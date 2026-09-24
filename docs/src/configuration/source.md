@@ -112,6 +112,10 @@ inputs:
     url: provider://my_failover_provider
     username: my_user
     password: my_password
+    proxy:
+      url: socks5h://proxy.example.com:1080
+      username: proxy_user
+      password: proxy_password
     enabled: true
     sequential_group: 1
     cache_duration: 1d
@@ -133,6 +137,7 @@ inputs:
 | `type`                  | Enum   |    No    | `m3u`   | Allowed: `m3u`, `xtream`, `stalker`, `library`, `staged`, `emby`, `jellyfin`, `plex`, and `m3u_batch` / `xtream_batch` / `stalker_batch` (CSV offloading). Stalker inputs use the portal handshake/catalog flow instead of a plain playlist download.                                                                                                                                                                                     |
 | `url`                   | String |   Yes    |         | The Provider URL. Tuliprox supports magic scheme prefixes: `http(s)://`, `file://`, `batch://`, and **`provider://my_failover_provider`** (for the Failover System above).                                                                                                                                                                                                                                                                |
 | `username` / `password` | String |  Often   |         | Mandatory for `xtream` and for Stalker inputs using `credentials_only` or `mac_plus_credentials`. Stalker inputs using `mac_only` do not need them.                                                                                                                                                                                                                                                                                       |
+| `proxy`                 | Object |    No    |         | Xtream-only outgoing proxy (`url`, optional `username` and `password`). When present, this input proxy replaces the global `config.yml` proxy for this input's playlist, EPG, account-expiry, metadata, probe, HLS, and playback requests. Aliases inherit it. Supported URL schemes: `http`, `https`, `socks5`, and `socks5h`. Without this block, the global proxy remains the fallback. |
 | `enabled`               | Bool   |    No    | `true`  | If `false`, this input is completely ignored in all processing.                                                                                                                                                                                                                                                                                                                                                                           |
 | `sequential_group`      | Int    |    No    |         | Optional non-zero process-wide group ID. With `process_parallel: true`, complete refreshes of inputs sharing an ID run one after another, including all Stalker page slices. Different groups and ungrouped inputs may overlap. Not valid for `staged` inputs; a staged overlay inherits its provider job.                                                                                                                                |
 | `cache_duration`        | String |    No    | `0`     | **Crucial:** Determines how often Tuliprox actually downloads the raw list from the provider. At `1d` (1 day), Tuliprox serves from its local `.db` for 24 hours, even if you trigger hourly updates. This heavily protects against provider bans! Supported units are `s`, `m`, `h`, and `d`. If `cache_duration` is set, the cached provider playlist stored on disk is reused for subsequent updates instead of downloading it again.  |
@@ -195,6 +200,32 @@ logic.
 | **`file://`**     | Local Storage   | Reads a playlist directly from the host filesystem. Useful for manual backups or pre-processed files.                                                                                                                                                                                                                         |
 | **`provider://`** | Failover System | Resolves the URL via internal `provider` definitions. **Pro-Tip:** Use this to implement automatic rotation or failover between multiple mirrors/gateways of the same provider. New requests honor `provider_url_selection_policy`, so they can either resume from the last healthy URL or always restart from the first URL. |
 | **`batch://`**    | CSV File        | Dedicated scheme for bulk alias management. Points to a local `;` separated CSV file (e.g., `batch://./aliases.csv`).                                                                                                                                                                                                         |
+
+### Per-input Xtream proxy
+
+An Xtream input can override the global outgoing proxy with its own `proxy` block:
+
+```yaml
+inputs:
+  - name: region-specific-provider
+    type: xtream
+    url: https://provider.example
+    username: account
+    password: secret
+    proxy:
+      url: socks5h://proxy.example:1080
+      username: proxy-user
+      password: proxy-secret
+```
+
+The override is all-or-nothing: once `inputs[].proxy` is defined, Tuliprox does not use the global `config.yml` proxy
+for that input. The same proxy is used for playlist import, automatic XMLTV, account login/expiration refresh,
+provider metadata, remote probes, reverse-proxy playback, and HLS manifests/resources. Input aliases inherit the parent
+proxy. Remove the input-level block to resume using the global proxy.
+
+Proxy credentials must be either both present or both omitted. Supported schemes are `http://`, `https://`, `socks5://`,
+and `socks5h://`; invalid URLs or unsupported schemes make the source configuration fail validation instead of falling
+back to the global proxy or a direct connection.
 
 ### Additional Notes
 

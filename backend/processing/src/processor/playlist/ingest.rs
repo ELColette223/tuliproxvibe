@@ -1025,53 +1025,69 @@ async fn playlist_download_from_input<E: EventSink>(
         Vec::new()
     };
 
-    let request = PlaylistFetchRequest {
-        app_config,
-        config: &app_config.config.load(),
-        client,
-        input,
-        xtream_clusters: Some(xtream_clusters_to_download.as_slice()),
-        update_quality: refresh_policy.quality,
+    let input_client = if download_input_type.is_xtream() {
+        if let Some(proxy) = input.proxy.as_ref() {
+            log::info!("Downloading playlist for input '{}' via proxy: {}", input.name, proxy.display_for_log());
+        }
+        tuliprox_core::utils::request::create_input_http_client(app_config, client, input.proxy.as_ref())
+    } else {
+        Ok(client.clone())
     };
 
     // Each arm builds the provider its input type needs and awaits it in place: the
     // provider types share no supertype, and building one is free, so this stays a match
     // and stays statically dispatched. What changed is the result - one named
     // `PlaylistFetch` instead of a six-element tuple assembled by position.
-    let fetch = match download_input_type {
-        InputType::M3u => {
-            super::m3u_quality::effective_m3u_fetch(
+    let fetch = match input_client {
+        Err(err) => PlaylistFetch::failed(err),
+        Ok(input_client) => {
+            let request = PlaylistFetchRequest {
                 app_config,
+                config: &app_config.config.load(),
+                client: &input_client,
                 input,
-                refresh_policy.quality,
-                M3uProvider.fetch(&request).await,
-            )
-            .await
-        }
-        InputType::Xtream => XtreamProvider::new(events).fetch(&request).await,
-        InputType::M3uBatch | InputType::XtreamBatch | InputType::StalkerBatch => {
-            BatchContainerProvider.fetch(&request).await
-        }
-        InputType::Stalker => {
-            StalkerProvider::new(stalker_refresh_mode, !config.disk_based_processing).fetch(&request).await
-        }
-        InputType::Library => LibraryProvider.fetch(&request).await,
-        InputType::Plex => PlexProvider.fetch(&request).await,
-        InputType::Emby | InputType::Jellyfin => {
-            UnsupportedProvider::new(
-                "media-server",
-                format!("media-server input '{}' is configured but catalog import is not implemented yet", input.name),
-            )
-            .fetch(&request)
-            .await
-        }
-        InputType::Staged => {
-            UnsupportedProvider::new(
-                "staged",
-                format!("staged input '{}' was not resolved against a parent input", input.name),
-            )
-            .fetch(&request)
-            .await
+                xtream_clusters: Some(xtream_clusters_to_download.as_slice()),
+                update_quality: refresh_policy.quality,
+            };
+            match download_input_type {
+                InputType::M3u => {
+                    super::m3u_quality::effective_m3u_fetch(
+                        app_config,
+                        input,
+                        refresh_policy.quality,
+                        M3uProvider.fetch(&request).await,
+                    )
+                    .await
+                }
+                InputType::Xtream => XtreamProvider::new(events).fetch(&request).await,
+                InputType::M3uBatch | InputType::XtreamBatch | InputType::StalkerBatch => {
+                    BatchContainerProvider.fetch(&request).await
+                }
+                InputType::Stalker => {
+                    StalkerProvider::new(stalker_refresh_mode, !config.disk_based_processing).fetch(&request).await
+                }
+                InputType::Library => LibraryProvider.fetch(&request).await,
+                InputType::Plex => PlexProvider.fetch(&request).await,
+                InputType::Emby | InputType::Jellyfin => {
+                    UnsupportedProvider::new(
+                        "media-server",
+                        format!(
+                            "media-server input '{}' is configured but catalog import is not implemented yet",
+                            input.name
+                        ),
+                    )
+                    .fetch(&request)
+                    .await
+                }
+                InputType::Staged => {
+                    UnsupportedProvider::new(
+                        "staged",
+                        format!("staged input '{}' was not resolved against a parent input", input.name),
+                    )
+                    .fetch(&request)
+                    .await
+                }
+            }
         }
     };
     // `ProviderErrorKind` has always been able to answer "is this worth

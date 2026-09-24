@@ -775,7 +775,7 @@ async fn config_batch_content(
 
 async fn get_xtream_login_info(
     axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
-    axum::extract::Json(request): axum::extract::Json<XtreamLoginRequest>,
+    axum::extract::Json(mut request): axum::extract::Json<XtreamLoginRequest>,
 ) -> impl IntoResponse + Send {
     if request.url.trim().is_empty() {
         return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": "URL is required"}))).into_response();
@@ -785,6 +785,11 @@ async fn get_xtream_login_info(
     }
     if request.password.trim().is_empty() {
         return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": "Password is required"}))).into_response();
+    }
+    if let Some(proxy) = request.proxy.as_mut() {
+        if let Err(err) = proxy.prepare_input_proxy() {
+            return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()}))).into_response();
+        }
     }
 
     let providers = {
@@ -798,7 +803,18 @@ async fn get_xtream_login_info(
             return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()}))).into_response();
         }
     };
-    let http_client = app_state.http_client.load();
+    let global_client = app_state.http_client.load();
+    let http_client = match tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &global_client,
+        input_source.proxy.as_ref(),
+    ) {
+        Ok(client) => client,
+        Err(err) => {
+            error!("Failed to prepare Xtream input proxy: {err}");
+            return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()}))).into_response();
+        }
+    };
     match xtream_login(&app_state.app_config, &http_client, &app_state.event_manager, &input_source, &request.username)
         .await
     {
@@ -843,6 +859,7 @@ fn build_xtream_login_input_source(
         provider,
         username: Some(request.username.clone()),
         password: Some(request.password.clone()),
+        proxy: request.proxy.as_ref().map(crate::model::ProxyConfig::from),
         method: InputFetchMethod::GET,
         headers: HashMap::new(),
     })
@@ -1248,6 +1265,7 @@ mod tests {
             url: "provider://b1g".to_string(),
             username: "demo".to_string(),
             password: "secret".to_string(),
+            proxy: None,
             providers: None,
         };
 
@@ -1256,6 +1274,28 @@ mod tests {
 
         assert_eq!(input_source.url, "provider://b1g/player_api.php?username=demo&password=secret");
         assert_eq!(input_source.provider.as_ref().map(|provider| provider.name.as_ref()), Some("b1g"));
+        assert!(input_source.proxy.is_none());
+    }
+
+    #[test]
+    fn build_xtream_login_input_source_preserves_input_proxy() {
+        let request = XtreamLoginRequest {
+            url: "https://provider.example".to_string(),
+            username: "demo".to_string(),
+            password: "secret".to_string(),
+            proxy: Some(shared::model::ProxyConfigDto {
+                url: "http://proxy.example:8080".to_string(),
+                username: Some("proxy-user".to_string()),
+                password: Some("proxy-pass".to_string()),
+            }),
+            providers: None,
+        };
+
+        let input_source = build_xtream_login_input_source(&request, &[]).expect("proxied request should build");
+        let proxy = input_source.proxy.expect("request proxy should reach runtime input source");
+        assert_eq!(proxy.url, "http://proxy.example:8080");
+        assert_eq!(proxy.username.as_deref(), Some("proxy-user"));
+        assert_eq!(proxy.password.as_deref(), Some("proxy-pass"));
     }
 
     #[test]
@@ -1264,6 +1304,7 @@ mod tests {
             url: "provider://strong".to_string(),
             username: "bubble".to_string(),
             password: "gum".to_string(),
+            proxy: None,
             providers: Some(vec![ConfigProviderDto {
                 name: "strong".into(),
                 urls: vec!["http://strong.example".into()],
@@ -1291,6 +1332,7 @@ mod tests {
             url: "provider://strong".to_string(),
             username: "bubble".to_string(),
             password: "gum".to_string(),
+            proxy: None,
             providers: Some(vec![ConfigProviderDto {
                 name: "strong".into(),
                 urls: vec!["http://request.example".into()],

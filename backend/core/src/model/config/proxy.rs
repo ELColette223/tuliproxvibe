@@ -8,6 +8,29 @@ pub struct ProxyConfig {
     pub password: Option<String>,
 }
 
+impl ProxyConfig {
+    /// Returns a safe display string: `scheme://host[:port]` — never includes the password.
+    pub fn display_host(&self) -> String {
+        url::Url::parse(&self.url)
+            .ok()
+            .map(|u| {
+                let port = u.port().map(|p| format!(":{p}")).unwrap_or_default();
+                format!("{}://{}{}", u.scheme(), u.host_str().unwrap_or("?"), port)
+            })
+            .unwrap_or_else(|| self.url.clone())
+    }
+
+    /// Returns a safe log line: `scheme://host[:port] (user: <username>)` or without user part.
+    pub fn display_for_log(&self) -> String {
+        let host = self.display_host();
+        if let Some(user) = &self.username {
+            format!("{host} (user: {user})")
+        } else {
+            host
+        }
+    }
+}
+
 macros::from_impl!(ProxyConfig);
 impl From<&ProxyConfigDto> for ProxyConfig {
     fn from(dto: &ProxyConfigDto) -> Self {

@@ -1,6 +1,11 @@
 use super::{common::CommonInputForm, ConfigInputFormAction, ConfigInputFormState, LABEL_RESOLVE};
-use crate::{app::components::ToolAction, hooks::use_service_context, i18n::use_translation};
-use shared::model::{ConfigProviderDto, XtreamLoginRequest};
+use crate::{
+    app::components::{input::Input, Card, TitledCard, ToolAction},
+    config_field, config_field_optional, config_field_optional_hide,
+    hooks::use_service_context,
+    i18n::use_translation,
+};
+use shared::model::{ConfigProviderDto, ProxyConfigDto, XtreamLoginRequest};
 use web_sys::MouseEvent;
 use yew::{
     component, html, platform::spawn_local, use_mut_ref, use_state, Callback, Html, Properties, UseReducerHandle,
@@ -61,6 +66,7 @@ pub(super) fn XtreamInputForm(props: &XtreamInputFormProps) -> Html {
                     url,
                     username,
                     password,
+                    proxy: state.form.proxy.clone(),
                     providers: (!providers.is_empty()).then_some(providers.clone()),
                 };
                 let services = services.clone();
@@ -97,8 +103,66 @@ pub(super) fn XtreamInputForm(props: &XtreamInputFormProps) -> Html {
         }
     };
 
-    html! {
+    let proxy = state.form.proxy.clone().unwrap_or_default();
+    let has_proxy = !proxy.is_empty();
+    let proxy_form = if !has_proxy && !props.allow_write {
+        html! {}
+    } else if props.allow_write {
+        let on_proxy_url = {
+            let state = state.clone();
+            Callback::from(move |value: String| {
+                let mut proxy = state.form.proxy.clone().unwrap_or_default();
+                proxy.url = value;
+                state.dispatch(ConfigInputFormAction::Proxy((!proxy.is_empty()).then_some(proxy)));
+            })
+        };
+        let on_proxy_username = {
+            let state = state.clone();
+            Callback::from(move |value: String| {
+                let mut proxy = state.form.proxy.clone().unwrap_or_default();
+                proxy.username = (!value.is_empty()).then_some(value);
+                state.dispatch(ConfigInputFormAction::Proxy((!proxy.is_empty()).then_some(proxy)));
+            })
+        };
+        let on_proxy_password = {
+            let state = state.clone();
+            Callback::from(move |value: String| {
+                let mut proxy = state.form.proxy.clone().unwrap_or_default();
+                proxy.password = (!value.is_empty()).then_some(value);
+                state.dispatch(ConfigInputFormAction::Proxy((!proxy.is_empty()).then_some(proxy)));
+            })
+        };
+        html! {
+            <Card class="tp__config-view__card">
+                <TitledCard title={translate.t("LABEL.PROXY")}>
+                    <Input label={translate.t("LABEL.URL")} name="proxy_url" value={proxy.url}
+                        hint_key={Some("INPUT_FORM.PROXY".to_string())} on_change={on_proxy_url} />
+                    <div class="tp__config-view__cols-2">
+                        <Input label={translate.t("LABEL.USERNAME")} name="proxy_username"
+                            value={proxy.username.unwrap_or_default()} on_change={on_proxy_username} />
+                        <Input label={translate.t("LABEL.PASSWORD")} name="proxy_password" hidden={true}
+                            value={proxy.password.unwrap_or_default()} on_change={on_proxy_password} />
+                    </div>
+                </TitledCard>
+            </Card>
+        }
+    } else {
+        html! {
+            <Card class="tp__config-view__card">
+                <TitledCard title={translate.t("LABEL.PROXY")}>
+                    { config_field!(proxy, translate.t("LABEL.URL"), url, Some("INPUT_FORM.PROXY".to_string())) }
+                    <div class="tp__config-view__cols-2">
+                        { config_field_optional!(proxy, translate.t("LABEL.USERNAME"), username) }
+                        { config_field_optional_hide!(proxy, translate.t("LABEL.PASSWORD"), password) }
+                    </div>
+                </TitledCard>
+            </Card>
+        }
+    };
+
+    html! { <>
         <CommonInputForm state={state} allow_write={props.allow_write} credentials={true}
             connection={true} cache_duration={true} exp_date_tool_action={Some(exp_date_tool_action)} />
-    }
+        {proxy_form}
+    </> }
 }

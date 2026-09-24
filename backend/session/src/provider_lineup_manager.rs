@@ -1046,6 +1046,7 @@ mod tests {
             epg: Option::default(),
             username: None,
             password: None,
+            proxy: None,
             persist: None,
             enabled: true,
             sequential_group: None,

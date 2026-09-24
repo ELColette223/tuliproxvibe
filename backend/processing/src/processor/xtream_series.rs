@@ -260,6 +260,17 @@ async fn process_immediate_series_info<E: EventSink + Clone + 'static, M: Metada
 ) -> Vec<PlaylistGroup> {
     let input = fpl.input;
     let storage_dir = &ctx.config.config.load().storage_dir;
+    let input_client = match tuliprox_core::utils::request::create_input_http_client(
+        &ctx.config,
+        &ctx.client,
+        input.proxy.as_ref(),
+    ) {
+        Ok(client) => client,
+        Err(err) => {
+            error!("Failed to create Xtream client for input '{}': {err}", input.name);
+            return Vec::new();
+        }
+    };
     let storage_path = match get_input_storage_path(&input.name, storage_dir).await {
         Ok(path) => path,
         Err(err) => {
@@ -340,6 +351,7 @@ async fn process_immediate_series_info<E: EventSink + Clone + 'static, M: Metada
 
                     match update_series_info_immediate(
                         ctx,
+                        &input_client,
                         active_provider,
                         input,
                         pli,
@@ -447,6 +459,7 @@ async fn process_immediate_series_info<E: EventSink + Clone + 'static, M: Metada
             },
             update: |active_provider, retry_pli, provider_id, reasons, db_query_ref| update_series_info_immediate(
                 ctx,
+                &input_client,
                 active_provider,
                 input,
                 retry_pli,
@@ -537,6 +550,7 @@ fn expand_series_item(pli: &PlaylistItem, input: &ConfigInput) -> Option<Playlis
 #[allow(clippy::too_many_arguments)]
 async fn update_series_info_immediate<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
     ctx: &PlaylistProcessingContext<E, M>,
+    client: &reqwest::Client,
     active_provider: &Arc<ActiveProviderManager>,
     input: &ConfigInput,
     pli: &PlaylistItem,
@@ -550,7 +564,7 @@ async fn update_series_info_immediate<E: EventSink + Clone + 'static, M: Metadat
 
     update_series_metadata(
         &ctx.config,
-        &ctx.client,
+        client,
         input,
         id,
         active_provider,
@@ -1004,7 +1018,11 @@ pub async fn update_series_metadata(
                                     .await
                             } else {
                                 FfmpegExecutor::new()
-                                    .probe_url_with_cancel(&probe_params, config.proxy.as_ref(), cancel_token)
+                                    .probe_url_with_cancel(
+                                        &probe_params,
+                                        input.proxy.as_ref().or(config.proxy.as_ref()),
+                                        cancel_token,
+                                    )
                                     .await
                             };
                             match probe_result {

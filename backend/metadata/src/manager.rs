@@ -3024,10 +3024,27 @@ impl InputWorker {
             })
             .unwrap_or(input_base);
 
-        let client = if tuliprox_core::model::should_use_manual_redirects(&ctx.app_config) {
+        let global_proxy = ctx.app_config.config.load().proxy.clone();
+        let manual_redirects = tuliprox_core::model::should_use_manual_redirects_for_proxy(
+            input_to_use.proxy.as_ref().or(global_proxy.as_ref()),
+        );
+        let global_client = if manual_redirects {
             ctx.http_client_no_redirect.load()
         } else {
             ctx.http_client.load()
+        };
+        let client = if manual_redirects {
+            tuliprox_core::utils::request::create_input_http_client_no_redirect(
+                &ctx.app_config,
+                &global_client,
+                input_to_use.proxy.as_ref(),
+            )?
+        } else {
+            tuliprox_core::utils::request::create_input_http_client(
+                &ctx.app_config,
+                &global_client,
+                input_to_use.proxy.as_ref(),
+            )?
         };
 
         // Execute task; probe tasks get a reserved provider handle, resolve tasks don't.

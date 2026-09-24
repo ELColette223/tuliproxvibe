@@ -1,4 +1,4 @@
-use crate::model::{ConfigInput, ConfigProvider};
+use crate::model::{ConfigInput, ConfigProvider, ProxyConfig};
 use shared::model::InputFetchMethod;
 use std::{collections::HashMap, sync::Arc};
 
@@ -15,6 +15,7 @@ pub struct InputSource {
     pub provider: Option<Arc<ConfigProvider>>,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub proxy: Option<ProxyConfig>,
     pub method: InputFetchMethod,
     pub headers: HashMap<String, String>,
 }
@@ -31,6 +32,7 @@ impl InputSource {
             provider: self.provider.clone(),
             username: self.username.clone(),
             password: self.password.clone(),
+            proxy: self.proxy.clone(),
             method: self.method,
             headers: self.headers.clone(),
         }
@@ -51,6 +53,7 @@ impl From<&ConfigInput> for InputSource {
             provider: input.get_resolve_provider(&input.url),
             username: input.username.clone(),
             password: input.password.clone(),
+            proxy: input.proxy.clone(),
             method: input.method,
             headers: input.headers.clone(),
         }

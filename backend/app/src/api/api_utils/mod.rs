@@ -1683,6 +1683,7 @@ async fn create_stream_response_details(
 
                             let provider_config = input.get_resolve_provider(url.as_ref());
                             provider_stream_factory_options.set_provider(provider_config);
+                            provider_stream_factory_options.set_proxy(input.proxy.clone());
                             if input.input_type.is_stalker() {
                                 provider_stream_factory_options.require_public_destination();
                             }

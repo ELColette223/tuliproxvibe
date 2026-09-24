@@ -1373,8 +1373,20 @@ pub async fn xtream_get_stream_info_response(
                 }
 
                 // fetch info from the upstream provider
+                let global_client = app_state.http_client.load();
+                let client = match tuliprox_core::utils::request::create_input_http_client(
+                    &app_state.app_config,
+                    &global_client,
+                    input.proxy.as_ref(),
+                ) {
+                    Ok(client) => client,
+                    Err(err) => {
+                        error!("Failed to create Xtream input proxy client: {err}");
+                        return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+                    }
+                };
                 if let Ok(content) = xtream::get_xtream_stream_info(
-                    &app_state.http_client.load(),
+                    &client,
                     &app_state.app_config,
                     &app_state.playlists,
                     user,
@@ -1480,9 +1492,21 @@ async fn xtream_get_short_epg(
                         }
 
                         let input_source = InputSource::from(&*input).with_url(info_url);
+                        let global_client = app_state.http_client.load();
+                        let client = match tuliprox_core::utils::request::create_input_http_client(
+                            &app_state.app_config,
+                            &global_client,
+                            input.proxy.as_ref(),
+                        ) {
+                            Ok(client) => client,
+                            Err(err) => {
+                                error!("Failed to create Xtream input proxy client: {err}");
+                                return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+                            }
+                        };
                         return match request::download_text_content(
                             &app_state.app_config,
-                            &app_state.http_client.load(),
+                            &client,
                             &input_source,
                             None,
                             None,
@@ -1617,14 +1641,14 @@ async fn xtream_get_catchup_response(
     }
 
     let input_source = InputSource::from(&*input).with_url(info_url);
+    let global_client = app_state.http_client.load();
+    let client = try_result_bad_request!(tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &global_client,
+        input.proxy.as_ref(),
+    ));
     let content = try_result_bad_request!(
-        xtream::get_xtream_stream_info_content(
-            &app_state.app_config,
-            &app_state.http_client.load(),
-            &input_source,
-            false,
-        )
-        .await
+        xtream::get_xtream_stream_info_content(&app_state.app_config, &client, &input_source, false).await
     );
 
     let mut doc: Map<String, Value> = try_result_bad_request!(serde_json::from_str(&content));

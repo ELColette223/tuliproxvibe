@@ -5,7 +5,7 @@
 //! configured proxy plus the standard proxy environment variables and nothing
 //! else, which is why it lives here rather than on the server's root state.
 
-use crate::model::AppConfig;
+use crate::model::{AppConfig, ProxyConfig};
 use std::ffi::OsStr;
 use url::Url;
 
@@ -13,8 +13,11 @@ use url::Url;
 /// manually.
 pub fn should_use_manual_redirects(app_config: &AppConfig) -> bool {
     let config = app_config.config.load();
-    config.proxy.as_ref().is_some_and(|proxy| should_use_manual_redirect_for_proxy(proxy.url.as_str()))
-        || proxy_env_present()
+    should_use_manual_redirects_for_proxy(config.proxy.as_ref())
+}
+
+pub fn should_use_manual_redirects_for_proxy(proxy: Option<&ProxyConfig>) -> bool {
+    proxy.is_some_and(|proxy| should_use_manual_redirect_for_proxy(proxy.url.as_str())) || proxy_env_present()
 }
 
 pub fn proxy_env_present() -> bool { should_use_manual_redirects_for_env_vars(std::env::vars_os()) }

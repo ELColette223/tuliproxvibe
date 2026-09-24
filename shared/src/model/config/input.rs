@@ -10,7 +10,7 @@ use crate::{
     foundation::{get_filter, Filter},
     model::{
         config::media_server_catalog::MediaServerInputConfigDto, ClusterFlags, ConfigInputUpdateQualityDto,
-        EpgConfigDto, PatternTemplate, Prepare, StalkerAuthMode, StalkerInputConfigDto,
+        EpgConfigDto, PatternTemplate, Prepare, ProxyConfigDto, StalkerAuthMode, StalkerInputConfigDto,
     },
     utils::{
         arc_str_option_serde, arc_str_serde, arc_str_vec_serde, deserialize_timestamp, get_credentials_from_url_str,
@@ -488,6 +488,8 @@ pub struct ConfigInputDto {
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "is_blank_optional_string")]
     pub password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyConfigDto>,
     #[serde(default, skip_serializing_if = "is_blank_optional_string")]
     pub persist: Option<String>,
     #[serde(default = "default_as_true", skip_serializing_if = "is_true")]
@@ -541,6 +543,7 @@ impl Default for ConfigInputDto {
             epg: None,
             username: None,
             password: None,
+            proxy: None,
             persist: None,
             enabled: default_as_true(),
             sequential_group: None,
@@ -948,6 +951,17 @@ impl ConfigInputDto {
 
         self.url = self.url.trim().to_string();
         self.normalize_input_type_from_batch_url();
+        if let Some(proxy) = self.proxy.as_mut() {
+            if !self.input_type.is_xtream() {
+                return Err(TuliproxError::ConfigInput(format!(
+                    "proxy is supported only for Xtream inputs (input: {})",
+                    self.name
+                )));
+            }
+            proxy.prepare_input_proxy().map_err(|err| {
+                TuliproxError::ConfigInput(format!("invalid proxy for input '{}': {err}", self.name))
+            })?;
+        }
         if let Some(options) = self.options.as_ref() {
             if options.disable_hls_streaming && !self.input_type.is_xtream() {
                 return Err(TuliproxError::ConfigInput(format!(
@@ -1359,6 +1373,62 @@ mod tests {
 
     fn prepare_dto(dto: &mut ConfigInputDto) -> Result<u16, TuliproxError> {
         dto.prepare(0, false, &HashSet::new(), None)
+    }
+
+    #[test]
+    fn xtream_input_proxy_is_normalized_and_serialized() {
+        let mut dto = ConfigInputDto {
+            name: "proxied".intern(),
+            input_type: InputType::Xtream,
+            url: "https://provider.example".to_string(),
+            username: Some("user".to_string()),
+            password: Some("pass".to_string()),
+            proxy: Some(ProxyConfigDto {
+                url: " socks5h://proxy.example:1080 ".to_string(),
+                username: Some(" proxy-user ".to_string()),
+                password: Some(" proxy-pass ".to_string()),
+            }),
+            ..ConfigInputDto::default()
+        };
+
+        prepare_dto(&mut dto).expect("Xtream proxy should prepare");
+        let proxy = dto.proxy.as_ref().expect("proxy should remain configured");
+        assert_eq!(proxy.url, "socks5h://proxy.example:1080");
+        assert_eq!(proxy.username.as_deref(), Some("proxy-user"));
+        assert_eq!(proxy.password.as_deref(), Some("proxy-pass"));
+        let yaml = serde_saphyr::to_string(&dto).expect("input should serialize");
+        assert!(yaml.contains("proxy:"));
+        assert!(yaml.contains("socks5h://proxy.example:1080"));
+    }
+
+    #[test]
+    fn input_proxy_is_rejected_for_non_xtream_inputs() {
+        let mut dto = ConfigInputDto {
+            name: "m3u".intern(),
+            input_type: InputType::M3u,
+            url: "https://provider.example/playlist.m3u".to_string(),
+            proxy: Some(ProxyConfigDto { url: "http://proxy.example:8080".to_string(), ..Default::default() }),
+            ..ConfigInputDto::default()
+        };
+
+        let error = prepare_dto(&mut dto).expect_err("M3U input proxy must be rejected");
+        assert!(error.to_string().contains("only for Xtream inputs"));
+    }
+
+    #[test]
+    fn xtream_input_proxy_rejects_unsupported_scheme() {
+        let mut dto = ConfigInputDto {
+            name: "proxied".intern(),
+            input_type: InputType::Xtream,
+            url: "https://provider.example".to_string(),
+            username: Some("user".to_string()),
+            password: Some("pass".to_string()),
+            proxy: Some(ProxyConfigDto { url: "ftp://proxy.example".to_string(), ..Default::default() }),
+            ..ConfigInputDto::default()
+        };
+
+        let error = prepare_dto(&mut dto).expect_err("unsupported proxy scheme must be rejected");
+        assert!(error.to_string().contains("Unsupported proxy scheme"));
     }
 
     #[test]

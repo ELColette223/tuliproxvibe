@@ -37,7 +37,7 @@ use shared::{
         ConfigInputAliasDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto, ConfigInputUpdateQualityDto,
         ConfigProviderDto, EpgSmartMatchConfigDto, EpgSourceDto, InputFetchMethod, InputType,
         MediaServerInputConfigDto, MediaServerLibrarySelector, OnConnectErrorPolicy, ProviderUrlSelectionPolicy,
-        ResourcePolicyDto, StagedInputType, StalkerDeviceProfileDto, StalkerInputConfigDto,
+        ProxyConfigDto, ResourcePolicyDto, StagedInputType, StalkerDeviceProfileDto, StalkerInputConfigDto,
     },
     utils::{Internable, BATCH_SCHEME_PREFIX},
 };
@@ -421,6 +421,7 @@ generate_form_reducer!(
         Url => url: String,
         Username => username: Option<String>,
         Password => password: Option<String>,
+        Proxy => proxy: Option<ProxyConfigDto>,
         Persist => persist: Option<String>,
         Enabled => enabled: bool,
         Priority => priority: i16,
@@ -988,6 +989,7 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                         input_type={input_form_state.form.input_type}
                         stalker_auth_mode={stalker_config_state.auth_mode}
                         providers={(*providers_state).clone()}
+                        proxy={input_form_state.form.proxy.clone()}
                         initial={(*edit_alias).clone()}
                         on_submit={handle_add_alias_item}
                         on_cancel={handle_close_add_alias_item}

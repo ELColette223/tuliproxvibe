@@ -1675,15 +1675,42 @@ pub(super) async fn try_hls_cache_canonical_manifest_response(
         }
     }
 
+    let client = match tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &app_state.http_client.load(),
+        origin.input.proxy.as_ref(),
+    ) {
+        Ok(client) => client,
+        Err(err) => {
+            error!("Failed to create HLS input proxy client: {}", sanitize_sensitive_info(&err.to_string()));
+            return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
+        }
+    };
+    let no_redirect_client = match tuliprox_core::utils::request::create_input_http_client_no_redirect(
+        &app_state.app_config,
+        &app_state.http_client_no_redirect.load(),
+        origin.input.proxy.as_ref(),
+    ) {
+        Ok(client) => client,
+        Err(err) => {
+            error!("Failed to create HLS input proxy client: {}", sanitize_sensitive_info(&err.to_string()));
+            return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
+        }
+    };
     let refresh_request = OriginRefreshRequest {
         app_config: Arc::clone(&app_state.app_config),
         session: Arc::clone(&session),
         origin_entry,
         headers,
         origin_provider_session_headers,
-        client: app_state.http_client.load().as_ref().clone(),
-        no_redirect_client: app_state.http_client_no_redirect.load().as_ref().clone(),
-        use_manual_redirects: app_state.should_use_manual_redirects(),
+        client,
+        no_redirect_client,
+        use_manual_redirects: {
+            let global_proxy = app_state.app_config.config.load().proxy.clone();
+            tuliprox_core::model::should_use_manual_redirects_for_proxy(
+                origin.input.proxy.as_ref().or(global_proxy.as_ref()),
+            )
+        },
         segment_cache: Arc::clone(app_state.hls_proxy.segment_cache()),
         hls_proxy: Arc::clone(&app_state.hls_proxy),
         segment_repair: Arc::clone(app_state.hls_proxy.segment_repair()),

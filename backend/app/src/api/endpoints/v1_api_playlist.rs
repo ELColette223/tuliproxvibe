@@ -347,6 +347,7 @@ fn merge_epg_channels(mut channels_by_source: Vec<(i16, Vec<EpgChannel>)>) -> Ve
 
 async fn load_xmltv_epg_source_channels(
     app_state: &Arc<AppState>,
+    input: &ConfigInput,
     raw_epg_path: &Path,
     resolved_url: &str,
 ) -> Result<Vec<EpgChannel>, TuliproxError> {
@@ -365,7 +366,19 @@ async fn load_xmltv_epg_source_channels(
         }
     }
 
-    parse_xmltv_for_web_ui_from_url(&app_state.app_config, &app_state.http_client.load(), resolved_url).await
+    let global_client = app_state.http_client.load();
+    let client = match tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &global_client,
+        input.proxy.as_ref(),
+    ) {
+        Ok(client) => client,
+        Err(err) => {
+            error!("Failed to create EPG proxy client for input '{}': {err}", input.name);
+            return Err(TuliproxError::ConfigProxy(err.to_string()));
+        }
+    };
+    parse_xmltv_for_web_ui_from_url(&app_state.app_config, &client, resolved_url).await
 }
 
 async fn load_ics_epg_source_channels(
@@ -408,7 +421,18 @@ async fn load_ics_epg_source_channels(
         }
     }
 
-    let client = app_state.http_client.load();
+    let global_client = app_state.http_client.load();
+    let client = match tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &global_client,
+        input.proxy.as_ref(),
+    ) {
+        Ok(client) => client,
+        Err(err) => {
+            error!("Failed to create EPG proxy client for input '{}': {err}", input.name);
+            return Err(TuliproxError::ConfigProxy(err.to_string()));
+        }
+    };
     request::get_input_epg_content_as_file(
         &app_state.app_config,
         &client,
@@ -459,7 +483,7 @@ async fn load_epg_channels_for_input(
         let source_result = match epg_source.source_type {
             EpgSourceType::Xmltv => {
                 let resolved_url = resolve_provider_url_with_input(input, &epg_source.url);
-                load_xmltv_epg_source_channels(app_state, &raw_epg_path, &resolved_url).await
+                load_xmltv_epg_source_channels(app_state, input, &raw_epg_path, &resolved_url).await
             }
             EpgSourceType::Ics => {
                 load_ics_epg_source_channels(app_state, input, epg_source, &raw_epg_path, &storage_dir).await
@@ -583,7 +607,10 @@ fn resolve_manual_playlist_update_targets(
             .find(|input| input.id == manual.input_id)
             .ok_or_else(|| TuliproxError::ConfigSource(format!("No input found for id {}", manual.input_id)))?;
         if !InputUpdateCapabilities::for_input_type(input.input_type, input.enabled).supports_action(manual.action) {
-            return Err(TuliproxError::ConfigSource("Manual action is not supported for this input".to_string()));
+            return Err(TuliproxError::ConfigSource(format!(
+                "Manual action is not supported for this input (id={}, name={}, type={:?}, enabled={}, action={:?})",
+                input.id, input.name, input.input_type, input.enabled, manual.action
+            )));
         }
         // Only the additive action wire form requires IDs. Legacy input_refresh
         // requests retain the existing name resolution, including empty = all.
@@ -729,7 +756,24 @@ async fn playlist_content(
     playlist_req: &PlaylistRequest,
     cluster: XtreamCluster,
 ) -> impl IntoResponse + Send {
-    let client = app_state.http_client.load();
+    let global_client = app_state.http_client.load();
+    let client = match &playlist_req {
+        PlaylistRequest::CustomXtream(xtream) => {
+            match xtream.proxy.as_ref().map(tuliprox_core::model::ProxyConfig::from) {
+                Some(proxy) => tuliprox_core::utils::request::create_input_http_client(
+                    &app_state.app_config,
+                    &global_client,
+                    Some(&proxy),
+                )
+                .unwrap_or_else(|err| {
+                    error!("Failed to create custom provider proxy client: {err}");
+                    (**global_client).clone()
+                }),
+                None => (**global_client).clone(),
+            }
+        }
+        _ => (**global_client).clone(),
+    };
     match playlist_req {
         PlaylistRequest::Target(target_id) => get_playlist_for_target(
             app_state.app_config.get_target_by_id(*target_id).as_deref(),
@@ -749,8 +793,10 @@ async fn playlist_content(
         .into_response(),
         PlaylistRequest::CustomXtream(xtream) => match Url::parse(&xtream.url) {
             Ok(parsed) if parsed.scheme() == "http" || parsed.scheme() == "https" => {
-                let input = Arc::new(create_config_input_for_xtream(&xtream.username, &xtream.password, &xtream.url));
-                get_playlist_for_custom_provider(client.as_ref(), Some(&input), app_state, cluster, accept.as_deref())
+                let mut input = create_config_input_for_xtream(&xtream.username, &xtream.password, &xtream.url);
+                input.proxy = xtream.proxy.as_ref().map(tuliprox_core::model::ProxyConfig::from);
+                let input = Arc::new(input);
+                get_playlist_for_custom_provider(&client, Some(&input), app_state, cluster, accept.as_deref())
                     .await
                     .into_response()
             }
@@ -763,7 +809,7 @@ async fn playlist_content(
         PlaylistRequest::CustomM3u(m3u) => match Url::parse(&m3u.url) {
             Ok(parsed) if parsed.scheme() == "http" || parsed.scheme() == "https" => {
                 let input = Arc::new(create_config_input_for_m3u(&m3u.url));
-                get_playlist_for_custom_provider(client.as_ref(), Some(&input), app_state, cluster, accept.as_deref())
+                get_playlist_for_custom_provider(&client, Some(&input), app_state, cluster, accept.as_deref())
                     .await
                     .into_response()
             }
@@ -833,9 +879,17 @@ async fn playlist_series_info(
                                 return axum::http::StatusCode::NO_CONTENT.into_response();
                             };
                             let input_source = InputSource::from(input.as_ref()).with_url(resolved_url.to_string());
+                            let global_client = app_state.http_client.load();
+                            let Ok(client) = tuliprox_core::utils::request::create_input_http_client(
+                                &app_state.app_config,
+                                &global_client,
+                                input.proxy.as_ref(),
+                            ) else {
+                                return axum::http::StatusCode::BAD_GATEWAY.into_response();
+                            };
                             if let Ok(content) = xtream::get_xtream_stream_info_content(
                                 &app_state.app_config,
-                                &app_state.http_client.load(),
+                                &client,
                                 &input_source,
                                 false,
                             )
@@ -853,14 +907,23 @@ async fn playlist_series_info(
         }
         PlaylistRequest::CustomXtream(xtream_req) => {
             if let Some(provider_id) = provider_id {
-                let input = create_config_input_for_xtream(&xtream_req.username, &xtream_req.password, &xtream_req.url);
+                let mut input = create_config_input_for_xtream(&xtream_req.username, &xtream_req.password, &xtream_req.url);
+                input.proxy = xtream_req.proxy.as_ref().map(tuliprox_core::model::ProxyConfig::from);
                 if let Some(info_url) =
                     xtream::get_xtream_player_api_info_url(&input, XtreamCluster::Series, provider_id)
                 {
                     let input_source = InputSource::from(&input).with_url(info_url);
+                    let global_client = app_state.http_client.load();
+                    let Ok(client) = tuliprox_core::utils::request::create_input_http_client(
+                        &app_state.app_config,
+                        &global_client,
+                        input.proxy.as_ref(),
+                    ) else {
+                        return axum::http::StatusCode::BAD_GATEWAY.into_response();
+                    };
                     if let Ok(content) = xtream::get_xtream_stream_info_content(
                         &app_state.app_config,
-                        &app_state.http_client.load(),
+                        &client,
                         &input_source,
                         false,
                     )

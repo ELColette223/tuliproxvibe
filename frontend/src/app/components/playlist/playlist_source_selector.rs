@@ -124,6 +124,7 @@ pub fn PlaylistSourceSelector(props: &PlaylistSourceSelectorProps) -> Html {
                         username: username.unwrap_or_default(),
                         password: password.unwrap_or_default(),
                         url,
+                        proxy: None,
                     })
                 } else {
                     PlaylistRequest::CustomM3u(PlaylistRequestM3u { url })

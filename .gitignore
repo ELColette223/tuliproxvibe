@@ -46,6 +46,7 @@ artifacts
 
 # Ignore VSCode settings and files
 /.vscode
+/.claude
 
 .envrc
 backend/app/Cargo.lock
@@ -76,3 +77,11 @@ backend/app/Cargo.lock
 # Testkit report artifacts
 /testkit-report/
 
+/backup/
+/data/
+/config/*.yml
+/config/*.txt
+/config/*.db
+/config/*.lock
+/config/.*
+!/config/.env.example

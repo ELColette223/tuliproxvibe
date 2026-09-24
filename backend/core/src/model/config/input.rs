@@ -1,5 +1,5 @@
 use crate::{
-    model::{macros, ConfigInputUpdateQuality, ConfigProvider, EpgConfig, PanelApiConfig, ResourcePolicy},
+    model::{macros, ConfigInputUpdateQuality, ConfigProvider, EpgConfig, PanelApiConfig, ProxyConfig, ResourcePolicy},
     utils::get_csv_file_path,
 };
 use chrono::Utc;
@@ -488,6 +488,7 @@ pub struct ConfigInput {
     pub epg: Option<EpgConfig>,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub proxy: Option<ProxyConfig>,
     pub persist: Option<String>,
     pub enabled: bool,
     pub sequential_group: Option<u32>,
@@ -874,6 +875,7 @@ impl ConfigInput {
             epg: self.epg.clone(),
             username: alias.username.clone(),
             password: alias.password.clone(),
+            proxy: self.proxy.clone(),
             persist: self.persist.clone(),
             enabled: self.enabled,
             sequential_group: self.sequential_group,
@@ -971,6 +973,7 @@ impl From<&ConfigInputDto> for ConfigInput {
             epg: dto.epg.as_ref().map(EpgConfig::from),
             username: dto.username.clone(),
             password: dto.password.clone(),
+            proxy: dto.proxy.as_ref().map(ProxyConfig::from),
             persist: dto.persist.clone(),
             enabled: dto.enabled,
             sequential_group: dto.sequential_group,
@@ -1094,7 +1097,7 @@ mod tests {
     use crate::model::ConfigProvider;
     use shared::model::{
         ConfigInputUpdateQualityDto, ConfigProviderDto, MediaServerInputConfigDto, MediaServerLibrarySelector,
-        ProviderUrlSelectionPolicy, XtreamCluster,
+        ProviderUrlSelectionPolicy, ProxyConfigDto, XtreamCluster,
     };
     use std::{borrow::Cow, sync::Arc};
 
@@ -1133,6 +1136,34 @@ mod tests {
         assert_eq!(options.update_quality.threshold(XtreamCluster::Live), 95);
         assert_eq!(options.update_quality.threshold(XtreamCluster::Video), 90);
         assert_eq!(options.update_quality.threshold(XtreamCluster::Series), 85);
+    }
+
+    #[test]
+    fn xtream_proxy_conversion_and_alias_inheritance_are_preserved() {
+        let dto = ConfigInputDto {
+            input_type: InputType::Xtream,
+            proxy: Some(ProxyConfigDto {
+                url: "socks5h://proxy.example:1080".to_string(),
+                username: Some("user".to_string()),
+                password: Some("pass".to_string()),
+            }),
+            aliases: Some(vec![ConfigInputAliasDto {
+                name: "alias".into(),
+                url: "https://alias.example.invalid".to_string(),
+                ..ConfigInputAliasDto::default()
+            }]),
+            ..ConfigInputDto::default()
+        };
+        let input = ConfigInput::from(&dto);
+        let proxy = input.proxy.as_ref().expect("runtime proxy");
+        assert_eq!(proxy.url, "socks5h://proxy.example:1080");
+
+        let alias = input.aliases.as_ref().and_then(|aliases| aliases.first()).expect("runtime alias");
+        let alias_input = input.as_input(alias);
+        let alias_proxy = alias_input.proxy.as_ref().expect("alias inherits input proxy");
+        assert_eq!(alias_proxy.url, proxy.url);
+        assert_eq!(alias_proxy.username, proxy.username);
+        assert_eq!(alias_proxy.password, proxy.password);
     }
 
     #[test]

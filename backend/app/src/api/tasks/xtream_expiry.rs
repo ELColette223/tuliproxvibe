@@ -34,6 +34,7 @@ struct Account {
     headers: HashMap<String, String>,
     username: String,
     password: String,
+    proxy: Option<crate::model::ProxyConfig>,
     exp_date: Option<i64>,
     panel: Arc<str>,
 }
@@ -272,6 +273,7 @@ fn collect_accounts(app_state: &AppState) -> Vec<Account> {
                     headers: input.headers.clone(),
                     username: username.clone(),
                     password: password.clone(),
+                    proxy: input.proxy.clone(),
                     exp_date: input.exp_date,
                     panel: Arc::clone(&panel),
                 })
@@ -288,6 +290,7 @@ fn collect_accounts(app_state: &AppState) -> Vec<Account> {
                             headers: input.headers.clone(),
                             username: username.clone(),
                             password: password.clone(),
+                            proxy: input.proxy.clone(),
                             exp_date: alias.exp_date,
                             panel: Arc::clone(&panel),
                         })
@@ -345,7 +348,16 @@ fn classify_response_status(status: reqwest::StatusCode) -> Result<(), FetchErro
 }
 
 async fn fetch_expiry_date(app_state: &AppState, account: &Account, url: &str) -> Result<i64, FetchError> {
-    let client = app_state.http_client.load();
+    let global_client = app_state.http_client.load();
+    let client = tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &global_client,
+        account.proxy.as_ref(),
+    )
+    .map_err(|err| {
+        debug!("Xtream expiry proxy setup failed: {err}");
+        FetchError::Panel
+    })?;
     let response = client
         .get(url)
         .headers(request::get_request_headers(Some(&account.headers), None, None, None))
@@ -544,6 +556,7 @@ mod tests {
             headers: HashMap::new(),
             username: "user".to_string(),
             password: password.to_string(),
+            proxy: None,
             exp_date: None,
             panel: Arc::from("http://panel.example"),
         }

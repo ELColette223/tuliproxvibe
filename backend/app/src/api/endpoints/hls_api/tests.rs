@@ -11281,6 +11281,7 @@ fn legacy_manifest_test_input(origin: &TestEncodedManifestOrigin) -> crate::mode
         provider: None,
         username: None,
         password: None,
+        proxy: None,
         method: shared::model::InputFetchMethod::GET,
         headers: HashMap::from([("Accept-Encoding".to_string(), "gzip".to_string())]),
     }

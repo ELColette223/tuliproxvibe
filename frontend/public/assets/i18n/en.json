@@ -505,6 +505,7 @@
       "INPUT_TYPE": "Defines the streaming protocol or source format (e.g. xtream, m3u).",
       "LIVE_SOURCE": "Source selector for the Live cluster when staged input is enabled (`default`, `staged`, `input`, `skip`).",
       "PERSIST": "Optional file path used to persist or reuse the downloaded input playlist.",
+      "PROXY": "Optional outgoing proxy for this Xtream input. When set, it replaces the global proxy for playlist, EPG, metadata, probe, expiration, and playback requests from this input.",
       "PROVIDERS": "Provider profiles define reusable upstream URLs and DNS behavior that this input can reference.",
       "SIMPLE_INPUT": {
         "URL": "Source URL for this input. Only `file://`, `http://`, and `https://` URLs are supported."

@@ -564,6 +564,7 @@ mod tests {
             url: "http://test".to_string(),
             username: Some("u".to_string()),
             password: Some("p".to_string()),
+            proxy: None,
             max_connections,
             priority: 0,
             input_type: InputType::Xtream,

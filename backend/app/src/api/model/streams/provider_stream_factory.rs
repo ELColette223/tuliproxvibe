@@ -96,6 +96,7 @@ pub struct ProviderStreamFactoryOptions {
     requested_range: Option<HeaderValue>,
     reconnect_flag: CancellationToken,
     provider: Option<Arc<ConfigProvider>>,
+    proxy: Option<crate::model::ProxyConfig>,
     username: Option<String>,
     client_ip: Option<String>,
     user_agent: Option<String>,
@@ -210,6 +211,7 @@ impl ProviderStreamFactoryOptions {
             default_user_agent,
             requested_range,
             provider: None,
+            proxy: None,
             username: username.map(ToString::to_string),
             client_ip: client_ip.map(ToString::to_string),
             user_agent,
@@ -245,6 +247,8 @@ impl ProviderStreamFactoryOptions {
     pub fn get_close_reason(&self) -> Option<Arc<AtomicU8>> { self.close_reason.clone() }
 
     pub fn set_provider(&mut self, provider: Option<Arc<ConfigProvider>>) { self.provider = provider; }
+
+    pub fn set_proxy(&mut self, proxy: Option<crate::model::ProxyConfig>) { self.proxy = proxy; }
 
     pub fn apply_user_agent_stream_index(&mut self, stream_index: u64) {
         crate::utils::request::append_user_agent_stream_index(&mut self.headers, stream_index);
@@ -847,8 +851,11 @@ async fn provider_stream_request(
     request_client: &reqwest::Client,
     stream_options: &ProviderStreamFactoryOptions,
 ) -> Result<Option<ProviderStreamFactoryResponse>, ProviderStreamRequestFailure> {
+    let global_proxy = ctx.app_config.config.load().proxy.clone();
     let use_manual_redirects = stream_options.requires_public_destination()
-        || tuliprox_core::model::should_use_manual_redirects(&ctx.app_config)
+        || tuliprox_core::model::should_use_manual_redirects_for_proxy(
+            stream_options.proxy.as_ref().or(global_proxy.as_ref()),
+        )
         || provider_headers_require_manual_redirects(stream_options.get_headers());
     if log_enabled!(log::Level::Debug) {
         let diagnostics =
@@ -861,9 +868,23 @@ async fn provider_stream_request(
     }
     let response_result = if use_manual_redirects {
         let client_no_redirect = if stream_options.requires_public_destination() {
-            ctx.public_http_client_no_redirect.load()
+            ctx.public_http_client_no_redirect.load().as_ref().clone()
         } else {
-            ctx.http_client_no_redirect.load()
+            let fallback = ctx.http_client_no_redirect.load();
+            match tuliprox_core::utils::request::create_input_http_client_no_redirect(
+                &ctx.app_config,
+                &fallback,
+                stream_options.proxy.as_ref(),
+            ) {
+                Ok(client) => client,
+                Err(err) => {
+                    return Err(ProviderStreamRequestFailure::Status {
+                        status: StatusCode::BAD_GATEWAY,
+                        provider_error_class: classify_provider_io_error(&io::Error::other(err.to_string())),
+                        serve_channel_unavailable: true,
+                    });
+                }
+            }
         };
         send_with_manual_redirects(&client_no_redirect, stream_options, &ctx.app_config).await
     } else {
@@ -871,6 +892,20 @@ async fn provider_stream_request(
         let url = stream_options.get_url();
         let provider = stream_options.get_provider().cloned();
 
+        let request_client = match tuliprox_core::utils::request::create_input_http_client(
+            &ctx.app_config,
+            request_client,
+            stream_options.proxy.as_ref(),
+        ) {
+            Ok(client) => client,
+            Err(err) => {
+                return Err(ProviderStreamRequestFailure::Status {
+                    status: StatusCode::BAD_GATEWAY,
+                    provider_error_class: classify_provider_io_error(&io::Error::other(err.to_string())),
+                    serve_channel_unavailable: true,
+                });
+            }
+        };
         send_with_retry_and_provider_policy(
             &ctx.app_config,
             url,
@@ -879,7 +914,7 @@ async fn provider_stream_request(
             stream_options.should_retry_provider_request(),
             |resolved_url| {
                 let (client, _partial_content) = prepare_client(
-                    request_client,
+                    &request_client,
                     stream_options,
                     Some(resolved_url),
                     ProviderRequestCredentialState::OriginalOrigin,

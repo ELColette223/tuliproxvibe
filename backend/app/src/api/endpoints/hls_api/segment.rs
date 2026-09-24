@@ -586,6 +586,37 @@ pub(super) async fn build_hls_segment_fetch_context(
     if let Some(provider_handle) = preacquired_provider_handle {
         origin_io = origin_io.with_preacquired_provider_handle(provider_handle);
     }
+    let input = {
+        let session = session.read().await;
+        app_state.app_config.get_input_by_name(&session.origin_source.input_name)
+    };
+    let input_proxy = input.as_ref().and_then(|input| input.proxy.clone());
+    let client = match tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &app_state.http_client.load(),
+        input_proxy.as_ref(),
+    ) {
+        Ok(client) => client,
+        Err(err) => {
+            log::error!("Failed to create HLS segment input proxy client: {err}");
+            app_state.http_client.load().as_ref().clone()
+        }
+    };
+    let no_redirect_client = match tuliprox_core::utils::request::create_input_http_client_no_redirect(
+        &app_state.app_config,
+        &app_state.http_client_no_redirect.load(),
+        input_proxy.as_ref(),
+    ) {
+        Ok(client) => client,
+        Err(err) => {
+            log::error!("Failed to create HLS segment input proxy client: {err}");
+            app_state.http_client_no_redirect.load().as_ref().clone()
+        }
+    };
+    let global_proxy = app_state.app_config.config.load().proxy.clone();
+    let use_manual_redirects = tuliprox_core::model::should_use_manual_redirects_for_proxy(
+        input_proxy.as_ref().or(global_proxy.as_ref()),
+    );
     SegmentFetchContext {
         session: Arc::clone(session),
         segment_cache: Arc::clone(app_state.hls_proxy.segment_cache()),
@@ -593,9 +624,9 @@ pub(super) async fn build_hls_segment_fetch_context(
         repair_access_lease_id,
         headers,
         origin_provider_session_headers,
-        client: app_state.http_client.load().as_ref().clone(),
-        no_redirect_client: app_state.http_client_no_redirect.load().as_ref().clone(),
-        use_manual_redirects: app_state.should_use_manual_redirects(),
+        client,
+        no_redirect_client,
+        use_manual_redirects,
         origin_io: Some(origin_io),
     }
 }
@@ -1075,14 +1106,39 @@ pub(super) struct HlsTransientOriginFetchResult {
 pub(super) async fn fetch_transient_origin_response_with_provider_io(
     request: HlsTransientEndpointOriginFetchRequest<'_>,
 ) -> HlsTransientOriginFetchResult {
-    let clients = HlsOriginResourceClients {
-        client: request.app_state.http_client.load().as_ref().clone(),
-        no_redirect_client: request.app_state.http_client_no_redirect.load().as_ref().clone(),
-        use_manual_redirects: request.app_state.should_use_manual_redirects(),
-    };
-    let log_identity = {
+    let (input_proxy, log_identity) = {
         let session = request.session.read().await;
-        HlsLogIdentity::from_session(&session)
+        let input = request.app_state.app_config.get_input_by_name(&session.origin_source.input_name);
+        (
+            input.and_then(|input| input.proxy.clone()),
+            HlsLogIdentity::from_session(&session),
+        )
+    };
+    let clients = HlsOriginResourceClients {
+        client: tuliprox_core::utils::request::create_input_http_client(
+            &request.app_state.app_config,
+            &request.app_state.http_client.load(),
+            input_proxy.as_ref(),
+        )
+        .unwrap_or_else(|err| {
+            log::error!("Failed to create HLS transient origin proxy client: {err}");
+            request.app_state.http_client.load().as_ref().clone()
+        }),
+        no_redirect_client: tuliprox_core::utils::request::create_input_http_client_no_redirect(
+            &request.app_state.app_config,
+            &request.app_state.http_client_no_redirect.load(),
+            input_proxy.as_ref(),
+        )
+        .unwrap_or_else(|err| {
+            log::error!("Failed to create HLS transient origin proxy client: {err}");
+            request.app_state.http_client_no_redirect.load().as_ref().clone()
+        }),
+        use_manual_redirects: {
+            let global_proxy = request.app_state.app_config.config.load().proxy.clone();
+            tuliprox_core::model::should_use_manual_redirects_for_proxy(
+                input_proxy.as_ref().or(global_proxy.as_ref()),
+            )
+        },
     };
     let fetch_request = HlsTransientOriginFetchRequest {
         resolved_origin_uri: request.resource.resolved_origin_uri.clone(),
@@ -1982,14 +2038,36 @@ pub(super) async fn fetch_and_cache_transient_origin_response(
         context.fetch_token.clone(),
         HLS_TEMPORARY_RESOURCE_RETRY_AFTER_MS,
     );
-    let clients = HlsOriginResourceClients {
-        client: context.app_state.http_client.load().as_ref().clone(),
-        no_redirect_client: context.app_state.http_client_no_redirect.load().as_ref().clone(),
-        use_manual_redirects: context.app_state.should_use_manual_redirects(),
-    };
-    let log_identity = {
+    let (input_proxy, log_identity) = {
         let session = context.session.read().await;
-        HlsLogIdentity::from_session(&session)
+        let input = context.app_state.app_config.get_input_by_name(&session.origin_source.input_name);
+        (input.and_then(|input| input.proxy.clone()), HlsLogIdentity::from_session(&session))
+    };
+    let clients = HlsOriginResourceClients {
+        client: tuliprox_core::utils::request::create_input_http_client(
+            &context.app_state.app_config,
+            &context.app_state.http_client.load(),
+            input_proxy.as_ref(),
+        )
+        .unwrap_or_else(|err| {
+            log::error!("Failed to create HLS transient origin proxy client: {err}");
+            context.app_state.http_client.load().as_ref().clone()
+        }),
+        no_redirect_client: tuliprox_core::utils::request::create_input_http_client_no_redirect(
+            &context.app_state.app_config,
+            &context.app_state.http_client_no_redirect.load(),
+            input_proxy.as_ref(),
+        )
+        .unwrap_or_else(|err| {
+            log::error!("Failed to create HLS transient origin proxy client: {err}");
+            context.app_state.http_client_no_redirect.load().as_ref().clone()
+        }),
+        use_manual_redirects: {
+            let global_proxy = context.app_state.app_config.config.load().proxy.clone();
+            tuliprox_core::model::should_use_manual_redirects_for_proxy(
+                input_proxy.as_ref().or(global_proxy.as_ref()),
+            )
+        },
     };
     let fetch_request = HlsTransientOriginFetchRequest {
         resolved_origin_uri: context.resource.resolved_origin_uri.clone(),
@@ -2222,10 +2300,20 @@ pub(super) async fn download_legacy_hls_manifest(
     let body_options = request::TextContentBodyOptions::hls_manifest(MAX_HLS_MANIFEST_BYTES, deadline);
     let options = request::TextContentFetchOptions::new(fetch_options, body_options);
 
-    if app_state.should_use_manual_redirects() {
+    let global_proxy = app_state.app_config.config.load().proxy.clone();
+    if tuliprox_core::model::should_use_manual_redirects_for_proxy(
+        input.proxy.as_ref().or(global_proxy.as_ref()),
+    ) {
+        let global_client = app_state.http_client_no_redirect.load();
+        let client = request::create_input_http_client_no_redirect(
+            &app_state.app_config,
+            &global_client,
+            input.proxy.as_ref(),
+        )
+        .map_err(|err| std::io::Error::other(err.to_string()))?;
         request::download_text_content_with_manual_redirects_and_headers_and_options(
             &app_state.app_config,
-            &app_state.http_client_no_redirect.load(),
+            &client,
             input,
             Some(headers),
             false,
@@ -2234,9 +2322,12 @@ pub(super) async fn download_legacy_hls_manifest(
         )
         .await
     } else {
+        let global_client = app_state.http_client.load();
+        let client = request::create_input_http_client(&app_state.app_config, &global_client, input.proxy.as_ref())
+            .map_err(|err| std::io::Error::other(err.to_string()))?;
         request::download_text_content_with_headers_and_options(
             &app_state.app_config,
-            &app_state.http_client.load(),
+            &client,
             input,
             Some(headers),
             false,

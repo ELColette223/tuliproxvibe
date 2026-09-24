@@ -849,7 +849,11 @@ impl AppState {
 
     pub fn get_grace_options(&self) -> GracePeriodOptions { self.app_config.get_grace_options() }
 
-    pub fn should_use_manual_redirects(&self) -> bool { crate::model::should_use_manual_redirects(&self.app_config) }
+    pub fn should_use_manual_redirects(&self) -> bool {
+        // Kept for call sites without an input context; input-aware call sites use
+        // `should_use_manual_redirects_for_proxy` with the input proxy first.
+        crate::model::should_use_manual_redirects(&self.app_config)
+    }
 
     pub fn get_encrypt_secret(&self) -> [u8; 16] { self.app_config.get_encrypt_secret() }
 }

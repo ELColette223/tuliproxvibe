@@ -672,6 +672,7 @@ fn create_deferred_provider_open_future(
         }
     }
     provider_stream_factory_options.set_provider(input.get_resolve_provider(stream_url.as_ref()));
+    provider_stream_factory_options.set_proxy(input.proxy.clone());
 
     Some(DeferredProviderOpenState::Pending(Box::new(DeferredProviderOpenContext {
         app_state: Arc::clone(app_state),
