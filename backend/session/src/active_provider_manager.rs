@@ -1280,7 +1280,16 @@ impl ActiveProviderManager {
     ) -> Option<ProviderHandle> {
         if let Some(owner) = params.session_owner() {
             if let Some(reserved_provider) = self.get_reserved_provider_for_owner(provider_or_input_name, owner) {
-                return self.acquire_exact_connection_inner_no_preempt(&reserved_provider, allow_grace, params);
+                if let Some(handle) = self.acquire_exact_connection_inner_no_preempt(&reserved_provider, allow_grace, params) {
+                    return Some(handle);
+                }
+                // When the reserved provider account is unavailable or exhausted, fall through
+                // to candidate lineup allocation so another account in the provider pool can be used.
+                debug_if_enabled!(
+                    "Reserved provider {} unavailable for owner {}; falling back to pool allocation",
+                    sanitize_sensitive_info(&reserved_provider),
+                    sanitize_sensitive_info(owner)
+                );
             }
         }
 
@@ -3836,6 +3845,57 @@ mod tests {
             Some(owner_2),
         );
         assert!(acquired.is_some(), "clearing reservation should unblock the provider");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_reserved_owner_falls_back_to_alternate_provider_in_pool_when_reserved_is_full() {
+        let app_cfg = create_test_app_config_with_dual_provider_pool();
+        let event_manager = Arc::new(EventManager::new());
+        let manager = ActiveProviderManager::new(&app_cfg, &event_manager);
+
+        let input_name = "provider_1".intern();
+        let provider_2 = "provider_2".intern();
+        let addr_1: SocketAddr = "127.0.0.1:43201".parse().unwrap();
+        let addr_2: SocketAddr = "127.0.0.1:43202".parse().unwrap();
+        let owner_repeat = "session-owner-repeat";
+
+        // 1. Initial request from owner_repeat reserves provider_1
+        let first = manager.acquire_connection_with_grace_for_session(
+            &input_name,
+            &addr_1,
+            false,
+            default_user_priority(),
+            ConnectionKind::Normal,
+            Some(owner_repeat),
+        );
+        assert!(first.is_some());
+        assert_eq!(first.as_ref().unwrap().allocation.get_provider_name().as_deref(), Some(input_name.as_ref()));
+        manager.refresh_provider_reservation(&input_name, owner_repeat, 30);
+        manager.confirm_playback_activity(owner_repeat);
+
+        // 2. Another user occupies provider_1 to capacity
+        // provider_1 max_connections is 1, so it is now fully occupied.
+        assert!(manager.is_exhausted(&input_name));
+
+        // 3. owner_repeat sends a new request.
+        // Even though owner_repeat has an existing reservation on provider_1,
+        // because provider_1 is full, it MUST fall back to provider_2 in the pool!
+        let fallback = manager.acquire_connection_with_grace_for_session(
+            &input_name,
+            &addr_2,
+            false,
+            default_user_priority(),
+            ConnectionKind::Normal,
+            Some(owner_repeat),
+        );
+        assert!(
+            fallback.is_some(),
+            "owner_repeat must fall back to available alternate provider when reserved account is exhausted"
+        );
+        assert_eq!(
+            fallback.as_ref().unwrap().allocation.get_provider_name().as_deref(),
+            Some(provider_2.as_ref())
+        );
     }
 
     #[tokio::test]

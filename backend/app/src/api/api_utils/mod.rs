@@ -2777,7 +2777,9 @@ pub(crate) async fn stream_response(
             if let Some(provider) = provider_name {
                 if matches!(
                     item_type,
-                    PlaylistItemType::LiveHls
+                    PlaylistItemType::Live
+                        | PlaylistItemType::LiveUnknown
+                        | PlaylistItemType::LiveHls
                         | PlaylistItemType::LiveDash
                         | PlaylistItemType::Video
                         | PlaylistItemType::Series
