@@ -1,7 +1,7 @@
 use crate::{
     app::{
         components::{
-            bouquet_editor::TargetBouquetView, can_connect, source_editor::layout::layout, Block, BlockId,
+            bouquet_editor::VisualTargetFilter, can_connect, source_editor::layout::layout, Block, BlockId,
             BlockInstance, BlockType, BlockView, Connection, EditMode, InputRow, PortStatus, SourceEditorContext,
             SourceEditorForm, SourceEditorSidebar, TextButton, BLOCK_HEADER_HEIGHT, BLOCK_HEIGHT, BLOCK_PORT_HEIGHT,
             BLOCK_WIDTH,
@@ -17,8 +17,8 @@ use gloo_timers::callback::Timeout;
 use shared::{
     model::{
         permission::Permission, ConfigInputDto, ConfigInputStagedDto, ConfigSourceDto, ConfigTargetDto,
-        HdHomeRunTargetOutputDto, InputType, M3uTargetOutputDto, SourcesConfigDto, StrmTargetOutputDto,
-        TargetOutputDto, XtreamTargetOutputDto,
+        HdHomeRunTargetOutputDto, InputType, M3uTargetOutputDto, ManagedFilterRule, SourcesConfigDto,
+        StrmTargetOutputDto, TargetOutputDto, XtreamTargetOutputDto,
     },
     utils::BATCH_SCHEME_PREFIX,
 };
@@ -53,7 +53,7 @@ type BlockCreatePosition = (BlockType, Position);
 #[derive(Properties, Clone, PartialEq)]
 pub struct SourceEditorProps {
     #[prop_or_default]
-    pub on_sources_change: Option<Callback<SourcesConfigDto>>,
+    pub on_sources_change: Option<Callback<(SourcesConfigDto, Vec<shared::model::ManagedFilterRule>)>>,
     #[prop_or(true)]
     pub show_save_button: bool,
 }
@@ -633,6 +633,25 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
     let translate = use_translation();
 
     let force_update = use_state(|| 0);
+    let initial_filter_rules = config_ctx
+        .config
+        .as_ref()
+        .and_then(|config| config.templates.as_ref())
+        .map_or_else(Vec::new, |definition| shared::foundation::managed_filter_rules(Some(&definition.templates)));
+    let filter_rules = use_state(|| Rc::new(initial_filter_rules));
+    let filter_rules_initialized = !filter_rules.is_empty() || config_ctx.config.is_none();
+    {
+        let filter_rules = filter_rules.clone();
+        let config_templates = config_ctx.config.as_ref().and_then(|config| config.templates.clone());
+        use_effect_with((config_templates, filter_rules_initialized), move |(templates, initialized)| {
+            if !*initialized {
+                if let Some(templates) = templates.as_ref() {
+                    filter_rules.set(Rc::new(shared::foundation::managed_filter_rules(Some(&templates.templates))));
+                }
+            }
+            || ()
+        });
+    }
     // ----------------- virtual canvas offset -----------------
     let editor_state_ref = use_mut_ref(EditorState::default);
     let initialized_from_playlist = use_state(|| false);
@@ -706,6 +725,7 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
         let config_ctx = config_ctx.clone();
         let is_dirty = is_dirty.clone();
         let edit_revision = edit_revision.clone();
+        let filter_rules = filter_rules.clone();
         Callback::from(move |()| {
             *edit_revision.borrow_mut() += 1;
             is_dirty.set(true);
@@ -713,7 +733,7 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
                 let base_sources = config_ctx.config.as_ref().map(|c| c.sources.clone()).unwrap_or_default();
                 let editor_state = editor_state_ref.borrow();
                 let dto = editor_state_to_sources_config(&base_sources, &editor_state);
-                on_sources_change.emit(dto);
+                on_sources_change.emit((dto, filter_rules.as_ref().clone()));
             }
         })
     };
@@ -1223,15 +1243,35 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
         let translate = translate.clone();
         let is_dirty = is_dirty.clone();
         let edit_revision = edit_revision.clone();
+        let filter_rules = filter_rules.clone();
         Callback::from(move |()| {
             let base_sources = config_ctx.config.as_ref().map(|c| c.sources.clone()).unwrap_or_default();
             let editor_state = editor_state_ref.borrow();
             let sources_config = editor_state_to_sources_config(&base_sources, &editor_state);
             let mut sources_to_validate = sources_config.clone();
             let hdhr_overview = config_ctx.config.as_ref().and_then(|cfg| cfg.config.get_hdhr_device_overview());
-            let global_templates =
-                config_ctx.config.as_ref().and_then(|cfg| cfg.templates.as_ref().map(|defs| defs.templates.as_slice()));
-            if let Err(err) = sources_to_validate.prepare(false, hdhr_overview.as_ref(), global_templates) {
+            let mut validation_templates =
+                config_ctx.config.as_ref().and_then(|cfg| cfg.templates.as_ref()).map_or_else(Vec::new, |defs| {
+                    defs.templates.iter().filter(|template| !template.is_managed_filter_rule()).cloned().collect()
+                });
+            let managed_templates = match shared::foundation::managed_filter_rule_templates(filter_rules.as_ref()) {
+                Ok(templates) => templates,
+                Err(err) => {
+                    services.toastr.error(err.to_string());
+                    return;
+                }
+            };
+            validation_templates.extend(managed_templates);
+            let mut prepared_templates = validation_templates.clone();
+            let prepared_templates = match shared::foundation::prepare_templates(&mut prepared_templates) {
+                Ok(templates) => Some(templates),
+                Err(err) => {
+                    services.toastr.error(err.to_string());
+                    return;
+                }
+            };
+            if let Err(err) = sources_to_validate.prepare(false, hdhr_overview.as_ref(), prepared_templates.as_deref())
+            {
                 services.toastr.error(err.to_string());
                 return;
             }
@@ -1240,9 +1280,14 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
             let translate = translate.clone();
             let is_dirty = is_dirty.clone();
             let edit_revision = edit_revision.clone();
+            let filter_rules = Rc::clone(&filter_rules);
             let saved_revision = *edit_revision.borrow();
             wasm_bindgen_futures::spawn_local(async move {
-                match services.config.save_sources(sources_config).await {
+                match services
+                    .config
+                    .save_sources_with_filter_rules(sources_config, Some((*filter_rules).clone()))
+                    .await
+                {
                     Ok(()) => {
                         // Preserve the dirty flag if the editor changed while the save was in flight
                         if *edit_revision.borrow() == saved_revision {
@@ -2072,6 +2117,15 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
         }
     };
 
+    let filter_rules_changed = {
+        let filter_rules = filter_rules.clone();
+        let emit_sources_change = emit_sources_change.clone();
+        Callback::<Vec<ManagedFilterRule>>::from(move |rules| {
+            filter_rules.set(Rc::new(rules));
+            emit_sources_change.emit(());
+        })
+    };
+
     let form_changed = {
         let editor_state_ref = editor_state_ref.clone();
         let emit_sources_change = emit_sources_change.clone();
@@ -2127,6 +2181,8 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
 
     let editor_context = SourceEditorContext {
         on_form_change: form_changed,
+        on_filter_rules_change: filter_rules_changed,
+        filter_rules: (*filter_rules).clone(),
         open_target_bouquet,
         bouquet_revision: *bouquet_revision,
         edit_mode: edit_mode.clone(),
@@ -2327,7 +2383,7 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
           </div>
           if let Some(target_name) = target_bouquet.as_ref() {
               <div class="tp__source-editor__stack-layer">
-                  <TargetBouquetView target_name={target_name.clone()} on_back={close_target_bouquet} />
+                  <VisualTargetFilter target_name={target_name.clone()} on_back={close_target_bouquet} />
               </div>
           }
         </div>

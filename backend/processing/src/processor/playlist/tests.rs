@@ -338,7 +338,7 @@ fn execute_pipe_freezes_input_stream_id_without_rename_or_mapper() {
     let mut duplicates = HashSet::new();
     let target = ConfigTarget::from(&ConfigTargetDto::default());
 
-    let (mut processed, _outcome) = execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, None)
+    let (mut processed, _outcome) = execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, None, None)
         .expect("target processing should succeed");
     let mut groups = processed.source.take_groups();
 
@@ -381,7 +381,7 @@ fn execute_pipe_applies_target_bouquet_prefilter() {
         tuliprox_core::model::TargetBouquetFilter::from_dto(shared::model::TargetBouquetDto::whitelist(bouquet_dto))
             .unwrap();
 
-    let (mut processed, _outcome) = execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, Some(&filter))
+    let (mut processed, _outcome) = execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, Some(&filter), None)
         .expect("target processing should succeed");
     let groups = processed.source.take_groups();
 
@@ -441,7 +441,7 @@ fn execute_pipe_prefilter_does_not_suppress_allowed_duplicate() {
         tuliprox_core::model::TargetBouquetFilter::from_dto(shared::model::TargetBouquetDto::whitelist(bouquet_dto))
             .unwrap();
 
-    let (mut processed, _outcome) = execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, Some(&filter))
+    let (mut processed, _outcome) = execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, Some(&filter), None)
         .expect("target processing should succeed");
     let groups = processed.source.take_groups();
 
@@ -450,6 +450,86 @@ fn execute_pipe_prefilter_does_not_suppress_allowed_duplicate() {
     assert_eq!(groups[0].title.as_ref(), "Kids");
     assert_eq!(groups[0].channels.len(), 1);
     assert_eq!(groups[0].channels[0].header.id.as_ref(), "ch-2");
+}
+
+#[test]
+fn execute_pipe_snapshots_raw_ids_across_inputs_before_channel_selection() {
+    use shared::model::{PlaylistClusterBouquetDto, TargetBouquetCategorySelectionDto, TargetBouquetDto, TargetBouquetSelectionDto};
+
+    let ids = [
+        UUIDType::from_valid_uuid("00000000-0000-4000-8000-000000000081"),
+        UUIDType::from_valid_uuid("00000000-0000-4000-8000-000000000082"),
+        UUIDType::from_valid_uuid("00000000-0000-4000-8000-000000000083"),
+        UUIDType::from_valid_uuid("00000000-0000-4000-8000-000000000084"),
+    ];
+    let make_item = |id: UUIDType, group: &str| PlaylistItem {
+        header: PlaylistItemHeader {
+            uuid: id,
+            id: id.to_string().intern(),
+            group: group.intern(),
+            xtream_cluster: XtreamCluster::Live,
+            ..Default::default()
+        },
+    };
+    let raw_ids = ids.map(|id| make_item(id, "News").get_uuid());
+    let selected = TargetBouquetSelectionDto {
+        base_filter: None,
+        categories: vec![TargetBouquetCategorySelectionDto {
+            cluster: XtreamCluster::Live,
+            name: "News".to_string(),
+            included_channel_ids: vec![raw_ids[0].to_string()],
+        }],
+    };
+    let filter = tuliprox_core::model::TargetBouquetFilter::from_dto(
+        TargetBouquetDto::whitelist(PlaylistClusterBouquetDto::default()).with_selection(selected),
+    )
+    .expect("selection creates filter");
+    let input = ConfigInput::default();
+    let target = ConfigTarget::from(&ConfigTargetDto::default());
+    let mut snapshot = BouquetSnapshot::default();
+    let mut duplicates = HashSet::new();
+
+    for groups in [
+        vec![PlaylistGroup {
+            id: 1,
+            title: "News".intern(),
+            channels: vec![make_item(ids[0], "News"), make_item(ids[1], "News")],
+            xtream_cluster: XtreamCluster::Live,
+        }],
+        vec![
+            PlaylistGroup {
+                id: 1,
+                title: "News".intern(),
+                channels: vec![make_item(ids[2], "News")],
+                xtream_cluster: XtreamCluster::Live,
+            },
+            PlaylistGroup {
+                id: 2,
+                title: "Sports".intern(),
+                channels: vec![make_item(ids[3], "Sports")],
+                xtream_cluster: XtreamCluster::Live,
+            },
+        ],
+    ] {
+        let mut fetched = FetchedPlaylist { input: &input, source: MemoryPlaylistSource::new(groups).into_source(), epg: None };
+        let (mut processed, _) = execute_pipe(
+            &target,
+            &vec![],
+            &mut fetched,
+            &mut duplicates,
+            false,
+            Some(&filter),
+            Some(&mut snapshot),
+        )
+        .expect("pipeline succeeds");
+        let kept = processed.source.take_groups();
+        assert!(kept.iter().flat_map(|group| &group.channels).all(|channel| channel.get_uuid() != raw_ids[1] && channel.get_uuid() != raw_ids[2]));
+    }
+
+    let news = snapshot.get(&(XtreamCluster::Live, "News".to_string())).expect("News is observed");
+    assert_eq!(news, &raw_ids[..3].iter().map(ToString::to_string).collect::<HashSet<_>>());
+    let sports = snapshot.get(&(XtreamCluster::Live, "Sports".to_string())).expect("Sports is observed");
+    assert_eq!(sports, &HashSet::from([raw_ids[3].to_string()]));
 }
 
 #[test]
@@ -2076,6 +2156,7 @@ mod mapping_stage {
             pre_processed_inputs: None,
             input_refresh: None,
             library_update_mode: LibraryUpdateMode::ExistingCatalog,
+            offline_target_reprocess: false,
             stalker_refresh_mode: StalkerRefreshMode::Complete,
             partial_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             had_quality_rejections: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -2543,7 +2624,7 @@ match {
             FetchedPlaylist { input: &input, source: memory_source(vec![channel.clone(), channel]), epg: None };
         let mut duplicates = HashSet::new();
         let (mut processed, _outcome) =
-            execute_pipe(&target, &get_processing_pipe(&target), &mut fetched, &mut duplicates, false, None)
+            execute_pipe(&target, &get_processing_pipe(&target), &mut fetched, &mut duplicates, false, None, None)
                 .expect("processing pipe must run");
         assert_eq!(processed.get_channel_count(), 1, "processing pipe must remove the duplicate");
 
@@ -2837,6 +2918,7 @@ mod curation_effect_gate {
             had_quality_rejections: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             input_refresh: None,
             library_update_mode: LibraryUpdateMode::ExistingCatalog,
+            offline_target_reprocess: false,
         }
     }
 
@@ -2963,6 +3045,7 @@ mod curation_effect_gate {
             processing: PipelineStats::default(),
             accepted_empty_clusters: ClusterFlags::Vod,
             library_empty: tuliprox_repository::LibraryEmptyPublication::None,
+            bouquet_snapshot: Vec::new(),
         };
 
         let (result, errors) = finalize_prepared_target(Arc::new(context), prepared).await;
@@ -2978,6 +3061,91 @@ mod curation_effect_gate {
             .and_then(|storage| storage.xtream.as_ref())
             .map_or(0, |storage| storage.vod.len());
         assert_eq!(after_cache_len, before_cache_len);
+    }
+
+    #[tokio::test]
+    async fn bouquet_snapshot_merges_only_after_nonempty_successful_publication() {
+        use shared::model::{PlaylistClusterBouquetDto, TargetBouquetCategorySelectionDto, TargetBouquetDto, TargetBouquetSelectionDto};
+
+        let directory = tempdir().expect("tempdir");
+        let app_config = app_config(directory.path());
+        let mut paths = (*app_config.paths.load_full()).clone();
+        paths.config_path = directory.path().to_string_lossy().into_owned();
+        app_config.paths.store(Arc::new(paths));
+        let name = "snapshot-gate";
+        let existing = TargetBouquetCategorySelectionDto {
+            cluster: XtreamCluster::Live,
+            name: "Known".to_string(),
+            included_channel_ids: Vec::new(),
+        };
+        let newly_observed = TargetBouquetCategorySelectionDto {
+            cluster: XtreamCluster::Live,
+            name: "New".to_string(),
+            included_channel_ids: vec![UUIDType::from_valid_uuid("00000000-0000-4000-8000-000000000084").to_string()],
+        };
+        tuliprox_repository::save_target_bouquet(
+            &app_config,
+            name,
+            TargetBouquetDto::whitelist(PlaylistClusterBouquetDto::default())
+                .with_selection(TargetBouquetSelectionDto { base_filter: None, categories: vec![existing.clone()] }),
+        )
+        .await
+        .expect("save selection");
+        let target = ConfigTarget::from(&ConfigTargetDto {
+            name: name.to_string(),
+            output: vec![TargetOutputDto::M3u(M3uTargetOutputDto {
+                filename: Some("snapshot-gate.m3u".to_string()),
+                ..M3uTargetOutputDto::default()
+            })],
+            ..ConfigTargetDto::default()
+        });
+        let make_prepared = |playlist: Vec<PlaylistGroup>| PreparedTarget {
+            target: target.clone(),
+            playlist,
+            epg: Vec::new(),
+            processing: PipelineStats::default(),
+            accepted_empty_clusters: ClusterFlags::empty(),
+            library_empty: tuliprox_repository::LibraryEmptyPublication::None,
+            bouquet_snapshot: vec![newly_observed.clone()],
+        };
+        async fn selection(app_config: &AppConfig, name: &str) -> TargetBouquetSelectionDto {
+            tuliprox_repository::load_target_bouquet(app_config, name)
+                .await
+                .expect("read selection")
+                .expect("saved selection")
+                .bouquet
+                .selection
+                .expect("v3 selection")
+        }
+        let (skipped, errors) = finalize_prepared_target(
+            Arc::new(processing_context(Arc::clone(&app_config), None)),
+            make_prepared(Vec::new()),
+        )
+        .await;
+        assert!(skipped.is_ok());
+        assert!(errors.is_empty());
+        assert_eq!(selection(&app_config, name).await.categories, vec![existing.clone()]);
+
+        let published_playlist = vec![PlaylistGroup {
+            id: 1,
+            title: "Known".intern(),
+            channels: vec![catalog_test_item(
+                "existing",
+                UUIDType::from_valid_uuid("00000000-0000-4000-8000-000000000085"),
+                PlaylistItemType::Live,
+                XtreamCluster::Live,
+                None,
+            )],
+            xtream_cluster: XtreamCluster::Live,
+        }];
+        let (published, errors) = finalize_prepared_target(
+            Arc::new(processing_context(Arc::clone(&app_config), None)),
+            make_prepared(published_playlist),
+        )
+        .await;
+        assert!(published.is_ok(), "publication failed: {published:?}");
+        assert!(errors.is_empty(), "snapshot merge failed: {errors:?}");
+        assert_eq!(selection(&app_config, name).await.categories, vec![existing, newly_observed]);
     }
 
     #[tokio::test]
@@ -3051,6 +3219,7 @@ mod curation_effect_gate {
             processing: PipelineStats::default(),
             accepted_empty_clusters: ClusterFlags::empty(),
             library_empty: tuliprox_repository::LibraryEmptyPublication::None,
+            bouquet_snapshot: Vec::new(),
         };
         let (result, errors) = finalize_prepared_target(Arc::new(context), prepared).await;
         server.await.expect("Trakt server should finish");
@@ -3663,6 +3832,7 @@ mod quality_rejection_fallback {
             pre_processed_inputs: None,
             input_refresh: None,
             library_update_mode: LibraryUpdateMode::ExistingCatalog,
+            offline_target_reprocess: false,
             stalker_refresh_mode: StalkerRefreshMode::Complete,
             partial_refresh: Arc::new(AtomicBool::new(false)),
             had_quality_rejections: Arc::new(AtomicBool::new(false)),
@@ -4219,6 +4389,173 @@ mod quality_rejection_fallback {
             assert_eq!(shows.quality_guard_threshold, Some(0));
             assert_eq!(shows.policy, Some(InputRefreshPolicy::FORCE));
             assert!(server.finish().iter().any(|action| action == "get_series"));
+        }
+    }
+
+    #[test]
+    fn disabled_input_requires_explicit_offline_mode() {
+        let input = ConfigInput { id: 7, enabled: false, ..ConfigInput::default() };
+        let targets = ProcessTargets { enabled: true, inputs: vec![7], targets: vec![1], target_names: vec![] };
+        assert!(!is_input_enabled(&input, &targets, false));
+        assert!(is_input_enabled(&input, &targets, true));
+        let other = ProcessTargets { inputs: vec![8], ..targets };
+        assert!(!is_input_enabled(&input, &other, true));
+        let bulk = ProcessTargets { enabled: false, inputs: vec![], targets: vec![], target_names: vec![] };
+        assert!(!is_input_enabled(&input, &bulk, true));
+    }
+
+    #[tokio::test]
+    async fn normal_target_update_still_skips_disabled_xtream_even_with_persisted_cache() {
+        let temp = tempfile::tempdir().expect("temporary storage");
+        let server = TestXtreamServer::start([2, 2, 2]);
+        let ctx = processing_context(temp.path());
+        let mut input = (*test_input(&server.base_url, ConfigInputUpdateQualityDto::default(), 0, &[])).clone();
+        input.enabled = false;
+        let input = Arc::new(input);
+        let target = xtream_target(false);
+        install_source(&ctx, &input, &target);
+        seed_baseline(&ctx, &input).await;
+        let selected = Arc::new(ProcessTargets {
+            enabled: true,
+            inputs: vec![input.id],
+            targets: vec![target.id],
+            target_names: vec![target.name.clone()],
+        });
+        let summary = exec_processing(ProcessingRun::new(
+            ctx.client.clone(), Arc::clone(&ctx.config), selected, shared::model::NoopSink,
+        ))
+        .await;
+        assert!(!summary.stats.iter().flat_map(|source| &source.targets).any(|stat| stat.success));
+        assert_target_counts(&ctx.config, &target, [0, 0, 0]).await;
+        assert!(server.finish().is_empty());
+    }
+
+    #[tokio::test]
+    async fn offline_target_reprocess_rebuilds_disabled_xtream_from_expired_cache_without_fetch() {
+        let temp = tempfile::tempdir().expect("temporary storage");
+        let server = TestXtreamServer::start([2, 2, 2]);
+        let events = CollectSink::default();
+        let ctx = processing_context_with_events(temp.path(), events.clone());
+        let mut input = (*test_input(&server.base_url, ConfigInputUpdateQualityDto::default(), 0, &[])).clone();
+        input.enabled = false;
+        input.options.as_mut().expect("Xtream options").flags.set(ConfigInputFlags::ResolveVod);
+        input.epg = Some(tuliprox_core::model::EpgConfig {
+            sources: vec![tuliprox_core::model::EpgSource {
+                source_type: tuliprox_core::model::EpgSourceType::Xmltv,
+                url: format!("{}/epg.xml", server.base_url),
+                priority: 0,
+                logo_override: false,
+                channel_id: None,
+                channel_title: None,
+                match_names: Vec::new(),
+                ics: None,
+            }],
+            smart_match: None,
+        });
+        let input = Arc::new(input);
+        let target = xtream_target(false);
+        install_source(&ctx, &input, &target);
+        seed_baseline(&ctx, &input).await;
+        let staged = Arc::new(ConfigInput {
+            name: "staged-overlay".intern(),
+            input_type: InputType::Staged,
+            url: format!("{}/staged", server.base_url),
+            enabled: true,
+            staged: Some(tuliprox_core::model::ConfigInputStaged {
+                for_input: Some(Arc::clone(&input.name)),
+                clusters: ClusterFlags::all(),
+            }),
+            ..ConfigInput::default()
+        });
+        let mut sources = (**ctx.config.sources.load()).clone();
+        sources.inputs.push(staged);
+        ctx.config.sources.store(Arc::new(sources));
+        let selected = Arc::new(ProcessTargets {
+            enabled: true,
+            inputs: vec![input.id],
+            targets: vec![target.id],
+            target_names: vec![target.name.clone()],
+        });
+        let run_id = PlaylistUpdateRunId::from("offline-disabled-xtream");
+        let summary = exec_processing(
+            ProcessingRun::for_run(run_id.clone(), ctx.client.clone(), Arc::clone(&ctx.config), selected, events.clone())
+                .with_pre_processed_inputs(HashSet::from([Arc::clone(&input.name)]))
+                .with_offline_target_reprocess(),
+        )
+        .await;
+        assert_eq!(summary.state, PlaylistUpdateState::Success, "{summary:?}");
+        assert!(summary.stats.iter().flat_map(|source| &source.targets).any(|stat| stat.name == target.name && stat.success));
+        assert_target_counts(&ctx.config, &target, [2, 2, 2]).await;
+        assert!(server.finish().is_empty(), "offline mode must not contact provider");
+        let emitted = events.0.lock().expect("event sink lock");
+        assert!(emitted.iter().any(|event| matches!(event, EventMessage::PlaylistUpdate(result) if result == &summary && result.run_id.as_ref() == Some(&run_id))));
+    }
+
+    #[tokio::test]
+    async fn offline_target_reprocess_rejects_online_curation_without_replacing_target() {
+        let temp = tempfile::tempdir().expect("temporary storage");
+        let server = TestXtreamServer::start([2, 2, 2]);
+        let ctx = processing_context(temp.path());
+        let mut input = (*test_input(&server.base_url, ConfigInputUpdateQualityDto::default(), 0, &[])).clone();
+        input.enabled = false;
+        let input = Arc::new(input);
+        let mut target = (*xtream_target(false)).clone();
+        if let TargetOutput::Xtream(output) = &mut target.output[0] {
+            output.trakt = Some(TraktConfig::from(&TraktConfigDto::default()));
+        }
+        let target = Arc::new(target);
+        install_source(&ctx, &input, &target);
+        seed_baseline(&ctx, &input).await;
+        let selected = Arc::new(ProcessTargets {
+            enabled: true,
+            inputs: vec![input.id],
+            targets: vec![target.id],
+            target_names: vec![target.name.clone()],
+        });
+        let summary = exec_processing(
+            ProcessingRun::new(ctx.client.clone(), Arc::clone(&ctx.config), selected, shared::model::NoopSink)
+                .with_offline_target_reprocess(),
+        )
+        .await;
+        assert_eq!(summary.state, PlaylistUpdateState::Failure);
+        assert!(summary.error.as_deref().is_some_and(|error| error.contains("cannot be reprocessed offline")));
+        assert_target_counts(&ctx.config, &target, [0, 0, 0]).await;
+        assert!(server.finish().is_empty());
+    }
+
+    #[tokio::test]
+    async fn offline_target_reprocess_missing_or_unreadable_cache_fails_without_publication_or_fetch() {
+        for corrupt in [false, true] {
+            let temp = tempfile::tempdir().expect("temporary storage");
+            let server = TestXtreamServer::start([2, 2, 2]);
+            let ctx = processing_context(temp.path());
+            let mut input = (*test_input(&server.base_url, ConfigInputUpdateQualityDto::default(), 0, &[])).clone();
+            input.enabled = false;
+            let input = Arc::new(input);
+            let target = xtream_target(false);
+            install_source(&ctx, &input, &target);
+            seed_xtream_target(&ctx, &target, &Arc::new(PlaylistStorageState::default())).await;
+            if corrupt {
+                let storage = input_storage_path(&ctx, &input).await;
+                tokio::fs::write(tuliprox_repository::xtream_get_file_path(&storage, XtreamCluster::Live), b"invalid cache")
+                    .await
+                    .expect("write corrupt cache");
+            }
+            let selected = Arc::new(ProcessTargets {
+                enabled: true,
+                inputs: vec![input.id],
+                targets: vec![target.id],
+                target_names: vec![target.name.clone()],
+            });
+            let summary = exec_processing(
+                ProcessingRun::new(ctx.client.clone(), Arc::clone(&ctx.config), selected, shared::model::NoopSink)
+                    .with_offline_target_reprocess(),
+            )
+            .await;
+            assert_eq!(summary.state, PlaylistUpdateState::Failure, "corrupt={corrupt}: {summary:?}");
+            assert!(summary.error.is_some());
+            assert!(!summary.stats.iter().flat_map(|source| &source.targets).any(|stat| stat.success));
+            assert!(server.finish().is_empty(), "cache failure must not fetch provider");
         }
     }
 

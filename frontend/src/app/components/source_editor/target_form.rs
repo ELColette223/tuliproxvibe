@@ -1,8 +1,9 @@
 use crate::{
     app::components::{
         build_options, config::HasFormData, select::Select, selection_parse_first, AppIcon, BlockId, BlockInstance,
-        Card, ClusterFlagsInput, ClusterFlagsInputMode, DropDownSelection, EditMode, FilterInput, IconButton, Panel,
-        SourceEditorContext, TextButton, ToggleSwitch,
+        Card, ClusterFlagsInput, ClusterFlagsInputMode, DropDownSelection, EditMode, IconButton, Panel,
+        SourceEditorContext, TargetFilterBuilder, TargetFilterBuilderResult, TargetFilterSummary, TextButton,
+        ToggleSwitch,
     },
     config_field, config_field_bool, config_field_child, config_field_custom, edit_field_bool, edit_field_list_option,
     edit_field_text, generate_form_reducer,
@@ -14,7 +15,7 @@ use shared::{
     error::TuliproxError,
     model::{
         permission::Permission, ClusterFlags, ConfigTargetDto, ConfigTargetFilterDto, ConfigTargetOptions,
-        ProcessingOrder, TargetBouquetMode, TargetBouquetStatusDto,
+        ProcessingOrder, TargetBouquetStatusDto,
     },
     utils::Internable,
 };
@@ -26,8 +27,6 @@ use yew::{
 
 const LABEL_ENABLED: &str = "LABEL.ENABLED";
 const LABEL_NAME: &str = "LABEL.NAME";
-const LABEL_FILTER: &str = "LABEL.FILTER";
-const LABEL_PERSIST_FILTER: &str = "LABEL.PERSIST_FILTER";
 const LABEL_MAPPING: &str = "LABEL.MAPPING";
 const LABEL_WATCH: &str = "LABEL.WATCH";
 const LABEL_ADD_MAPPING: &str = "LABEL.ADD_MAPPING";
@@ -46,7 +45,6 @@ const LABEL_LOWERCASE_EPG_IDS: &str = "LABEL.LOWERCASE_EPG_IDS";
 const LABEL_LOWERCASE_XMLTV_DISPLAY_NAMES: &str = "LABEL.LOWERCASE_XMLTV_DISPLAY_NAMES";
 const LABEL_MAIN: &str = "LABEL.MAIN_CONFIG";
 const LABEL_OPTIONS: &str = "LABEL.OPTIONS";
-const LABEL_BOUQUETS: &str = "LABEL.BOUQUETS";
 
 #[derive(Clone, PartialEq)]
 enum BouquetStatus {
@@ -211,8 +209,10 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
         use_reducer(|| ConfigTargetFormState { form: ConfigTargetDto::default(), modified: false });
     let target_options_state: UseReducerHandle<ConfigTargetOptionsFormState> =
         use_reducer(|| ConfigTargetOptionsFormState { form: ConfigTargetOptions::default(), modified: false });
+    let local_filter_rules = use_state(|| source_editor_ctx.filter_rules.as_ref().clone());
 
     let view_visible = use_state(|| TargetFormPage::Main);
+    let filter_builder_open = use_state(|| false);
     let bouquet_status = use_state(|| BouquetStatus::Loading);
     let bouquet_target_name = props.target.as_ref().map_or_else(String::new, |target| target.name.clone());
     let can_read_bouquets = services.auth.has_permission(Permission::PlaylistRead);
@@ -277,6 +277,8 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
     {
         let target_form_state = target_form_state.clone();
         let target_options_state = target_options_state.clone();
+        let local_filter_rules = local_filter_rules.clone();
+        let source_rules = source_editor_ctx.filter_rules.clone();
 
         let config_target = props.target.clone();
 
@@ -290,6 +292,7 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
                 target_form_state.dispatch(ConfigTargetFormAction::SetAll(ConfigTargetDto::default()));
                 target_options_state.dispatch(ConfigTargetOptionsFormAction::SetAll(ConfigTargetOptions::default()));
             }
+            local_filter_rules.set(source_rules.as_ref().clone());
             || ()
         });
     }
@@ -465,18 +468,10 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
         let status = match &*bouquet_status {
             BouquetStatus::Loading => translate.t("LABEL.LOADING"),
             BouquetStatus::Unavailable => translate.t("MESSAGES.TARGET_BOUQUET.STATUS_UNAVAILABLE"),
-            BouquetStatus::Ready(Some(summary)) => match summary.mode {
-                Some(TargetBouquetMode::Whitelist) => translate
-                    .t("MESSAGES.TARGET_BOUQUET.STATUS_WHITELIST")
-                    .replace("{count}", &summary.group_count.to_string()),
-                Some(TargetBouquetMode::Blacklist) => translate
-                    .t("MESSAGES.TARGET_BOUQUET.STATUS_BLACKLIST")
-                    .replace("{count}", &summary.group_count.to_string()),
-                None => translate.t("MESSAGES.TARGET_BOUQUET.NO_FILTER"),
-            },
+            BouquetStatus::Ready(Some(_)) => translate.t("FILTER_BUILDER.VISUAL_TITLE"),
             BouquetStatus::Ready(None) => translate.t("MESSAGES.TARGET_BOUQUET.SAVE_TARGET_FIRST"),
         };
-        let can_open = matches!(&*bouquet_status, BouquetStatus::Ready(Some(_)));
+        let can_open = !bouquet_target_name.is_empty();
         let on_open = {
             let open_target_bouquet = source_editor_ctx.open_target_bouquet.clone();
             let target_name = bouquet_target_name.clone();
@@ -489,7 +484,7 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
             })
         };
         html! {
-            { config_field_child!(translate.t(LABEL_BOUQUETS), "TARGET_FORM.BOUQUETS", {
+            { config_field_child!(translate.t("LABEL.FILTER"), "TARGET_FORM.BOUQUETS", {
                 html! {
                     <button
                         type="button"
@@ -509,8 +504,7 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
 
     let render_target = || {
         let target_form_state_1 = target_form_state.clone();
-        let target_form_state_2 = target_form_state.clone();
-        let target_form_state_3 = target_form_state.clone();
+        let filter_builder_open = filter_builder_open.clone();
         if props.allow_write {
             html! {
                 <Card class="tp__config-view__card">
@@ -519,23 +513,14 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
                 { edit_field_bool!(target_form_state, translate.t(LABEL_USE_MEMORY_CACHE), use_memory_cache,  ConfigTargetFormAction::UseMemoryCache) }
                 </div>
                 { edit_field_text!(target_form_state, translate.t(LABEL_NAME), name, ConfigTargetFormAction::Name) }
-                { config_field_child!(translate.t(LABEL_FILTER), "TARGET_FORM.FILTER", {
-                       html! {
-                            <FilterInput filter={target_form_state_2.form.filter.processing.clone()} on_change={Callback::from(move |new_filter: Option<String>| {
-                                let mut filter = target_form_state_2.form.filter.clone();
-                                filter.processing = new_filter.filter(|value| !value.is_empty());
-                                target_form_state_2.dispatch(ConfigTargetFormAction::Filter(filter));
-                            })} />
-                       }
-                })}
                 { render_bouquet_input() }
-                { config_field_child!(translate.t(LABEL_PERSIST_FILTER), "TARGET_FORM.PERSIST_FILTER", {
+                { config_field_child!(translate.t("FILTER_BUILDER.FILTER_ADVANCED"), "TARGET_FORM.FILTER", {
                        html! {
-                            <FilterInput filter={target_form_state_3.form.filter.persist.clone()} on_change={Callback::from(move |new_filter: Option<String>| {
-                                let mut filter = target_form_state_3.form.filter.clone();
-                                filter.persist = new_filter.filter(|value| !value.is_empty());
-                                target_form_state_3.dispatch(ConfigTargetFormAction::Filter(filter));
-                            })} />
+                            <TargetFilterSummary
+                                filter={target_form_state.form.filter.clone()}
+                                rules={Some((*local_filter_rules).clone())}
+                                onclick={Some(Callback::from(move |_| filter_builder_open.set(true)))}
+                            />
                        }
                 })}
 
@@ -565,15 +550,16 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
                         { config_field_bool!(target_form_state.form, translate.t(LABEL_USE_MEMORY_CACHE), use_memory_cache) }
                     </div>
                     { config_field!(target_form_state.form, translate.t(LABEL_NAME), name) }
-                    { config_field_custom!(
-                        translate.t(LABEL_FILTER),
-                        target_form_state.form.filter.processing.clone().unwrap_or_default()
-                    ) }
-                    { config_field_custom!(
-                        translate.t(LABEL_PERSIST_FILTER),
-                        target_form_state.form.filter.persist.clone().unwrap_or_default()
-                    ) }
                     { render_bouquet_input() }
+                    { config_field_child!(translate.t("FILTER_BUILDER.FILTER_ADVANCED"), "TARGET_FORM.FILTER", {
+                        html! {
+                            <TargetFilterSummary
+                                filter={target_form_state.form.filter.clone()}
+                                rules={Some((*local_filter_rules).clone())}
+                                readonly={true}
+                            />
+                        }
+                    }) }
                     { config_field_custom!(
                         translate.t(LABEL_PROCESSING_ORDER),
                         target_form_state.form.processing_order.to_string()
@@ -606,6 +592,19 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
         }
     };
 
+    let handle_filter_builder_result = {
+        let filter_builder_open = filter_builder_open.clone();
+        let target_form_state = target_form_state.clone();
+        let local_filter_rules = local_filter_rules.clone();
+        Callback::from(move |result: Option<TargetFilterBuilderResult>| {
+            if let Some(result) = result {
+                target_form_state.dispatch(ConfigTargetFormAction::Filter(result.filter));
+                local_filter_rules.set(result.rules);
+            }
+            filter_builder_open.set(false);
+        })
+    };
+
     let render_sidebar = || {
         html! {
             <div class="tp__source-editor-form__sidebar">
@@ -619,6 +618,7 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
         let source_editor_ctx = source_editor_ctx.clone();
         let target_form_state = target_form_state.clone();
         let target_options_state = target_options_state.clone();
+        let local_filter_rules = local_filter_rules.clone();
         let block_id = props.block_id;
         Callback::from(move |_| {
             let mut target = target_form_state.data().clone();
@@ -629,6 +629,7 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
                 target.options = Some(target_options.clone());
             }
             source_editor_ctx.on_form_change.emit((block_id, BlockInstance::Target(Rc::new(target))));
+            source_editor_ctx.on_filter_rules_change.emit((*local_filter_rules).clone());
             source_editor_ctx.edit_mode.set(EditMode::Inactive);
         })
     };
@@ -641,6 +642,14 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
 
     html! {
         <div class="tp__source-editor-form tp__config-view-page">
+         if *filter_builder_open {
+             <TargetFilterBuilder
+                 filter={target_form_state.form.filter.clone()}
+                 rules={Some((*local_filter_rules).clone())}
+                 on_result={handle_filter_builder_result}
+                 readonly={!props.allow_write}
+             />
+         }
          <div class="tp__source-editor-form_toolbar tp__form-page__toolbar">
          <TextButton class="secondary" name="cancel_input"
                 icon="Cancel"

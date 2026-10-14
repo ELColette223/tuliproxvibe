@@ -21,6 +21,12 @@ pub fn Setup() -> Html {
     let setup_password_repeat = use_state(String::new);
     let config_forms = use_state(SetupConfigFormState::default);
     let sources = use_state(|| config_ctx.config.as_ref().map_or_else(Default::default, |cfg| cfg.sources.clone()));
+    let filter_rules =
+        use_state(|| {
+            config_ctx.config.as_ref().and_then(|cfg| cfg.templates.as_ref()).map_or_else(Vec::new, |definition| {
+                shared::foundation::managed_filter_rules(Some(&definition.templates))
+            })
+        });
     let api_users = use_state(|| config_ctx.api_proxy.as_ref().map_or_else(Vec::new, |cfg| cfg.user.clone()));
     let is_submitting = use_state(|| false);
     let is_completed = use_state(|| false);
@@ -68,6 +74,7 @@ pub fn Setup() -> Html {
         setup_password_repeat: setup_password_repeat.clone(),
         config_forms: config_forms.clone(),
         sources: sources.clone(),
+        filter_rules: filter_rules.clone(),
         api_users: api_users.clone(),
         is_submitting: is_submitting.clone(),
         is_completed: is_completed.clone(),

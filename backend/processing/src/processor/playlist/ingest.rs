@@ -4,10 +4,11 @@ use super::{
     *,
 };
 
-// Inputs disabled in the config are always disabled.
-// Command-line targets can only restrict enabled inputs, never enable them.
-pub(crate) fn is_input_enabled(input: &ConfigInput, user_targets: &ProcessTargets) -> bool {
-    input.enabled && (!user_targets.enabled || user_targets.has_input(input.id))
+// A normal run never enables disabled inputs; only an explicit offline target
+// rebuild may consume their already-persisted playlists.
+pub(crate) fn is_input_enabled(input: &ConfigInput, user_targets: &ProcessTargets, offline_target_reprocess: bool) -> bool {
+    let explicitly_selected_offline = offline_target_reprocess && user_targets.enabled && !user_targets.targets.is_empty();
+    (input.enabled || explicitly_selected_offline) && (!user_targets.enabled || user_targets.has_input(input.id))
 }
 
 pub(crate) async fn with_sequential_group<T>(
@@ -1263,7 +1264,7 @@ pub(crate) async fn process_input_job_inner<E: EventSink + Clone + 'static, M: M
         error!("Failed to persist input playlist {}", input.name);
         download.errors.push(err);
     }
-    let epg = if input_type == InputType::Library || download.partial || storage_failed {
+    let epg = if ctx.offline_target_reprocess || input_type == InputType::Library || download.partial || storage_failed {
         None
     } else {
         download_input_epg(ctx, input, &mut download.errors).await
@@ -1383,7 +1384,7 @@ pub(crate) async fn process_source<E: EventSink + Clone + 'static, M: MetadataUp
                 error!("Input {input_name} referenced by source {source_idx} does not exist");
                 continue;
             };
-            if is_input_enabled(input, &ctx.user_targets) {
+            if is_input_enabled(input, &ctx.user_targets, ctx.offline_target_reprocess) {
                 enabled_inputs.push((index, input));
             } else {
                 disabled_inputs.push(input.name.clone());
@@ -1542,6 +1543,51 @@ pub(crate) async fn download_input<E: EventSink + Clone + 'static, M: MetadataUp
             errors: Vec::new(),
             source: MemoryPlaylistSource::default().into_source(),
             storage_error: None,
+            partial: false,
+            quality_rejections: Vec::new(),
+            accepted_empty_clusters: ClusterFlags::empty(),
+            input_telemetry: None,
+        };
+    }
+
+    if ctx.offline_target_reprocess {
+        let _input_lock = ctx.get_input_lock(&input.name).await;
+        let storage_dir = ctx.config.config.load().storage_dir.clone();
+        let storage_path = build_input_storage_path(&input.name, &storage_dir);
+        let cache = if input.get_download_input_type().is_xtream() {
+            let clusters: Vec<_> = PIPELINE_TRANSPARENCY_CLUSTERS
+                .into_iter()
+                .filter(|cluster| cluster_is_configured(input, *cluster))
+                .collect();
+            if !clusters.iter().any(|cluster| xtream_get_file_path(&storage_path, *cluster).is_file()) {
+                Err(TuliproxError::RepositoryPlaylist(format!(
+                    "No persisted Xtream playlist cache for input '{}'",
+                    input.name
+                )))
+            } else {
+                load_input_xtream_playlist(&ctx.config, &storage_path, &clusters).await
+                    .map(|groups| MemoryPlaylistSource::new(groups).into_source())
+            }
+        } else {
+            load_input_playlist(&ctx.config, input, None).await
+        };
+        let (source, storage_error) = match cache {
+            Ok(mut source) => {
+                if source.is_empty() {
+                    (MemoryPlaylistSource::default().into_source(), Some(TuliproxError::RepositoryPlaylist(
+                        format!("Persisted playlist cache for input '{}' is empty", input.name),
+                    )))
+                } else {
+                    (filter_skipped_clusters_from_source(source, input), None)
+                }
+            }
+            Err(error) => (MemoryPlaylistSource::default().into_source(), Some(error)),
+        };
+        return InputDownloadResult {
+            authoritative_library: false,
+            errors: Vec::new(),
+            source,
+            storage_error,
             partial: false,
             quality_rejections: Vec::new(),
             accepted_empty_clusters: ClusterFlags::empty(),
@@ -1895,6 +1941,7 @@ pub struct PlaylistProcessingContext<E: EventSink, M: MetadataUpdateSink = NoopM
     /// Optional request-local behavior for one manually selected input.
     pub input_refresh: Option<InputRefreshOverride>,
     pub(crate) library_update_mode: LibraryUpdateMode,
+    pub(crate) offline_target_reprocess: bool,
 }
 
 // Written out rather than derived: `#[derive(Clone)]` would demand `M: Clone`,
@@ -1921,6 +1968,7 @@ impl<E: EventSink + Clone, M: MetadataUpdateSink> Clone for PlaylistProcessingCo
             had_quality_rejections: Arc::clone(&self.had_quality_rejections),
             input_refresh: self.input_refresh,
             library_update_mode: self.library_update_mode,
+            offline_target_reprocess: self.offline_target_reprocess,
         }
     }
 }

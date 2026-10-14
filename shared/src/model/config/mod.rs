@@ -48,6 +48,7 @@ mod web_ui;
 
 mod disk_alert;
 mod favourites;
+mod filter_rule;
 mod library;
 mod media_server_catalog;
 mod network_access;
@@ -67,6 +68,7 @@ pub use disk_alert::*;
 pub use epg::*;
 pub use epg_smart_match::*;
 pub use favourites::*;
+pub use filter_rule::*;
 pub use geoip::*;
 pub use hdhomerun::*;
 pub use hls::*;

@@ -23,7 +23,9 @@ use yew::prelude::*;
 use yew_hooks::{use_async_with_options, UseAsyncOptions};
 use yew_router::prelude::*;
 
-const STATIC_ASSET_VERSION: &str = env!("CARGO_PKG_VERSION");
+// Version assets by crate version plus a build-time timestamp so updated
+// translations/icons are picked up even when the crate version is unchanged.
+const STATIC_ASSET_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-", env!("BUILD_TIMESTAMP"));
 
 /// App routes
 #[derive(Routable, Debug, Clone, PartialEq, Eq)]

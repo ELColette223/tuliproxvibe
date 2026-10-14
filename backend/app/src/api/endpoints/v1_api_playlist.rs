@@ -594,6 +594,98 @@ async fn playlist_update(
     }
 }
 
+async fn playlist_target_reprocess(
+    axum::extract::Path(target_name): axum::extract::Path<String>,
+    axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
+) -> impl axum::response::IntoResponse + Send {
+    let sources = app_state.app_config.sources.load();
+    let target_exists = sources.sources.iter().any(|s| s.targets.iter().any(|t| t.name == target_name));
+    if !target_exists {
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            axum::Json(json!({"error": format!("Target '{}' not found", target_name)})),
+        )
+            .into_response();
+    }
+
+    let target_names = vec![target_name.clone()];
+    let proc_targets = match sources.validate_targets(Some(&target_names)) {
+        Ok(t) => Arc::new(t),
+        Err(err) => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                axum::Json(json!({"error": err.to_string()})),
+            )
+                .into_response();
+        }
+    };
+
+    let mut pre_processed_inputs: std::collections::HashSet<Arc<str>> = std::collections::HashSet::new();
+    for source in &sources.sources {
+        for target in &source.targets {
+            if target.name == target_name {
+                for input in &source.inputs {
+                    pre_processed_inputs.insert(input.clone());
+                }
+            }
+        }
+    }
+    drop(sources);
+
+    let Some(permit) = app_state.update_guard.acquire_playlist_lock().await else {
+        return (
+            axum::http::StatusCode::CONFLICT,
+            axum::Json(json!({"error": "Playlist update lock is currently busy"})),
+        )
+            .into_response();
+    };
+
+    let client = (**app_state.http_client.load()).clone();
+    let run_id = PlaylistUpdateRunId::generate();
+
+    let summary = crate::processing::processor::exec_processing(
+        crate::processing::processor::ProcessingRun::for_run(
+            run_id,
+            client,
+            Arc::clone(&app_state.app_config),
+            proc_targets,
+            Arc::clone(&app_state.event_manager),
+        )
+        .with_playlist_state(Arc::clone(&app_state.playlists))
+        .with_update_guard(app_state.update_guard.clone())
+        .with_disabled_headers(app_state.get_disabled_headers())
+        .with_provider_manager(Arc::clone(&app_state.active_provider))
+        .with_metadata_manager(Arc::clone(&app_state.metadata_manager))
+        .with_pre_processed_inputs(pre_processed_inputs)
+        .with_offline_target_reprocess()
+        .with_acquired_permit(permit),
+    )
+    .await;
+
+    if !target_reprocess_published(&summary, &target_name) {
+        let detail = summary.error.as_deref().unwrap_or("No successful publication was recorded for this target");
+        return (
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            axum::Json(json!({"error": format!("Target '{target_name}' was saved but not applied: {detail}")})),
+        )
+            .into_response();
+    }
+
+    (
+        axum::http::StatusCode::OK,
+        axum::Json(json!({
+            "status": "ok",
+            "message": format!("Target '{}' reprocessed from local cache and playlist updated", target_name)
+        })),
+    )
+        .into_response()
+}
+
+fn target_reprocess_published(summary: &shared::model::PlaylistUpdateSummary, target_name: &str) -> bool {
+    summary.state == shared::model::PlaylistUpdateState::Success
+        && summary.stats.iter().flat_map(|source| &source.targets).any(|target| target.name == target_name && target.success)
+}
+
 fn resolve_manual_playlist_update_targets(
     sources: &SourcesConfig,
     request: &PlaylistUpdateRequestDto,
@@ -1421,6 +1513,7 @@ pub fn v1_api_playlist_register_protected(router: Router<Arc<AppState>>) -> axum
         .route("/playlist/resolve_url", axum::routing::post(playlist_resolve_url))
         .route("/playlist/update", axum::routing::post(playlist_update))
         .route("/playlist/update/status", axum::routing::get(playlist_update_status))
+        .route("/playlist/target/{target_name}/reprocess", axum::routing::post(playlist_target_reprocess))
         .route("/playlist/epg", axum::routing::post(playlist_epg))
         .route("/playlist/epg/stream", axum::routing::post(stream_epg_api))
         .route("/playlist/live", axum::routing::post(playlist_content_live))
@@ -1458,6 +1551,7 @@ pub fn v1_api_playlist_register_with_permissions(
 
     let write_routes = Router::new()
         .route("/update", axum::routing::post(playlist_update))
+        .route("/target/{target_name}/reprocess", axum::routing::post(playlist_target_reprocess))
         .layer(permission_layer!(app_state, Permission::PlaylistWrite));
 
     let epg_routes = Router::new()
@@ -1507,7 +1601,29 @@ async fn playlist_episode_item(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_provider_url_for_request;
+    use super::{resolve_provider_url_for_request, target_reprocess_published};
+
+    #[test]
+    fn target_reprocess_requires_successful_publication_of_requested_target() {
+        use shared::model::{PlaylistUpdateState, PlaylistUpdateSummary, SourceStats, TargetStats};
+
+        let mut summary = PlaylistUpdateSummary::state_only(PlaylistUpdateState::Success);
+        assert!(!target_reprocess_published(&summary, "example"));
+
+        summary.stats.push(SourceStats { inputs: vec![], targets: vec![TargetStats::failure("example")] });
+        assert!(!target_reprocess_published(&summary, "example"));
+
+        summary.stats[0].targets = vec![TargetStats::success("other")];
+        assert!(!target_reprocess_published(&summary, "example"));
+
+        summary.stats[0].targets.push(TargetStats::success("example"));
+        assert!(target_reprocess_published(&summary, "example"));
+
+        summary.state = PlaylistUpdateState::Partial;
+        assert!(!target_reprocess_published(&summary, "example"));
+        summary.state = PlaylistUpdateState::Failure;
+        assert!(!target_reprocess_published(&summary, "example"));
+    }
     use crate::{
         api::model::{
             empty_resource_client_set, recording::recording_source_resolution::resolve_recording_config,

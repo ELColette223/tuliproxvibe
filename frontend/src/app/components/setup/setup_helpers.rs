@@ -138,6 +138,15 @@ pub fn build_setup_app_config(
     form_state: &SetupConfigFormState,
     sources: shared::model::SourcesConfigDto,
 ) -> AppConfigDto {
+    build_setup_app_config_with_filter_rules(config_ctx, form_state, sources, None)
+}
+
+pub fn build_setup_app_config_with_filter_rules(
+    config_ctx: &ConfigContext,
+    form_state: &SetupConfigFormState,
+    sources: shared::model::SourcesConfigDto,
+    filter_rules: Option<&[shared::model::ManagedFilterRule]>,
+) -> AppConfigDto {
     let mut app_config = config_ctx.config.as_ref().map_or_else(AppConfigDto::default, |cfg| cfg.as_ref().clone());
     if app_config.api_proxy.is_none() {
         app_config.api_proxy =
@@ -169,6 +178,18 @@ pub fn build_setup_app_config(
     apply_setup_log_defaults(&mut app_config, !log_modified);
     apply_setup_reverse_proxy_defaults(&mut app_config, !reverse_proxy_modified, setup_rewrite_secret.as_deref());
     app_config.sources = sources;
+    if let Some(filter_rules) = filter_rules {
+        let mut templates = app_config.templates.as_ref().map_or_else(Vec::new, |definition| {
+            definition.templates.iter().filter(|template| !template.is_managed_filter_rule()).cloned().collect()
+        });
+        match shared::foundation::managed_filter_rule_templates(filter_rules) {
+            Ok(managed) => templates.extend(managed),
+            Err(err) => {
+                log::error!("Failed to compile setup filter rules: {err}");
+            }
+        }
+        app_config.templates = Some(shared::model::TemplateDefinitionDto { templates });
+    }
     app_config
 }
 

@@ -1,5 +1,7 @@
 use crate::{
-    model::{PlaylistItemType, ProxyConfigDto, SearchRequest, StreamProperties, UiPlaylistItem, VirtualId, XtreamCluster},
+    model::{
+        PlaylistItemType, ProxyConfigDto, SearchRequest, StreamProperties, UiPlaylistItem, VirtualId, XtreamCluster,
+    },
     utils::{arc_str_option_serde, arc_str_serde},
 };
 use serde::{Deserialize, Serialize};

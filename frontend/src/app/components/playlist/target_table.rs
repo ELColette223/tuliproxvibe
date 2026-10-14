@@ -2,8 +2,9 @@ use crate::{
     app::{
         components::{
             convert_bool_to_chip_style, make_translated_header_callback, menu_item::MenuItem, popup_menu::PopupMenu,
-            AppIcon, Chip, FilterView, PlaylistMappings, PlaylistProcessing, RevealContent, Table, TableDefinition,
-            TargetOptions, TargetOutput, TargetRename, TargetSort, TargetWatch, ToggleSwitch,
+            AppIcon, Chip, PlaylistMappings, PlaylistProcessing, RevealContent, Table, TableDefinition,
+            TargetOptions, TargetOutput,
+            TargetRename, TargetSort, TargetWatch, ToggleSwitch, bouquet_editor::VisualTargetFilter,
         },
         ConfigContext,
     },
@@ -13,7 +14,7 @@ use crate::{
     model::DialogResult,
     services::DialogService,
 };
-use shared::model::{ConfigTargetDto, SortOrder};
+use shared::model::{permission::Permission, ConfigTargetDto, SortOrder};
 use std::{rc::Rc, str::FromStr};
 use yew::{platform::spawn_local, prelude::*};
 
@@ -46,6 +47,7 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
     let popup_anchor_ref = use_state(|| None::<web_sys::Element>);
     let popup_is_open = use_state(|| false);
     let selected_dto = use_state(|| None::<Rc<ConfigTargetDto>>);
+    let visual_filter_target = use_state(|| None::<String>);
 
     let handle_popup_close = {
         let set_is_open = popup_is_open.clone();
@@ -72,6 +74,8 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
     let render_data_cell = {
         let translator = translate.clone();
         let popup_onclick = handle_popup_onclick.clone();
+        let visual_filter_target = visual_filter_target.clone();
+        let can_read_visual_filter = services.auth.has_permission(Permission::PlaylistRead);
         Callback::<(usize, usize, Rc<ConfigTargetDto>), Html>::from(
             move |(row, col, dto): (usize, usize, Rc<ConfigTargetDto>)| match col {
                 0 => {
@@ -97,21 +101,25 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
                     |_s| html! { <RevealContent><TargetSort target={Rc::clone(&dto)} /></RevealContent> },
                 ),
                 6 => {
-                    let filters = [
-                        (translator.t("LABEL.FILTER"), dto.filter.t_processing.as_ref()),
-                        (translator.t("LABEL.PERSIST_FILTER"), dto.filter.t_persist.as_ref()),
-                    ];
-                    let rendered = filters.into_iter().filter_map(|(label, filter)| {
-                        filter.map(|filter| {
-                            html! {
-                                <div>
-                                    <strong>{label}</strong>
-                                    <FilterView pretty={true} filter={filter.clone()} />
-                                </div>
-                            }
-                        })
-                    });
-                    html! { <RevealContent>{ for rendered }</RevealContent> }
+                    let filter_label = {
+                        let s = translator.t("FILTER_BUILDER.VISUAL_TITLE");
+                        if s.starts_with("Key '") { "Choose what stays in this target".to_string() } else { s }
+                    };
+                    if can_read_visual_filter {
+                        let visual_filter_target = visual_filter_target.clone();
+                        let target_name = dto.name.clone();
+                        html! {
+                            <button type="button" class="tp__filter-summary" onclick={Callback::from(move |event: MouseEvent| {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                visual_filter_target.set(Some(target_name.clone()));
+                            })}>
+                                <span class="tp__filter-summary__stage"><strong>{ translator.t("LABEL.FILTER") }</strong>{ filter_label }</span>
+                            </button>
+                        }
+                    } else {
+                        html! { <span>{ filter_label }</span> }
+                    }
                 }
                 7 => dto.rename.as_ref().map_or_else(
                     || html! {},
@@ -217,12 +225,22 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
             if let Some(definition) = table_definition.as_ref() {
                 html! {
                   <>
-                   <Table::<ConfigTargetDto> definition={definition.clone()} />
+                   if visual_filter_target.is_none() {
+                       <Table::<ConfigTargetDto> definition={definition.clone()} />
+                   }
                     <PopupMenu is_open={*popup_is_open} anchor_ref={(*popup_anchor_ref).clone()} on_close={handle_popup_close}>
                         <MenuItem icon="Refresh" name={TargetTableAction::Refresh.to_string()} label={translate.t("LABEL.REFRESH")} onclick={&handle_menu_click} class="tp__update_action"></MenuItem>
                         <hr/>
                         <MenuItem icon="Delete" name={TargetTableAction::Delete.to_string()} label={translate.t("LABEL.DELETE")} onclick={&handle_menu_click} class="tp__delete_action"></MenuItem>
                     </PopupMenu>
+                    if let Some(target_name) = visual_filter_target.as_ref() {
+                        <div class="tp__target-table__visual-filter">
+                            <VisualTargetFilter target_name={target_name.clone()} on_back={{
+                                let visual_filter_target = visual_filter_target.clone();
+                                Callback::from(move |_| visual_filter_target.set(None))
+                            }} />
+                        </div>
+                    }
                 </>
                   }
             } else {

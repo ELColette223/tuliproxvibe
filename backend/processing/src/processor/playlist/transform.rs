@@ -489,6 +489,10 @@ pub(crate) fn execute_pipeline_on_groups(
     execute_pipeline_on_items(groups.into_iter().flat_map(|group| group.channels).collect(), target, pipe)
 }
 
+/// Raw categories seen across every input, before target-local bouquet rejection.
+/// A category can occur in multiple inputs, so its initial IDs are a union.
+pub(crate) type BouquetSnapshot = IndexMap<(XtreamCluster, String), HashSet<String>>;
+
 pub(crate) fn execute_pipe<'a>(
     target: &ConfigTarget,
     pipe: &ProcessingPipe,
@@ -496,6 +500,7 @@ pub(crate) fn execute_pipe<'a>(
     duplicates: &mut HashSet<UUIDType>,
     consume_source: bool,
     bouquet_filter: Option<&tuliprox_core::model::TargetBouquetFilter>,
+    mut bouquet_snapshot: Option<&mut BouquetSnapshot>,
 ) -> Result<(FetchedPlaylist<'a>, PipelineOutcome), TuliproxError> {
     let mut source = if consume_source {
         if fpl.is_memory() {
@@ -529,7 +534,14 @@ pub(crate) fn execute_pipe<'a>(
         if is_memory {
             item.header.freeze_input_stream_id();
         }
-        if bouquet_filter.is_some_and(|filter| !filter.allows(item.header.xtream_cluster, &item.header.group)) {
+        // Preserve the source UUID before filtering, mapping, or deduplication.
+        let channel_id = item.get_uuid().to_string();
+        if let Some(snapshot) = bouquet_snapshot.as_deref_mut() {
+            snapshot.entry((item.header.xtream_cluster, item.header.group.to_string())).or_default().insert(channel_id.clone());
+        }
+        if bouquet_filter.is_some_and(|filter| {
+            !filter.allows_channel(item.header.xtream_cluster, &item.header.group, &channel_id)
+        }) {
             rejected += 1;
             continue;
         }

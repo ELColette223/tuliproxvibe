@@ -351,6 +351,7 @@ mod tests {
         let templates = vec![PatternTemplate {
             name: "PREFIX".to_string(),
             value: TemplateValue::Single("Channel".to_string()),
+            filter_rule: None,
             placeholder: "!PREFIX!".to_string(),
         }];
 
@@ -369,11 +370,13 @@ mod tests {
                 PatternTemplate {
                     name: "BASE".to_string(),
                     value: TemplateValue::Single("news".to_string()),
+                    filter_rule: None,
                     placeholder: String::new(),
                 },
                 PatternTemplate {
                     name: "CHAIN".to_string(),
                     value: TemplateValue::Single("!BASE!-live".to_string()),
+                    filter_rule: None,
                     placeholder: String::new(),
                 },
             ]),

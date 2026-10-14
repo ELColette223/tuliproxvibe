@@ -958,9 +958,9 @@ impl ConfigInputDto {
                     self.name
                 )));
             }
-            proxy.prepare_input_proxy().map_err(|err| {
-                TuliproxError::ConfigInput(format!("invalid proxy for input '{}': {err}", self.name))
-            })?;
+            proxy
+                .prepare_input_proxy()
+                .map_err(|err| TuliproxError::ConfigInput(format!("invalid proxy for input '{}': {err}", self.name)))?;
         }
         if let Some(options) = self.options.as_ref() {
             if options.disable_hls_streaming && !self.input_type.is_xtream() {

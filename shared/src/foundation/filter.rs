@@ -29,48 +29,17 @@ impl PartialEq for CompiledRegex {
 }
 
 #[derive(Parser)]
-#[grammar_inline = r#"
-WHITESPACE = _{ " " | "\t" | "\r" | "\n"}
-field = { ^"group" | ^"title" | ^"name" | ^"genre" | ^"url" | ^"input" | ^"caption" | ^"epgid"}
-numeric_field = { ^"chno" | ^"quality" }
-and = { ^"and" }
-or = { ^"or" }
-not = { ^"not" }
-regexp = @{ "\"" ~ ( "\\\"" | (!"\"" ~ ANY) )* ~ "\"" }
-number = @{ ASCII_DIGIT+ }
-type_value = { ^"live" | ^"vod" | ^"movie" | ^"series" }
-type_comparison = { ^"type" ~ "=" ~ type_value }
-field_comparison_value = _{ regexp }
-field_comparison = { field ~ "~" ~ field_comparison_value }
-str_op = { "!=" | "=" | ^"contains" | ^"startswith" }
-string_comparison = { field ~ str_op ~ regexp }
-presence_negation = { ^"not" }
-presence_op = { (^"is" ~ presence_negation?) | "!=" | "=" }
-presence_comparison = { field ~ presence_op ~ ^"empty" }
-num_op = { ">=" | "<=" | "!=" | ">" | "<" | "=" }
-numeric_comparison = { numeric_field ~ num_op ~ number }
-set_values = { regexp ~ ("," ~ regexp)* }
-set_comparison = { field ~ ^"in" ~ "[" ~ set_values ~ "]" }
-comparison = { field_comparison | type_comparison | numeric_comparison | set_comparison | presence_comparison | string_comparison }
-bool_op = { and | or }
-expr_group = { "(" ~ expr ~ ")" }
-basic_expr = _{ comparison | expr_group }
-not_expr = _{ not ~ basic_expr }
-expr = {
-  not_expr ~ (bool_op ~ expr)?
-  | basic_expr ~ (bool_op ~ expr)*
-}
-stmt = { expr ~ (bool_op ~ expr)* }
-main = _{ SOI ~ stmt ~ EOI }
-"#]
+#[grammar = "foundation/filter.pest"]
 struct FilterParser;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum UnaryOperator {
     Not,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum StringOperator {
     Eq,
     NotEq,
@@ -78,7 +47,8 @@ pub enum StringOperator {
     StartsWith,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum PresenceOperator {
     IsEmpty,
     IsNotEmpty,
@@ -104,7 +74,8 @@ impl std::fmt::Display for StringOperator {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum NumericOperator {
     Eq,
     NotEq,
@@ -127,7 +98,8 @@ impl std::fmt::Display for NumericOperator {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum BinaryOperator {
     And,
     Or,
@@ -1319,11 +1291,13 @@ mod tests {
             PatternTemplate {
                 name: "A".to_string(),
                 value: TemplateValue::Multi(vec!["a1".to_string(), "a2".to_string()]),
+                filter_rule: None,
                 placeholder: String::new(),
             },
             PatternTemplate {
                 name: "SEQ".to_string(),
                 value: TemplateValue::Multi(vec!["!A!".to_string(), "literal".to_string()]),
+                filter_rule: None,
                 placeholder: String::new(),
             },
         ];
@@ -1340,16 +1314,19 @@ mod tests {
             PatternTemplate {
                 name: "UK".to_string(),
                 value: TemplateValue::Multi(vec!["uk1".to_string(), "uk2".to_string()]),
+                filter_rule: None,
                 placeholder: String::new(),
             },
             PatternTemplate {
                 name: "US".to_string(),
                 value: TemplateValue::Multi(vec!["us1".to_string(), "us2".to_string(), "us3".to_string()]),
+                filter_rule: None,
                 placeholder: String::new(),
             },
             PatternTemplate {
                 name: "SEQ".to_string(),
                 value: TemplateValue::Multi(vec!["!UK!".to_string(), "!US!".to_string(), "adult".to_string()]),
+                filter_rule: None,
                 placeholder: String::new(),
             },
         ];
@@ -1376,11 +1353,13 @@ mod tests {
             PatternTemplate {
                 name: "BASE".to_string(),
                 value: TemplateValue::Multi(vec!["a".to_string(), "b".to_string()]),
+                filter_rule: None,
                 placeholder: String::new(),
             },
             PatternTemplate {
                 name: "URL".to_string(),
                 value: TemplateValue::Single("!BASE!/stream".to_string()),
+                filter_rule: None,
                 placeholder: String::new(),
             },
         ];

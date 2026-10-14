@@ -26,6 +26,8 @@ fn resolve_close_result(actions: &DialogActions) -> Option<DialogResult> {
 #[derive(Properties, PartialEq)]
 pub struct ContentDialogProps {
     pub content: Html,
+    #[prop_or_default]
+    pub class: String,
     pub actions: DialogActions,
     pub on_confirm: Callback<DialogResult>,
     #[prop_or(true)]
@@ -86,7 +88,7 @@ pub fn ContentDialog(props: &ContentDialogProps) -> Html {
     html! {
         <CustomDialog
             open={*is_open}
-            class="tp__content-dialog"
+            class={Some(format!("tp__content-dialog {}", props.class))}
             modal=true
             close_on_backdrop_click={props.close_on_backdrop_click}
             on_close={on_close}

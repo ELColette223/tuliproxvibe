@@ -1,6 +1,7 @@
 use super::setup_helpers::{
-    apply_setup_api_users, build_setup_app_config, collect_setup_warnings, format_setup_error_message,
-    move_to_previous_step, prepare_config_and_api_proxy, prepare_sources, validate_credentials,
+    apply_setup_api_users, build_setup_app_config_with_filter_rules, collect_setup_warnings,
+    format_setup_error_message, move_to_previous_step, prepare_config_and_api_proxy, prepare_sources,
+    validate_credentials,
 };
 use crate::{
     app::{
@@ -58,8 +59,12 @@ pub fn FinishStep() -> Html {
                 return;
             }
 
-            let mut app_config =
-                build_setup_app_config(&config_ctx, &setup_ctx.config_forms, (*setup_ctx.sources).clone());
+            let mut app_config = build_setup_app_config_with_filter_rules(
+                &config_ctx,
+                &setup_ctx.config_forms,
+                (*setup_ctx.sources).clone(),
+                Some(&setup_ctx.filter_rules),
+            );
             apply_setup_api_users(&mut app_config, setup_ctx.api_users.as_ref());
             for warning in collect_setup_warnings(&app_config) {
                 services.toastr.warning(warning);

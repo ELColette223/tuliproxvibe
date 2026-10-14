@@ -9,10 +9,11 @@ use shared::{
     concat_string,
     defaults::{generate_default_access_secret, generate_default_encrypt_secret, TEMPLATE_FILE},
     error::TuliproxError,
-    foundation::prepare_templates,
+    foundation::{managed_filter_rule_templates, prepare_templates},
     model::{
         ApiProxyConfigDto, AppConfigDto, ConfigDto, ConfigInputAliasDto, ConfigPaths, HdHomeRunDeviceOverview,
-        InputType, PatternTemplate, PlansConfigDto, Prepare, SourcesConfigDto, TargetUserDto, TemplateDefinitionDto,
+        InputType, ManagedFilterRule, PatternTemplate, PlansConfigDto, Prepare, SourcesConfigDto, TargetUserDto,
+        TemplateDefinitionDto,
         UserPlanDto,
     },
     utils::PROVIDER_SCHEME_PREFIX,
@@ -933,6 +934,7 @@ pub async fn save_templates_config(
 async fn build_templates_to_persist(
     app_config: &Arc<AppConfig>,
     dto: &SourcesConfigDto,
+    filter_rules: Option<&[ManagedFilterRule]>,
 ) -> Result<Option<TemplateDefinitionDto>, TuliproxError> {
     let mut new_dto = dto.clone();
     let config = app_config.config.load();
@@ -964,7 +966,17 @@ async fn build_templates_to_persist(
     let template_file_path = paths.template_file_path.as_deref().or(config.template_path.as_deref());
     let template_bundle =
         read_templates(template_file_path, true, source_inline_templates, mapping_inline_templates.as_deref())?;
-    let prepared_templates = template_bundle.prepared;
+    let prepared_templates = if let Some(rules) = filter_rules {
+        let existing_templates = template_bundle
+            .definition
+            .map(|definition| definition.templates)
+            .unwrap_or_default();
+        let merged = merge_managed_filter_rule_templates(existing_templates, rules)?;
+        let mut templates = merged.templates;
+        Some(prepare_templates(&mut templates)?)
+    } else {
+        template_bundle.prepared
+    };
 
     new_dto.prepare(true, config.get_hdhr_device_overview().as_ref(), prepared_templates.as_deref())?;
 
@@ -985,7 +997,81 @@ pub async fn validate_source_config_for_persist(
     app_config: &Arc<AppConfig>,
     dto: &SourcesConfigDto,
 ) -> Result<Option<TemplateDefinitionDto>, TuliproxError> {
-    build_templates_to_persist(app_config, dto).await
+    build_templates_to_persist(app_config, dto, None).await
+}
+
+pub async fn validate_source_config_with_filter_rules_for_persist(
+    app_config: &Arc<AppConfig>,
+    dto: &SourcesConfigDto,
+    filter_rules: Option<&[ManagedFilterRule]>,
+) -> Result<Option<TemplateDefinitionDto>, TuliproxError> {
+    build_templates_to_persist(app_config, dto, filter_rules).await
+}
+
+pub fn merge_managed_filter_rule_templates(
+    existing: impl IntoIterator<Item = PatternTemplate>,
+    rules: &[ManagedFilterRule],
+) -> Result<TemplateDefinitionDto, TuliproxError> {
+    let mut templates = existing
+        .into_iter()
+        .filter(|template| !template.is_managed_filter_rule())
+        .collect::<Vec<_>>();
+    templates.extend(
+        managed_filter_rule_templates(rules).map_err(|error| TuliproxError::FilterParse(error.to_string()))?,
+    );
+    let mut prepared = templates.clone();
+    prepare_templates(&mut prepared)?;
+    Ok(TemplateDefinitionDto { templates })
+}
+
+pub fn managed_filter_rule_template_file(app_config: &Arc<AppConfig>) -> String {
+    let config = app_config.config.load();
+    let paths = app_config.paths.load();
+    let configured = paths.template_file_path.as_deref().or(config.template_path.as_deref());
+    let resolved = utils::resolve_template_file_path(&paths.config_path, configured);
+    let resolved_path = PathBuf::from(&resolved);
+    if resolved_path.is_dir()
+        || configured.is_some_and(|path| path.ends_with('/') || path.ends_with('\\') || Path::new(path).extension().is_none())
+    {
+        resolved_path.join("tuliprox-filter-rules.yml").to_string_lossy().to_string()
+    } else {
+        resolved
+    }
+}
+
+pub async fn build_managed_filter_rule_definition(
+    app_config: &Arc<AppConfig>,
+    rules: &[ManagedFilterRule],
+    additional_templates: Option<&[PatternTemplate]>,
+) -> Result<(String, TemplateDefinitionDto), TuliproxError> {
+    let path = managed_filter_rule_template_file(app_config);
+    let mut existing = if Path::new(&path).is_file() {
+        read_templates_file(&path, true)?.map(|(_, definition)| definition.templates).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    if let Some(additional_templates) = additional_templates {
+        existing.extend(additional_templates.iter().cloned());
+    }
+    Ok((path, merge_managed_filter_rule_templates(existing, rules)?))
+}
+
+pub async fn persist_templates_config_to_path(
+    app_config: &Arc<AppConfig>,
+    file_path: &str,
+    template_definition: &TemplateDefinitionDto,
+) -> Result<(), TuliproxError> {
+    let config = app_config.config.load();
+    save_templates_config(file_path, config.get_backup_dir().as_ref(), template_definition).await
+}
+
+pub fn template_persist_file(app_config: &Arc<AppConfig>) -> String {
+    let config = app_config.config.load();
+    let paths = app_config.paths.load();
+    utils::resolve_template_persist_file_path(
+        paths.template_file_path.as_deref().or(config.template_path.as_deref()),
+        &paths.config_path,
+    )
 }
 
 pub async fn persist_templates_config(
@@ -993,11 +1079,7 @@ pub async fn persist_templates_config(
     template_definition: &TemplateDefinitionDto,
 ) -> Result<(), TuliproxError> {
     let config = app_config.config.load();
-    let paths = app_config.paths.load();
-    let template_file = utils::resolve_template_persist_file_path(
-        paths.template_file_path.as_deref().or(config.template_path.as_deref()),
-        &paths.config_path,
-    );
+    let template_file = template_persist_file(app_config);
     save_templates_config(&template_file, config.get_backup_dir().as_ref(), template_definition).await
 }
 
