@@ -643,6 +643,18 @@ where
     Ok(())
 }
 
+fn catalog_source_for_input(input: &ConfigInput) -> Option<InputSource> {
+    let mut source: InputSource = input.into();
+    if is_input_expired(input.exp_date) {
+        let alias = input.get_enabled_aliases()?.into_iter().find(|alias| !is_input_expired(alias.exp_date))?;
+        source.url.clone_from(&alias.url);
+        source.username.clone_from(&alias.username);
+        source.password.clone_from(&alias.password);
+        source.provider = input.get_resolve_provider(&alias.url);
+    }
+    Some(source)
+}
+
 /// Downloads xtream clusters from a single source (either main input or staged input).
 async fn download_xtream_from_source<E: EventSink>(
     app_config: &Arc<AppConfig>,
@@ -771,7 +783,15 @@ async fn download_xtream_playlist_with_scope<E: EventSink>(
 
     if !main_clusters.is_empty() {
         check_alias_user_state(events, input);
-        let source: InputSource = input.into();
+        let Some(source) = catalog_source_for_input(input) else {
+            return PlaylistFetch {
+                failed_clusters: main_clusters.clone(),
+                ..PlaylistFetch::failed(TuliproxError::ConfigInput(format!(
+                    "No unexpired account available to fetch Xtream catalog for '{}'",
+                    input.name
+                )))
+            };
+        };
         let mut source_fetch = download_xtream_from_source(
             app_config,
             client,
@@ -912,15 +932,15 @@ pub fn create_vod_info_from_item(pli: &XtreamPlaylistItem) -> String {
 mod tests {
     use super::{
         apply_cluster_update_quality, apply_disk_cluster_publish_result, apply_in_memory_cluster_download,
-        create_vod_info_from_item, disk_cluster_quality_policy, input_btree_provider_id, requested_clusters,
-        XtreamDownloadScope,
+        catalog_source_for_input, create_vod_info_from_item, disk_cluster_quality_policy, input_btree_provider_id,
+        requested_clusters, XtreamDownloadScope,
     };
     use crate::provider::PlaylistFetch;
     use serde_json::Value;
     use shared::{
         error::TuliproxError,
         model::{
-            ConfigInputOptionsDto, ConfigInputUpdateQualityDto, InputType, PlaylistGroup, PlaylistItem,
+            ConfigInputAliasDto, ConfigInputOptionsDto, ConfigInputUpdateQualityDto, InputType, PlaylistGroup, PlaylistItem,
             PlaylistItemHeader, PlaylistItemType, ProxyType, UpdateQualityPolicy, XtreamCluster, XtreamPlaylistItem,
         },
         utils::Internable,
@@ -930,8 +950,8 @@ mod tests {
         Arc,
     };
     use tuliprox_core::model::{
-        ClusterForceUpdate, ClusterUpdateAcceptance, ClusterUpdateRejection, ConfigInput, ConfigInputFlags,
-        ConfigInputFlagsSet, ConfigInputOptions, ProxyUserCredentials,
+        ClusterForceUpdate, ClusterUpdateAcceptance, ClusterUpdateRejection, ConfigInput, ConfigInputAlias,
+        ConfigInputFlags, ConfigInputFlagsSet, ConfigInputOptions, ProxyUserCredentials,
     };
     use tuliprox_repository::{
         XtreamClusterPublishBatchResult, XtreamClusterPublishOutcome, XtreamClusterQualityPolicy,
@@ -985,6 +1005,45 @@ mod tests {
         let sink = RecordingSink::default();
         super::notify_account_expire_at(EXPIRY, None, &sink, "user", "provider");
         assert!(sink.states().is_empty());
+    }
+
+    #[test]
+    fn expired_root_catalog_uses_eligible_alias_without_changing_input_identity() {
+        let input = ConfigInput {
+            name: "erizadez79".intern(),
+            input_type: InputType::Xtream,
+            url: "https://provider.example".to_string(),
+            username: Some("expired-root".to_string()),
+            password: Some("root-password".to_string()),
+            exp_date: Some(1),
+            aliases: Some(vec![
+                ConfigInputAlias::from(&ConfigInputAliasDto {
+                    name: "expired-alias".intern(),
+                    username: Some("expired".to_string()),
+                    password: Some("expired-password".to_string()),
+                    url: "https://provider.example".to_string(),
+                    exp_date: Some(1),
+                    enabled: true,
+                    ..ConfigInputAliasDto::default()
+                }),
+                ConfigInputAlias::from(&ConfigInputAliasDto {
+                    name: "active-alias".intern(),
+                    username: Some("active".to_string()),
+                    password: Some("alias-password".to_string()),
+                    url: "https://provider.example".to_string(),
+                    enabled: true,
+                    ..ConfigInputAliasDto::default()
+                }),
+            ]),
+            ..ConfigInput::default()
+        };
+        let source = catalog_source_for_input(&input).expect("unexpired alias");
+        assert_eq!(source.name.as_ref(), input.name.as_ref());
+        assert_eq!(source.username.as_deref(), Some("active"));
+        assert_eq!(source.password.as_deref(), Some("alias-password"));
+
+        let no_alias = ConfigInput { aliases: None, ..input };
+        assert!(catalog_source_for_input(&no_alias).is_none());
     }
 
     fn options_with_flags(flags: &[ConfigInputFlags]) -> ConfigInputOptions {

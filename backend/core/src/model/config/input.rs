@@ -564,7 +564,12 @@ impl ConfigInput {
     fn apply_expiration(&mut self) {
         if is_input_expired(self.exp_date) {
             warn!("Account {} expired for provider: {}", self.username.as_ref().map_or("?", |s| s.as_str()), self.name);
-            self.enabled = false;
+            let has_usable_alias = self.aliases.as_ref().is_some_and(|aliases| {
+                aliases.iter().any(|alias| alias.enabled && !is_input_expired(alias.exp_date))
+            });
+            if !has_usable_alias {
+                self.enabled = false;
+            }
         }
     }
 
@@ -1122,6 +1127,40 @@ mod tests {
         assert_eq!(options.update_quality.threshold(XtreamCluster::Live), 95);
         assert_eq!(options.update_quality.threshold(XtreamCluster::Video), 90);
         assert_eq!(options.update_quality.threshold(XtreamCluster::Series), 85);
+    }
+
+    #[test]
+    fn expired_root_keeps_eligible_alias_pool_without_allocating_root() {
+        let mut input = ConfigInput::from(&ConfigInputDto {
+            name: Arc::from("pool"),
+            input_type: InputType::Xtream,
+            enabled: true,
+            url: "http://provider.example".to_string(),
+            username: Some("root".to_string()),
+            password: Some("root-pass".to_string()),
+            max_connections: 1,
+            exp_date: Some(1),
+            aliases: Some(vec![ConfigInputAliasDto {
+                name: Arc::from("alias"),
+                enabled: true,
+                url: "http://provider.example".to_string(),
+                username: Some("alias-user".to_string()),
+                password: Some("alias-pass".to_string()),
+                max_connections: 1,
+                ..Default::default()
+            }]),
+            ..Default::default()
+        });
+        input.prepare(&[]).expect("prepare expired root with valid alias");
+        assert!(input.enabled);
+        assert_eq!(input.exp_date, Some(1));
+        assert!(input.aliases.as_ref().expect("aliases")[0].enabled);
+
+        let mut no_alias = input.clone();
+        no_alias.aliases = None;
+        no_alias.enabled = true;
+        no_alias.prepare(&[]).expect("prepare expired root without alias");
+        assert!(!no_alias.enabled);
     }
 
     fn quality_options_dto() -> ConfigInputOptionsDto {

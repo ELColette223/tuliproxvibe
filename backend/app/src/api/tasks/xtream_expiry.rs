@@ -403,8 +403,15 @@ async fn persist_updates(app_state: &Arc<AppState>, updates: &[(&Account, i64)])
     let mut source_updates = Vec::new();
     let mut batch_updates = HashMap::<String, Vec<BatchExpDateUpdate>>::new();
     let mut updated_accounts = Vec::new();
+    let sources = app_state.app_config.sources.load();
     for (account, exp_date) in updates {
-        let disable = is_expired_at(exp_date, now);
+        let has_usable_alias = account.name == account.input_name
+            && sources.inputs.iter().find(|input| input.name == account.input_name).is_some_and(|input| {
+                input.aliases.as_ref().is_some_and(|aliases| {
+                    aliases.iter().any(|alias| alias.enabled && !tuliprox_core::model::is_input_expired(alias.exp_date))
+                })
+            });
+        let disable = is_expired_at(exp_date, now) && !has_usable_alias;
         if account.exp_date == Some(exp_date) && !disable {
             updated_accounts.push(account_key(account));
             continue;
@@ -422,6 +429,7 @@ async fn persist_updates(app_state: &Arc<AppState>, updates: &[(&Account, i64)])
                 Arc::clone(&account.input_name),
                 Arc::clone(&account.name),
                 exp_date,
+                disable,
             ));
         }
     }
@@ -430,16 +438,16 @@ async fn persist_updates(app_state: &Arc<AppState>, updates: &[(&Account, i64)])
     if !source_updates.is_empty() {
         let patches: Vec<SourcesYmlPatch> = source_updates
             .iter()
-            .map(|(_, input_name, account_name, exp_date)| SourcesYmlPatch::SetFetchedExpiry {
+            .map(|(_, input_name, account_name, exp_date, disable)| SourcesYmlPatch::SetFetchedExpiry {
                 input_name: Arc::clone(input_name),
                 account_name: Arc::clone(account_name),
                 exp_date: *exp_date,
-                disable: is_expired_at(*exp_date, now),
+                disable: *disable,
             })
             .collect();
         match execute_source_yml_patches(&app_state.app_config, sources_path, &patches).await {
             Ok(_) => {
-                updated_accounts.extend(source_updates.iter().map(|(key, _, _, _)| key.clone()));
+                updated_accounts.extend(source_updates.iter().map(|(key, _, _, _, _)| key.clone()));
             }
             Err(err) => {
                 // Failed patching leaves pending updates available for retry.

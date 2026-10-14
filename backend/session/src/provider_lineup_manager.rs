@@ -1088,6 +1088,52 @@ mod tests {
 
     fn dummy_callback(_: &Arc<str>, _: usize) {}
 
+    #[test]
+    fn expired_root_allocates_only_unexpired_alias_until_alias_capacity_is_full() {
+        let input_name = "expired_root_pool".intern();
+        let mut input = create_config_input(1, &input_name, 0, 0);
+        input.exp_date = Some(1);
+        let mut alias = create_config_input_alias(2, "http://alias.example", 1, 2);
+        alias.exp_date = Some(i64::MAX);
+        let alias_name = alias.name.clone();
+        input.aliases = Some(vec![alias]);
+
+        let events = Arc::new(EventManager::new());
+        let mut receiver = events.get_event_channel();
+        let manager = ProviderLineupManager::new(vec![Arc::new(input)], GracePeriodOptions::default(), &events);
+
+        // The expired root has higher priority and unlimited capacity; it must never be selected.
+        for _ in 0..2 {
+            match manager.acquire_connection_with_grace_override(&input_name, false) {
+                ProviderAllocation::Available(provider) => assert_eq!(provider.name, alias_name),
+                other => panic!("expected unexpired alias allocation, got {other:?}"),
+            }
+        }
+        assert_eq!(manager.provider_capacity(&input_name), Some((0, 0)));
+        assert_eq!(manager.provider_capacity(&alias_name), Some((2, 2)));
+
+        assert!(matches!(
+            manager.acquire_connection_with_grace_override(&input_name, false),
+            ProviderAllocation::Exhausted
+        ));
+        assert_eq!(manager.provider_capacity(&input_name), Some((0, 0)));
+        assert_eq!(manager.provider_capacity(&alias_name), Some((2, 2)));
+
+        let exhausted = std::iter::from_fn(|| receiver.try_recv().ok()).find_map(|event| match event {
+            EventMessage::ProviderPoolExhausted(pool) => Some(pool),
+            _ => None,
+        });
+        let pool = exhausted.expect("full alias must report pool exhaustion");
+        assert_eq!(pool.input, input_name);
+        assert!(pool.providers.iter().any(|provider| provider.name == input_name && provider.expired));
+        assert!(pool.providers.iter().any(|provider| {
+            provider.name == alias_name
+                && !provider.expired
+                && provider.current_connections == 2
+                && provider.max_connections == 2
+        }));
+    }
+
     // Test acquiring with an alias
     #[test]
     fn test_provider_with_alias() {
