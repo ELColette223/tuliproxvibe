@@ -381,6 +381,7 @@
     },
     "CONFIG_TARGET_OPTIONS": {
       "CLEAR_INVALID_EPG_IDS": "يمسح معرفات EPG التي لا تطابق بيانات EPG المعالجة دون إزالة عناصر قائمة التشغيل.",
+      "PRESERVE_STREAM_IDS": "يحافظ على معرفات البث (virtual IDs) ثابتة عبر تحديثات المصدر.",
       "SHARE_LIVE_STREAMS": "يُفعّل مشاركة البث المباشر. المفتاح الرئيسي يضبط HLS و MPEG-TS معًا؛ يمكن تغيير كل تنسيق أيضًا بشكل منفصل."
     },
     "CONFIG_TARGET_SHARE_LIVE_STREAMS": {
@@ -1354,6 +1355,7 @@
     "PANEL_STATUS_INVALID": "غير صالح",
     "PANEL_STATUS_READY": "جاهز",
     "PASSWORD": "كلمة المرور",
+    "PRESERVE_STREAM_IDS": "الحفاظ على معرفات البث",
     "PATH": "مسار",
     "PATTERN": "نمط",
     "PATTERN_IPV4": "نمط IPv4",

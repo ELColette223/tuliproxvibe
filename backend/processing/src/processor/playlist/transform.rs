@@ -524,6 +524,7 @@ pub(crate) fn execute_pipe<'a>(
     // leaves are read-only at the pipeline boundary. Cross-input dedup for disk
     // sources runs later in `deduplicate_playlist` during target finalization.
     let deduplicate_memory = is_memory && pre_transform_dedup_enabled;
+    let preserve_stream_ids = target.options.as_ref().is_some_and(ConfigTargetOptions::preserve_stream_ids);
     let mut items = Vec::new();
     let mut rejected = 0usize;
     let mut duplicates_removed = 0usize;
@@ -535,12 +536,33 @@ pub(crate) fn execute_pipe<'a>(
             item.header.freeze_input_stream_id();
         }
         // Preserve the source UUID before filtering, mapping, or deduplication.
-        let channel_id = item.get_uuid().to_string();
+        let raw_channel_id = item.get_uuid().to_string();
+        let effective_channel_id = if preserve_stream_ids {
+            let stable_uuid = shared::utils::generate_stable_channel_uuid(
+                &target.name,
+                &item.header.group,
+                &item.header.get_name(),
+                item.header.item_type,
+            );
+            item.header.uuid = stable_uuid;
+            stable_uuid.to_string()
+        } else {
+            raw_channel_id.clone()
+        };
+
         if let Some(snapshot) = bouquet_snapshot.as_deref_mut() {
-            snapshot.entry((item.header.xtream_cluster, item.header.group.to_string())).or_default().insert(channel_id.clone());
+            snapshot
+                .entry((item.header.xtream_cluster, item.header.group.to_string()))
+                .or_default()
+                .insert(effective_channel_id.clone());
         }
         if bouquet_filter.is_some_and(|filter| {
-            !filter.allows_channel(item.header.xtream_cluster, &item.header.group, &channel_id)
+            if preserve_stream_ids {
+                !filter.allows_channel(item.header.xtream_cluster, &item.header.group, &effective_channel_id)
+                    && !filter.allows_channel(item.header.xtream_cluster, &item.header.group, &raw_channel_id)
+            } else {
+                !filter.allows_channel(item.header.xtream_cluster, &item.header.group, &raw_channel_id)
+            }
         }) {
             rejected += 1;
             continue;

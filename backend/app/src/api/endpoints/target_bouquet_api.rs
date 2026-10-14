@@ -407,8 +407,9 @@ async fn stream_input_inventory(
     app_config: &tuliprox_core::model::AppConfig,
     input: &ConfigInput,
     storage_dir: &str,
+    target_name: Option<Arc<str>>,
 ) -> bool {
-    let input_storage = tuliprox_repository::build_input_storage_path(&input.name, storage_dir);
+    let _input_storage = tuliprox_repository::build_input_storage_path(&input.name, storage_dir);
     let clusters = [
         (XtreamCluster::Live, !input.has_flag(ConfigInputFlags::SkipLive)),
         (XtreamCluster::Video, !input.has_flag(ConfigInputFlags::SkipVod)),
@@ -424,17 +425,30 @@ async fn stream_input_inventory(
             id: String,
             name: String,
         }
+        let target_name_clone = target_name.clone();
         let entries: Option<std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<InventoryEntry, TuliproxError>> + Send>>> =
             if input.input_type.is_xtream() {
                 tuliprox_repository::iter_raw_xtream_input_playlist(app_config, input, cluster)
                     .await
                     .map(|stream| {
-                        Box::pin(stream.map(|item| {
+                        let target_name = target_name_clone;
+                        Box::pin(stream.map(move |item| {
+                            let target_name = target_name.as_deref();
                             item.map(|item| {
                                 let item = PlaylistItem::from(&item);
+                                let id = match target_name {
+                                    Some(target) => shared::utils::generate_stable_channel_uuid(
+                                        target,
+                                        &item.header.group,
+                                        &item.header.name,
+                                        item.header.item_type,
+                                    )
+                                    .to_string(),
+                                    None => item.header.uuid.to_string(),
+                                };
                                 InventoryEntry {
                                     group: item.header.group.to_string(),
-                                    id: item.header.uuid.to_string(),
+                                    id,
                                     name: item.header.name.to_string(),
                                 }
                             })
@@ -444,12 +458,24 @@ async fn stream_input_inventory(
                 tuliprox_repository::iter_raw_m3u_input_playlist(app_config, input, Some(cluster))
                     .await
                     .map(|stream| {
-                        Box::pin(stream.map(|item| {
+                        let target_name = target_name_clone;
+                        Box::pin(stream.map(move |item| {
+                            let target_name = target_name.as_deref();
                             item.map(|item| {
                                 let item = PlaylistItem::from(&item);
+                                let id = match target_name {
+                                    Some(target) => shared::utils::generate_stable_channel_uuid(
+                                        target,
+                                        &item.header.group,
+                                        &item.header.name,
+                                        item.header.item_type,
+                                    )
+                                    .to_string(),
+                                    None => item.header.uuid.to_string(),
+                                };
                                 InventoryEntry {
                                     group: item.header.group.to_string(),
-                                    id: item.header.uuid.to_string(),
+                                    id,
                                     name: item.header.name.to_string(),
                                 }
                             })
@@ -541,11 +567,12 @@ async fn get_target_bouquet_inventory(
 
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     let state = Arc::clone(&app_state);
-    let target_name = target.name.clone();
+    let preserve_stream_ids = target.options.as_ref().is_some_and(shared::model::ConfigTargetOptions::preserve_stream_ids);
+    let target_name_opt = preserve_stream_ids.then(|| Arc::from(target.name.as_str()));
     tokio::spawn(async move {
         let storage_dir = state.app_config.config.load().storage_dir.clone();
         for input in inputs {
-            if !stream_input_inventory(&tx, &state.app_config, &input, &storage_dir).await {
+            if !stream_input_inventory(&tx, &state.app_config, &input, &storage_dir, target_name_opt.clone()).await {
                 return;
             }
         }

@@ -207,6 +207,8 @@ pub struct ConfigTargetOptions {
     pub epg_output: EpgOutputOptions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub force_redirect: Option<ClusterFlags>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub preserve_stream_ids: bool,
 }
 
 impl ConfigTargetOptions {
@@ -218,6 +220,7 @@ impl ConfigTargetOptions {
             && self.deduplicate.is_none()
             && self.epg_output.is_empty()
             && self.force_redirect.is_none_or(|f| f.has_full_flags() || f.is_empty())
+            && !self.preserve_stream_ids
     }
 
     pub const fn lowercase_epg_ids(&self) -> bool { self.epg_output.lowercase_ids }
@@ -231,6 +234,8 @@ impl ConfigTargetOptions {
     pub fn share_live_mpeg_ts_enabled(&self) -> bool { self.share_live_streams.mpeg_ts }
 
     pub fn share_live_any_enabled(&self) -> bool { self.share_live_hls_enabled() || self.share_live_mpeg_ts_enabled() }
+
+    pub const fn preserve_stream_ids(&self) -> bool { self.preserve_stream_ids }
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -979,5 +984,21 @@ epg_output:
         assert!(hls_only.share_live_hls_enabled());
         assert!(!hls_only.share_live_mpeg_ts_enabled());
         assert!(mpeg_ts.share_live_mpeg_ts_enabled());
+    }
+
+    #[test]
+    fn target_options_preserve_stream_ids_roundtrips() {
+        let yaml = "preserve_stream_ids: true\n";
+        let options = serde_saphyr::from_str::<ConfigTargetOptions>(yaml)
+            .expect("configured preserve_stream_ids should deserialize");
+
+        assert!(options.preserve_stream_ids());
+        assert!(!options.is_empty());
+
+        let serialized = serde_saphyr::to_string(&options).expect("configured preserve_stream_ids should serialize");
+        assert!(serialized.contains("preserve_stream_ids: true"));
+        let roundtripped = serde_saphyr::from_str::<ConfigTargetOptions>(&serialized)
+            .expect("serialized preserve_stream_ids should deserialize");
+        assert_eq!(roundtripped, options);
     }
 }

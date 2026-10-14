@@ -268,7 +268,7 @@ mod tests {
             included_channel_ids: vec!["a".repeat(64)],
         };
         let file = TargetBouquetFileDto::new("family", TargetBouquetDto::whitelist(PlaylistClusterBouquetDto::default())
-            .with_selection(TargetBouquetSelectionDto { categories: vec![known.clone()] }));
+            .with_selection(TargetBouquetSelectionDto { categories: vec![known.clone()], base_filter: None }));
         assert_eq!(file.version, TARGET_BOUQUET_SELECTION_VERSION);
         assert!(file.is_supported_version());
         let yaml = serde_saphyr::to_string(&file).unwrap();

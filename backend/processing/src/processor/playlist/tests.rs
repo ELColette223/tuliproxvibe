@@ -533,6 +533,88 @@ fn execute_pipe_snapshots_raw_ids_across_inputs_before_channel_selection() {
 }
 
 #[test]
+fn execute_pipe_preserves_channel_when_provider_id_changes_and_preserve_stream_ids_is_enabled() {
+    use shared::model::{PlaylistClusterBouquetDto, TargetBouquetCategorySelectionDto, TargetBouquetDto, TargetBouquetSelectionDto};
+
+    let input = ConfigInput::default();
+    let target_name = "test-target";
+    let group_name = "News";
+    let channel_name = "BBC News";
+
+    // Compute the stable UUID for this channel
+    let stable_uuid = shared::utils::generate_stable_channel_uuid(
+        target_name,
+        group_name,
+        channel_name,
+        PlaylistItemType::Live,
+    );
+
+    // Selected bouquet contains the stable UUID
+    let selected = TargetBouquetSelectionDto {
+        base_filter: None,
+        categories: vec![TargetBouquetCategorySelectionDto {
+            cluster: XtreamCluster::Live,
+            name: group_name.to_string(),
+            included_channel_ids: vec![stable_uuid.to_string()],
+        }],
+    };
+    let filter = tuliprox_core::model::TargetBouquetFilter::from_dto(
+        TargetBouquetDto::whitelist(PlaylistClusterBouquetDto::default()).with_selection(selected),
+    )
+    .expect("filter");
+
+    let target = ConfigTarget::from(&ConfigTargetDto {
+        name: target_name.to_string(),
+        options: Some(ConfigTargetOptions {
+            preserve_stream_ids: true,
+            ..Default::default()
+        }),
+        output: vec![TargetOutputDto::Xtream(XtreamTargetOutputDto::default())],
+        ..ConfigTargetDto::default()
+    });
+
+    // Upstream has BBC News with a completely arbitrary provider ID 8888
+    let item = PlaylistItem {
+        header: PlaylistItemHeader {
+            id: "8888".intern(),
+            name: channel_name.intern(),
+            group: group_name.intern(),
+            url: "http://provider/8888.ts".intern(),
+            item_type: PlaylistItemType::Live,
+            xtream_cluster: XtreamCluster::Live,
+            ..Default::default()
+        },
+    };
+    let groups = vec![PlaylistGroup {
+        id: 1,
+        title: group_name.intern(),
+        channels: vec![item],
+        xtream_cluster: XtreamCluster::Live,
+    }];
+    let mut fetched = FetchedPlaylist {
+        input: &input,
+        source: MemoryPlaylistSource::new(groups).into_source(),
+        epg: None,
+    };
+    let mut duplicates = HashSet::new();
+    let (mut processed, _) = execute_pipe(
+        &target,
+        &vec![],
+        &mut fetched,
+        &mut duplicates,
+        false,
+        Some(&filter),
+        None,
+    )
+    .expect("execute_pipe");
+
+    let kept_groups = processed.source.take_groups();
+    assert_eq!(kept_groups.len(), 1);
+    assert_eq!(kept_groups[0].channels.len(), 1);
+    assert_eq!(kept_groups[0].channels[0].header.uuid, stable_uuid);
+}
+
+#[test]
 fn legacy_messagepack_playlist_items_default_missing_input_stream_id() {
     let mut source = PlaylistItem {
         header: PlaylistItemHeader {

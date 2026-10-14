@@ -35,6 +35,7 @@ const LABEL_USE_MEMORY_CACHE: &str = "LABEL.USE_MEMORY_CACHE";
 const LABEL_PROCESSING_ORDER: &str = "LABEL.PROCESSING_ORDER";
 const LABEL_IGNORE_LOGO: &str = "LABEL.IGNORE_LOGO";
 const LABEL_CLEAR_INVALID_EPG_IDS: &str = "LABEL.CLEAR_INVALID_EPG_IDS";
+const LABEL_PRESERVE_STREAM_IDS: &str = "LABEL.PRESERVE_STREAM_IDS";
 const LABEL_SHARE_LIVE_STREAMS: &str = "LABEL.SHARE_LIVE_STREAMS";
 const LABEL_HLS: &str = "LABEL.HLS";
 const LABEL_MPEG_TS: &str = "LABEL.MPEG_TS";
@@ -118,6 +119,7 @@ impl HasFormData for ConfigTargetOptionsFormState {
 pub enum ConfigTargetOptionsFormAction {
     IgnoreLogo(bool),
     ClearInvalidEpgIds(bool),
+    PreserveStreamIds(bool),
     ShareLiveStreamsHls(bool),
     ShareLiveStreamsMpegTs(bool),
     RemoveDuplicates(bool),
@@ -141,6 +143,10 @@ impl yew::prelude::Reducible for ConfigTargetOptionsFormState {
             }
             ConfigTargetOptionsFormAction::ClearInvalidEpgIds(value) => {
                 form.clear_invalid_epg_ids = value;
+                modified = true;
+            }
+            ConfigTargetOptionsFormAction::PreserveStreamIds(value) => {
+                form.preserve_stream_ids = value;
                 modified = true;
             }
             ConfigTargetOptionsFormAction::ShareLiveStreamsHls(value) => {
@@ -367,6 +373,7 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
                 <div class="tp__target-options">
                     { edit_field_bool!(target_options_state, translate.t(LABEL_IGNORE_LOGO), ignore_logo,  ConfigTargetOptionsFormAction::IgnoreLogo) }
                     { edit_field_bool!(target_options_state, translate.t(LABEL_CLEAR_INVALID_EPG_IDS), clear_invalid_epg_ids, ConfigTargetOptionsFormAction::ClearInvalidEpgIds) }
+                    { edit_field_bool!(target_options_state, translate.t(LABEL_PRESERVE_STREAM_IDS), preserve_stream_ids, ConfigTargetOptionsFormAction::PreserveStreamIds) }
                     <div class="tp__target-options__group">
                         <div class="tp__target-options__heading">
                             <span class="tp__form-field__label">{ translate.t(LABEL_SHARE_LIVE_STREAMS) }</span>
@@ -420,6 +427,7 @@ pub fn ConfigTargetView(props: &ConfigTargetViewProps) -> Html {
                     <div class="tp__target-options">
                         { config_field_bool!(target_options_state.form, translate.t(LABEL_IGNORE_LOGO), ignore_logo) }
                         { config_field_bool!(target_options_state.form, translate.t(LABEL_CLEAR_INVALID_EPG_IDS), clear_invalid_epg_ids) }
+                        { config_field_bool!(target_options_state.form, translate.t(LABEL_PRESERVE_STREAM_IDS), preserve_stream_ids) }
                         <div class="tp__target-options__group">
                             <div class="tp__target-options__heading">
                                 <span class="tp__form-field__label">{ translate.t(LABEL_SHARE_LIVE_STREAMS) }</span>

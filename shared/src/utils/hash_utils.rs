@@ -130,6 +130,23 @@ pub fn generate_provider_playlist_uuid(key: &str, provider_id: &str, item_type: 
     UUIDType(hasher.finalize().into())
 }
 
+/// Generates a deterministic, target-scoped UUID based on the channel's semantic identity
+/// (target name, cluster/item type, group name, and channel name).
+/// This UUID remains stable across source updates even if upstream provider stream IDs change.
+pub fn generate_stable_channel_uuid(
+    target_name: &str,
+    group: &str,
+    name: &str,
+    item_type: PlaylistItemType,
+) -> UUIDType {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(target_name.trim().as_bytes());
+    hasher.update(item_type.as_str().as_bytes());
+    hasher.update(group.trim().as_bytes());
+    hasher.update(name.trim().as_bytes());
+    UUIDType(hasher.finalize().into())
+}
+
 pub fn generate_local_playlist_uuid(key: &str, item_type: PlaylistItemType, url: &str) -> UUIDType {
     let mut hasher = blake3::Hasher::new();
     hasher.update(key.as_bytes());
@@ -618,6 +635,22 @@ mod tests {
         let a = generate_provider_playlist_uuid("k", "1", PlaylistItemType::Live);
         let b = generate_provider_playlist_uuid("k", "1", PlaylistItemType::Live);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn generate_stable_channel_uuid_is_deterministic_and_ignores_provider_id() {
+        let a = generate_stable_channel_uuid("target1", "News", "Channel 1", PlaylistItemType::Live);
+        let b = generate_stable_channel_uuid("target1", "News", "Channel 1", PlaylistItemType::Live);
+        assert_eq!(a, b);
+
+        let diff_target = generate_stable_channel_uuid("target2", "News", "Channel 1", PlaylistItemType::Live);
+        assert_ne!(a, diff_target);
+
+        let diff_group = generate_stable_channel_uuid("target1", "Sports", "Channel 1", PlaylistItemType::Live);
+        assert_ne!(a, diff_group);
+
+        let diff_name = generate_stable_channel_uuid("target1", "News", "Channel 2", PlaylistItemType::Live);
+        assert_ne!(a, diff_name);
     }
 
     #[test]

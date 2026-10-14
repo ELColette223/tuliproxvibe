@@ -381,6 +381,7 @@
     },
     "CONFIG_TARGET_OPTIONS": {
       "CLEAR_INVALID_EPG_IDS": "Clears EPG IDs that do not match the processed EPG data. Playlist entries are not removed.",
+      "PRESERVE_STREAM_IDS": "Preserves stream IDs (virtual IDs) across source updates by reconciling channels semantically. Prevents IPTV players from losing channels or requiring playlist reloads when the upstream provider changes stream IDs.",
       "SHARE_LIVE_STREAMS": "Enables live stream sharing. The master toggle sets HLS and MPEG-TS together; each format can also be changed separately."
     },
     "EPG_OUTPUT_OPTIONS": {
@@ -1364,6 +1365,7 @@
     "PANEL_STATUS_INVALID": "Invalid",
     "PANEL_STATUS_READY": "Ready",
     "PASSWORD": "Password",
+    "PRESERVE_STREAM_IDS": "Preserve stream IDs",
     "PATH": "Path",
     "PATTERN": "Pattern",
     "PATTERN_IPV4": "Pattern IPv4",

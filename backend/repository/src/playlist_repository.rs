@@ -338,6 +338,7 @@ fn prepare_target_playlist_for_persistence(
     target_id_mapping: &mut TargetIdMapping,
 ) {
     let mut source_ordinal: u32 = 0;
+    let preserve_stream_ids = target.options.as_ref().is_some_and(ConfigTargetOptions::preserve_stream_ids);
     for group in playlist.iter_mut() {
         for channel in &mut group.channels {
             let header = &mut channel.header;
@@ -358,15 +359,36 @@ fn prepare_target_playlist_for_persistence(
                 };
             }
 
-            let uuid = header.get_uuid();
             let item_type = header.item_type;
-            let parent_virtual_id = if item_type.is_series() {
-                target_id_mapping.get_parent_virtual_id_by_uuid(uuid).unwrap_or_default()
+            let virtual_id = if preserve_stream_ids {
+                let stable_uuid = shared::utils::generate_stable_channel_uuid(
+                    &target.name,
+                    &header.group,
+                    &header.get_name(),
+                    item_type,
+                );
+                header.uuid = stable_uuid;
+                let parent_virtual_id = if item_type.is_series() {
+                    target_id_mapping.get_parent_virtual_id_by_uuid(&header.uuid).unwrap_or_default()
+                } else {
+                    VirtualId::default()
+                };
+                target_id_mapping.get_and_update_virtual_id_with_reconciliation(
+                    &header.uuid,
+                    provider_id,
+                    item_type,
+                    parent_virtual_id,
+                )
             } else {
-                VirtualId::default()
+                let uuid = header.get_uuid();
+                let parent_virtual_id = if item_type.is_series() {
+                    target_id_mapping.get_parent_virtual_id_by_uuid(uuid).unwrap_or_default()
+                } else {
+                    VirtualId::default()
+                };
+                target_id_mapping.get_and_update_virtual_id(uuid, provider_id, item_type, parent_virtual_id)
             };
-            header.virtual_id =
-                target_id_mapping.get_and_update_virtual_id(uuid, provider_id, item_type, parent_virtual_id);
+            header.virtual_id = virtual_id;
         }
     }
 
@@ -1370,6 +1392,7 @@ mod tests {
         assign_local_series_info_episode_key, assign_media_server_series_info_episode,
         get_input_media_server_playlist_file_path, materialize_media_server_series_info_episodes,
         normalize_target_playlist_epg_ids, persist_playlist_views, persist_playlist_with_mode, playlist_has_items,
+        prepare_target_playlist_for_persistence,
         rewrite_local_series_info_episode_virtual_id, rewrite_series_episode_parent_virtual_ids,
         rewrite_series_info_episode_virtual_id, skipped_clusters, validate_target_playlist_persistence,
         LocalEpisodeKey, PlaylistPublicationPlan, ProviderEpisodeKey, TargetCacheReloadStage, TargetPersistenceMode,
@@ -2761,5 +2784,130 @@ mod tests {
         assert_eq!(episodes[1].id, 7002);
         assert!(playlist[0].channels[0].header.parent_code.is_empty());
         assert!(playlist[0].channels[1].header.parent_code.is_empty());
+    }
+
+    #[test]
+    fn prepare_target_playlist_for_persistence_preserves_stream_ids_when_enabled() {
+        let dir = tempdir().expect("tempdir");
+        let mapping_path = dir.path().join("id_mapping.db");
+        let mut target_id_mapping = TargetIdMapping::new(&mapping_path, false).expect("mapping");
+
+        let target_preserve = ConfigTarget::from(&ConfigTargetDto {
+            name: "erizadez79".to_string(),
+            options: Some(ConfigTargetOptions {
+                preserve_stream_ids: true,
+                ..Default::default()
+            }),
+            output: vec![TargetOutputDto::Xtream(XtreamTargetOutputDto::default())],
+            ..ConfigTargetDto::default()
+        });
+
+        // Run 1: Upstream provider has Globo SP FHD with provider_id 38839
+        let mut playlist_run1 = vec![PlaylistGroup {
+            id: 1,
+            title: "Canais ⫸ Globo Sudeste".intern(),
+            channels: vec![PlaylistItem {
+                header: PlaylistItemHeader {
+                    id: "38839".intern(),
+                    name: "Globo SP FHD".intern(),
+                    group: "Canais ⫸ Globo Sudeste".intern(),
+                    url: "http://upstream/live/user/pass/38839.ts".intern(),
+                    item_type: PlaylistItemType::Live,
+                    xtream_cluster: XtreamCluster::Live,
+                    ..PlaylistItemHeader::default()
+                },
+            }],
+            xtream_cluster: XtreamCluster::Live,
+        }];
+
+        prepare_target_playlist_for_persistence(&mut playlist_run1, &target_preserve, &mut target_id_mapping);
+        let vid_run1 = playlist_run1[0].channels[0].header.virtual_id;
+        assert_eq!(vid_run1, VirtualId::new(1));
+        target_id_mapping.persist().expect("persist");
+
+        // Run 2: Upstream provider UPDATED! Provider ID changed from 38839 to 50123
+        let mut playlist_run2 = vec![PlaylistGroup {
+            id: 1,
+            title: "Canais ⫸ Globo Sudeste".intern(),
+            channels: vec![PlaylistItem {
+                header: PlaylistItemHeader {
+                    id: "50123".intern(),
+                    name: "Globo SP FHD".intern(),
+                    group: "Canais ⫸ Globo Sudeste".intern(),
+                    url: "http://upstream/live/user/pass/50123.ts".intern(),
+                    item_type: PlaylistItemType::Live,
+                    xtream_cluster: XtreamCluster::Live,
+                    ..PlaylistItemHeader::default()
+                },
+            }],
+            xtream_cluster: XtreamCluster::Live,
+        }];
+
+        prepare_target_playlist_for_persistence(&mut playlist_run2, &target_preserve, &mut target_id_mapping);
+        let vid_run2 = playlist_run2[0].channels[0].header.virtual_id;
+        assert_eq!(
+            vid_run2,
+            VirtualId::new(1),
+            "Stream ID (virtual_id) MUST be preserved across source updates when preserve_stream_ids is true!"
+        );
+
+        // Run 3: Same channel, but on a target with preserve_stream_ids = false (legacy behavior)
+        let target_legacy = ConfigTarget::from(&ConfigTargetDto {
+            name: "erizadez79-legacy".to_string(),
+            options: Some(ConfigTargetOptions {
+                preserve_stream_ids: false,
+                ..Default::default()
+            }),
+            output: vec![TargetOutputDto::Xtream(XtreamTargetOutputDto::default())],
+            ..ConfigTargetDto::default()
+        });
+        let mut mapping_legacy = TargetIdMapping::new(&dir.path().join("id_mapping_legacy.db"), false).expect("mapping");
+
+        let mut playlist_legacy_run1 = vec![PlaylistGroup {
+            id: 1,
+            title: "Canais ⫸ Globo Sudeste".intern(),
+            channels: vec![PlaylistItem {
+                header: PlaylistItemHeader {
+                    id: "38839".intern(),
+                    name: "Globo SP FHD".intern(),
+                    group: "Canais ⫸ Globo Sudeste".intern(),
+                    url: "http://upstream/live/user/pass/38839.ts".intern(),
+                    item_type: PlaylistItemType::Live,
+                    xtream_cluster: XtreamCluster::Live,
+                    ..PlaylistItemHeader::default()
+                },
+            }],
+            xtream_cluster: XtreamCluster::Live,
+        }];
+        playlist_legacy_run1[0].channels[0].header.gen_uuid();
+        prepare_target_playlist_for_persistence(&mut playlist_legacy_run1, &target_legacy, &mut mapping_legacy);
+        let vid_leg1 = playlist_legacy_run1[0].channels[0].header.virtual_id;
+        assert_eq!(vid_leg1, VirtualId::new(1));
+        mapping_legacy.persist().expect("persist");
+
+        let mut playlist_legacy_run2 = vec![PlaylistGroup {
+            id: 1,
+            title: "Canais ⫸ Globo Sudeste".intern(),
+            channels: vec![PlaylistItem {
+                header: PlaylistItemHeader {
+                    id: "50123".intern(),
+                    name: "Globo SP FHD".intern(),
+                    group: "Canais ⫸ Globo Sudeste".intern(),
+                    url: "http://upstream/live/user/pass/50123.ts".intern(),
+                    item_type: PlaylistItemType::Live,
+                    xtream_cluster: XtreamCluster::Live,
+                    ..PlaylistItemHeader::default()
+                },
+            }],
+            xtream_cluster: XtreamCluster::Live,
+        }];
+        playlist_legacy_run2[0].channels[0].header.gen_uuid();
+        prepare_target_playlist_for_persistence(&mut playlist_legacy_run2, &target_legacy, &mut mapping_legacy);
+        let vid_leg2 = playlist_legacy_run2[0].channels[0].header.virtual_id;
+        assert_eq!(
+            vid_leg2,
+            VirtualId::new(2),
+            "Without preserve_stream_ids, legacy behavior increments virtual_id when upstream provider changes!"
+        );
     }
 }

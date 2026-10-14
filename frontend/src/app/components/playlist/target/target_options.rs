@@ -18,13 +18,14 @@ pub fn TargetOptions(props: &TargetOptionsProps) -> Html {
         let redirect_default = vec![(false, "LABEL.LIVE"), (false, "LABEL.VOD"), (false, "LABEL.SERIES")];
         let (flags, options, redirect) = match target.options.as_ref() {
             None => (
-                vec![false, false, false, false, false, false],
+                vec![false, false, false, false, false, false, false],
                 vec![
                     (false, "LABEL.IGNORE_LOGO"),
                     (false, "LABEL.SHARE_LIVE_STREAMS"),
                     (false, "LABEL.HLS"),
                     (false, "LABEL.MPEG_TS"),
                     (false, "LABEL.REMOVE_DUPLICATES"),
+                    (false, "LABEL.PRESERVE_STREAM_IDS"),
                 ],
                 redirect_default.clone(),
             ),
@@ -44,6 +45,7 @@ pub fn TargetOptions(props: &TargetOptionsProps) -> Html {
                         options.share_live_hls_enabled(),
                         options.share_live_mpeg_ts_enabled(),
                         options.remove_duplicates,
+                        options.preserve_stream_ids,
                         force_redirect[0].0,
                         force_redirect[1].0,
                         force_redirect[2].0,
@@ -54,6 +56,7 @@ pub fn TargetOptions(props: &TargetOptionsProps) -> Html {
                         (options.share_live_hls_enabled(), "LABEL.HLS"),
                         (options.share_live_mpeg_ts_enabled(), "LABEL.MPEG_TS"),
                         (options.remove_duplicates, "LABEL.REMOVE_DUPLICATES"),
+                        (options.preserve_stream_ids, "LABEL.PRESERVE_STREAM_IDS"),
                     ],
                     force_redirect,
                 )
