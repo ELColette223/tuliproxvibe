@@ -352,6 +352,9 @@
       "URLS": "Ordered list of provider base URLs. Tuliprox rotates through them on failover."
     },
     "CONFIG_INPUT_OPTIONS": {
+      "CONNECTION_LIMIT_POLICY": "Choose how this source behaves when a login reaches its connection limit. These two options are mutually exclusive: enabling one turns the other off.",
+      "CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP": "Ignore the local max_connections cap and still try the same login. Cannot be combined with auto-rotate.",
+      "CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL": "When the current login is full, immediately fail over to another eligible alias. Cannot be combined with bypass local limit.",
       "PROBE_DELAY": "Delay in seconds between probe requests (default 2) to reduce provider pressure.",
       "PROBE_LIVE": "Enables background technical analysis for live channels to detect codecs and resolution.",
       "PROBE_LIVE_INTERVAL_HOURS": "Interval in hours between re-probing live channels (default: 120).",
@@ -1418,6 +1421,10 @@
     "PROVIDER_URL_SELECTION_RESUME_LAST_WORKING": "Resume Last Working",
     "PROVIDER_URL_SELECTION_RESTART_FROM_FIRST": "Restart From First",
     "SELECTION_POLICY": "Selection Policy",
+    "CONNECTION_LIMIT_POLICY": "Connection Limit Policy",
+    "CONNECTION_LIMIT_POLICY_STRICT": "Strict",
+    "CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP": "Bypass local limit",
+    "CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL": "Auto-rotate on full",
     "PROVIDER_URLS": "Provider URLs",
     "PROXY": "Proxy",
     "PROXY_CONFIG": "Proxy",

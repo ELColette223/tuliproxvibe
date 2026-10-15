@@ -129,7 +129,7 @@ mod tests {
     fn visual_selection_known_empty_and_unknown_default() {
         let selection = TargetBouquetSelectionDto { categories: vec![shared::model::TargetBouquetCategorySelectionDto {
             cluster: XtreamCluster::Live, name: "News".to_string(), included_channel_ids: vec![],
-        }] };
+        }], base_filter: None };
         let filter = TargetBouquetFilter::from_dto(whitelist(PlaylistClusterBouquetDto::default()).with_selection(selection)).unwrap();
         assert!(!filter.allows_channel(XtreamCluster::Live, "News", &"a".repeat(64)));
         assert!(filter.allows_channel(XtreamCluster::Live, "New", &"a".repeat(64)));

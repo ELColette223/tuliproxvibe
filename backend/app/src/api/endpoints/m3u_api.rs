@@ -318,7 +318,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
             );
         }
 
-        if app_state.active_provider.is_over_limit(&session.provider) {
+        if pli.item_type.requires_provider_affinity() && app_state.active_provider.is_over_limit(&session.provider) {
             if extension == HLS_EXT {
                 return hls_admission_failure_manifest_response(
                     app_state,
@@ -1344,5 +1344,14 @@ mod tests {
             assert!(archive.as_ref().is_some_and(|value| native_archive_matches_mode("flussonic-ts", value)));
             assert!(!archive.as_ref().is_some_and(|value| native_archive_matches_mode("flussonic", value)));
         }
+    }
+
+    #[test]
+    fn live_stream_does_not_require_provider_affinity() {
+        assert!(!PlaylistItemType::Live.requires_provider_affinity());
+        assert!(!PlaylistItemType::LiveUnknown.requires_provider_affinity());
+        assert!(PlaylistItemType::Video.requires_provider_affinity());
+        assert!(PlaylistItemType::Series.requires_provider_affinity());
+        assert!(PlaylistItemType::Catchup.requires_provider_affinity());
     }
 }

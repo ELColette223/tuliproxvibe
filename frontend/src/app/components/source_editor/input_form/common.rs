@@ -1,16 +1,20 @@
 use super::{
-    input_persist_hint_key, input_url_hint_key, ConfigInputFormAction, ConfigInputFormState,
-    ConfigInputOptionsDtoFormState, ConfigInputOptionsFormAction, LABEL_CACHE_DURATION, LABEL_DISABLE_HLS_STREAMING,
-    LABEL_ENABLED, LABEL_EXP_DATE, LABEL_FETCH_METHOD, LABEL_HEADERS, LABEL_LIVE, LABEL_LIVE_STREAMS,
-    LABEL_MAX_CONNECTIONS, LABEL_METADATA, LABEL_NAME, LABEL_PASSWORD, LABEL_PERSIST, LABEL_PRIORITY, LABEL_PROBE,
-    LABEL_PROBE_DELAY_SEC, LABEL_PROBE_FILTER, LABEL_PROBE_LIVE, LABEL_PROBE_LIVE_INTERVAL_HOURS, LABEL_PROBE_SERIES,
-    LABEL_PROBE_VOD, LABEL_RESOLVE, LABEL_RESOLVE_BACKGROUND, LABEL_RESOLVE_DELAY_SEC, LABEL_RESOLVE_FILTER,
-    LABEL_RESOLVE_SERIES, LABEL_RESOLVE_TMDB, LABEL_RESOLVE_VOD, LABEL_SEQUENTIAL_GROUP, LABEL_SERIES, LABEL_SKIP,
-    LABEL_UPDATE_QUALITY, LABEL_URL, LABEL_USERNAME, LABEL_USER_AGENT_STREAM_INDEX, LABEL_VOD,
-    LABEL_XTREAM_LIVE_STREAM_USE_PREFIX, LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION,
+    connection_limit_policy_label_key, input_persist_hint_key, input_url_hint_key, ConfigInputFormAction,
+    ConfigInputFormState, ConfigInputOptionsDtoFormState, ConfigInputOptionsFormAction, LABEL_CACHE_DURATION,
+    LABEL_CONNECTION_LIMIT_POLICY, LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP,
+    LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL, LABEL_DISABLE_HLS_STREAMING, LABEL_ENABLED, LABEL_EXP_DATE,
+    LABEL_FETCH_METHOD, LABEL_HEADERS, LABEL_LIVE, LABEL_LIVE_STREAMS, LABEL_MAX_CONNECTIONS, LABEL_METADATA,
+    LABEL_NAME, LABEL_PASSWORD, LABEL_PERSIST, LABEL_PRIORITY, LABEL_PROBE, LABEL_PROBE_DELAY_SEC, LABEL_PROBE_FILTER,
+    LABEL_PROBE_LIVE, LABEL_PROBE_LIVE_INTERVAL_HOURS, LABEL_PROBE_SERIES, LABEL_PROBE_VOD, LABEL_RESOLVE,
+    LABEL_RESOLVE_BACKGROUND, LABEL_RESOLVE_DELAY_SEC, LABEL_RESOLVE_FILTER, LABEL_RESOLVE_SERIES, LABEL_RESOLVE_TMDB,
+    LABEL_RESOLVE_VOD, LABEL_SEQUENTIAL_GROUP, LABEL_SERIES, LABEL_SKIP, LABEL_UPDATE_QUALITY, LABEL_URL,
+    LABEL_USERNAME, LABEL_USER_AGENT_STREAM_INDEX, LABEL_VOD, LABEL_XTREAM_LIVE_STREAM_USE_PREFIX,
+    LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION,
 };
 use crate::{
-    app::components::{Card, FilterInput, KeyValueEditor, RadioButtonGroup, RangeSlider, TitledCard, ToolAction},
+    app::components::{
+        Card, FilterInput, KeyValueEditor, RadioButtonGroup, RangeSlider, TitledCard, ToggleSwitch, ToolAction,
+    },
     config_field, config_field_bool, config_field_child, config_field_custom, config_field_optional,
     config_field_optional_hide, edit_field_bool, edit_field_exp_date, edit_field_number_i16,
     edit_field_number_option_u32, edit_field_number_u16, edit_field_number_u32, edit_field_text,
@@ -19,7 +23,7 @@ use crate::{
     utils::content_cluster_presentation,
 };
 use shared::{
-    model::{ConfigInputUpdateQualityDto, InputFetchMethod, XtreamCluster},
+    model::{ConfigInputUpdateQualityDto, ConnectionLimitPolicy, InputFetchMethod, XtreamCluster},
     utils::BATCH_SCHEME_PREFIX,
 };
 use std::{collections::HashMap, rc::Rc};
@@ -316,8 +320,68 @@ pub(super) fn InputOptionsForm(props: &InputOptionsFormProps) -> Html {
         (false, OptionsKind::Xtream) => xtream_options_readonly(&state, &translate, update_quality),
         (true, OptionsKind::Xtream) => xtream_options_editable(&state, &translate, update_quality),
     };
+    let bypass_enabled = matches!(state.form.connection_limit_policy, ConnectionLimitPolicy::BypassLocalCap);
+    let rotate_enabled = matches!(state.form.connection_limit_policy, ConnectionLimitPolicy::RotateOnFull);
+    let bypass_state = state.clone();
+    let handle_bypass_toggle = Callback::from(move |enabled: bool| {
+        let policy = if enabled {
+            ConnectionLimitPolicy::BypassLocalCap
+        } else {
+            ConnectionLimitPolicy::Strict
+        };
+        bypass_state.dispatch(ConfigInputOptionsFormAction::ConnectionLimitPolicy(policy));
+    });
+    let rotate_state = state.clone();
+    let handle_rotate_toggle = Callback::from(move |enabled: bool| {
+        let policy = if enabled {
+            ConnectionLimitPolicy::RotateOnFull
+        } else {
+            ConnectionLimitPolicy::Strict
+        };
+        rotate_state.dispatch(ConfigInputOptionsFormAction::ConnectionLimitPolicy(policy));
+    });
+
     html! {
         <Card class="tp__config-view__card">
+            <TitledCard title={translate.t(LABEL_CONNECTION_LIMIT_POLICY)}>
+                if props.allow_write {
+                    { config_field_child!(translate.t(LABEL_CONNECTION_LIMIT_POLICY), "CONFIG_INPUT_OPTIONS.CONNECTION_LIMIT_POLICY", {
+                        html! {
+                            <div class="tp__config-view__cols-1">
+                                <div class="tp__form-field tp__form-field__bool">
+                                    <ToggleSwitch
+                                        value={bypass_enabled}
+                                        readonly={false}
+                                        on_change={handle_bypass_toggle}
+                                    />
+                                    <crate::app::components::FieldLabel
+                                        label={translate.t(LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP)}
+                                        field_id={"connection_limit_policy_bypass_local_cap".to_string()}
+                                        hint_key={Some("CONFIG_INPUT_OPTIONS.CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP".to_string())}
+                                    />
+                                </div>
+                                <div class="tp__form-field tp__form-field__bool">
+                                    <ToggleSwitch
+                                        value={rotate_enabled}
+                                        readonly={false}
+                                        on_change={handle_rotate_toggle}
+                                    />
+                                    <crate::app::components::FieldLabel
+                                        label={translate.t(LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL)}
+                                        field_id={"connection_limit_policy_rotate_on_full".to_string()}
+                                        hint_key={Some("CONFIG_INPUT_OPTIONS.CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL".to_string())}
+                                    />
+                                </div>
+                            </div>
+                        }
+                    })}
+                } else {
+                    { config_field_custom!(
+                        translate.t(LABEL_CONNECTION_LIMIT_POLICY),
+                        translate.t(connection_limit_policy_label_key(state.form.connection_limit_policy))
+                    ) }
+                }
+            </TitledCard>
             {type_options}
             <TitledCard title={translate.t(LABEL_METADATA)}>
                 if props.allow_write {

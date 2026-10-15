@@ -1278,15 +1278,43 @@ impl ActiveProviderManager {
         allow_grace: bool,
         params: &AcquireProviderParams<'_>,
     ) -> Option<ProviderHandle> {
+        self.acquire_connection_inner_no_preempt_excluding(
+            provider_or_input_name,
+            allow_grace,
+            params,
+            &HashSet::new(),
+        )
+    }
+
+    fn acquire_connection_inner_no_preempt_excluding(
+        &self,
+        provider_or_input_name: &Arc<str>,
+        allow_grace: bool,
+        params: &AcquireProviderParams<'_>,
+        excluded_providers: &HashSet<Arc<str>>,
+    ) -> Option<ProviderHandle> {
         if let Some(owner) = params.session_owner() {
             if let Some(reserved_provider) = self.get_reserved_provider_for_owner(provider_or_input_name, owner) {
-                return self.acquire_exact_connection_inner_no_preempt(&reserved_provider, allow_grace, params);
+                if !excluded_providers.contains(&reserved_provider) {
+                    if let Some(handle) =
+                        self.acquire_exact_connection_inner_no_preempt(&reserved_provider, allow_grace, params)
+                    {
+                        return Some(handle);
+                    }
+                }
+                // When the reserved provider account is unavailable or exhausted, fall through
+                // to candidate lineup allocation so another account in the provider pool can be used.
+                debug_if_enabled!(
+                    "Reserved provider {} unavailable for owner {}; falling back to pool allocation",
+                    sanitize_sensitive_info(&reserved_provider),
+                    sanitize_sensitive_info(owner)
+                );
             }
         }
 
         let candidate_count = self.providers.provider_names_for_input(provider_or_input_name).len();
         let attempts = candidate_count.max(1);
-        let mut skipped_reserved = HashSet::new();
+        let mut skipped_reserved = excluded_providers.clone();
         for _ in 0..attempts {
             let allocation =
                 ProviderAllocationGuard::new(self.providers.acquire_connection_with_grace_override_excluding(
@@ -1855,6 +1883,11 @@ impl ActiveProviderManager {
         )
     }
 
+    /// Provider account names that belong to the same input pool.
+    pub fn provider_names_for_input(&self, input_name: &Arc<str>) -> Vec<Arc<str>> {
+        self.providers.provider_names_for_input(input_name)
+    }
+
     /// Lineup acquisition with an explicit playback lease identity.
     pub fn acquire_connection_with_lease_for_session(
         &self,
@@ -1878,6 +1911,30 @@ impl ActiveProviderManager {
         kind: ConnectionKind,
         lease: Option<PlaybackLeaseRef<'_>>,
     ) -> Option<ProviderHandle> {
+        self.acquire_connection_with_lease_for_session_await_excluding(
+            input_name,
+            addr,
+            allow_grace,
+            priority,
+            kind,
+            lease,
+            &HashSet::new(),
+        )
+        .await
+    }
+
+    /// Same as [`Self::acquire_connection_with_lease_for_session_await`], but skips already-tried accounts.
+    /// Used by source-level rotate-on-full to avoid reselecting a provider that just rejected the open.
+    pub async fn acquire_connection_with_lease_for_session_await_excluding(
+        &self,
+        input_name: &Arc<str>,
+        addr: &SocketAddr,
+        allow_grace: bool,
+        priority: i8,
+        kind: ConnectionKind,
+        lease: Option<PlaybackLeaseRef<'_>>,
+        excluded_providers: &HashSet<Arc<str>>,
+    ) -> Option<ProviderHandle> {
         let params = AcquireProviderParams { addr, priority, kind, lease };
         let outcome = {
             if self.is_shutting_down.load(Ordering::Acquire) {
@@ -1887,8 +1944,17 @@ impl ActiveProviderManager {
             if self.is_shutting_down.load(Ordering::Acquire) {
                 return None;
             }
-            if let Some(handle) = self.acquire_connection_inner_no_preempt(input_name, allow_grace, &params) {
+            if let Some(handle) = self.acquire_connection_inner_no_preempt_excluding(
+                input_name,
+                allow_grace,
+                &params,
+                excluded_providers,
+            ) {
                 return Some(handle);
+            }
+            // Rotation retries must not cascade into preemption; only the first attempt may preempt.
+            if !excluded_providers.is_empty() {
+                return None;
             }
             self.try_preempt_connection_outcome(
                 input_name,
@@ -1921,7 +1987,12 @@ impl ActiveProviderManager {
                         Some(victim_gen),
                     );
                 }
-                self.acquire_connection_inner_no_preempt(input_name, allow_grace, &params)
+                self.acquire_connection_inner_no_preempt_excluding(
+                    input_name,
+                    allow_grace,
+                    &params,
+                    excluded_providers,
+                )
             }
             PreemptionOutcome::Exhausted => None,
         }
@@ -3836,6 +3907,57 @@ mod tests {
             Some(owner_2),
         );
         assert!(acquired.is_some(), "clearing reservation should unblock the provider");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_reserved_owner_falls_back_to_alternate_provider_in_pool_when_reserved_is_full() {
+        let app_cfg = create_test_app_config_with_dual_provider_pool();
+        let event_manager = Arc::new(EventManager::new());
+        let manager = ActiveProviderManager::new(&app_cfg, &event_manager);
+
+        let input_name = "provider_1".intern();
+        let provider_2 = "provider_2".intern();
+        let addr_1: SocketAddr = "127.0.0.1:43201".parse().unwrap();
+        let addr_2: SocketAddr = "127.0.0.1:43202".parse().unwrap();
+        let owner_repeat = "session-owner-repeat";
+
+        // 1. Initial request from owner_repeat reserves provider_1
+        let first = manager.acquire_connection_with_grace_for_session(
+            &input_name,
+            &addr_1,
+            false,
+            default_user_priority(),
+            ConnectionKind::Normal,
+            Some(owner_repeat),
+        );
+        assert!(first.is_some());
+        assert_eq!(first.as_ref().unwrap().allocation.get_provider_name().as_deref(), Some(input_name.as_ref()));
+        manager.refresh_provider_reservation(&input_name, owner_repeat, 30);
+        manager.confirm_playback_activity(owner_repeat);
+
+        // 2. Another user occupies provider_1 to capacity
+        // provider_1 max_connections is 1, so it is now fully occupied.
+        assert!(manager.is_exhausted(&input_name));
+
+        // 3. owner_repeat sends a new request.
+        // Even though owner_repeat has an existing reservation on provider_1,
+        // because provider_1 is full, it MUST fall back to provider_2 in the pool!
+        let fallback = manager.acquire_connection_with_grace_for_session(
+            &input_name,
+            &addr_2,
+            false,
+            default_user_priority(),
+            ConnectionKind::Normal,
+            Some(owner_repeat),
+        );
+        assert!(
+            fallback.is_some(),
+            "owner_repeat must fall back to available alternate provider when reserved account is exhausted"
+        );
+        assert_eq!(
+            fallback.as_ref().unwrap().allocation.get_provider_name().as_deref(),
+            Some(provider_2.as_ref())
+        );
     }
 
     #[tokio::test]

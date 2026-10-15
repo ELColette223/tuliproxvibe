@@ -35,7 +35,7 @@ use shared::{
     error::TuliproxError,
     model::{
         ConfigInputAliasDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto, ConfigInputUpdateQualityDto,
-        ConfigProviderDto, EpgSmartMatchConfigDto, EpgSourceDto, InputFetchMethod, InputType,
+        ConfigProviderDto, ConnectionLimitPolicy, EpgSmartMatchConfigDto, EpgSourceDto, InputFetchMethod, InputType,
         MediaServerInputConfigDto, MediaServerLibrarySelector, OnConnectErrorPolicy, ProviderUrlSelectionPolicy,
         ProxyConfigDto, ResourcePolicyDto, StagedInputType, StalkerDeviceProfileDto, StalkerInputConfigDto,
     },
@@ -88,6 +88,12 @@ const LABEL_XTREAM_LIVE_STREAM_USE_PREFIX: &str = "LABEL.LIVE_STREAM_USE_PREFIX"
 const LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION: &str = "LABEL.LIVE_STREAM_WITHOUT_EXTENSION";
 const LABEL_DISABLE_HLS_STREAMING: &str = "LABEL.DISABLE_HLS_STREAMING";
 const LABEL_USER_AGENT_STREAM_INDEX: &str = "LABEL.USER_AGENT_STREAM_INDEX";
+pub(super) const LABEL_CONNECTION_LIMIT_POLICY: &str = "LABEL.CONNECTION_LIMIT_POLICY";
+pub(super) const LABEL_CONNECTION_LIMIT_POLICY_STRICT: &str = "LABEL.CONNECTION_LIMIT_POLICY_STRICT";
+pub(super) const LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP: &str =
+    "LABEL.CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP";
+pub(super) const LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL: &str =
+    "LABEL.CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL";
 const LABEL_RESOLVE_TMDB: &str = "LABEL.RESOLVE_TMDB";
 const LABEL_RESOLVE: &str = "LABEL.RESOLVE";
 const LABEL_PROBE: &str = "LABEL.PROBE";
@@ -218,6 +224,14 @@ fn provider_url_selection_policy_label_key(policy: ProviderUrlSelectionPolicy) -
     match policy {
         ProviderUrlSelectionPolicy::ResumeLastWorking => LABEL_PROVIDER_URL_SELECTION_RESUME_LAST_WORKING,
         ProviderUrlSelectionPolicy::RestartFromFirst => LABEL_PROVIDER_URL_SELECTION_RESTART_FROM_FIRST,
+    }
+}
+
+pub(super) fn connection_limit_policy_label_key(policy: ConnectionLimitPolicy) -> &'static str {
+    match policy {
+        ConnectionLimitPolicy::Strict => LABEL_CONNECTION_LIMIT_POLICY_STRICT,
+        ConnectionLimitPolicy::BypassLocalCap => LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP,
+        ConnectionLimitPolicy::RotateOnFull => LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL,
     }
 }
 
@@ -393,6 +407,7 @@ generate_form_reducer!(
       SkipVod => skip_vod: bool,
       SkipSeries => skip_series: bool,
       UpdateQuality => update_quality: ConfigInputUpdateQualityDto,
+      ConnectionLimitPolicy => connection_limit_policy: ConnectionLimitPolicy,
       XtreamLiveStreamUsePrefix => xtream_live_stream_use_prefix: bool,
       XtreamLiveStreamWithoutExtension => xtream_live_stream_without_extension: bool,
       DisableHlsStreaming => disable_hls_streaming: bool,

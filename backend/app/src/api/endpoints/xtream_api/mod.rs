@@ -519,7 +519,7 @@ async fn xtream_player_api_stream(
             );
         }
 
-        if app_state.active_provider.is_over_limit(&session.provider) {
+        if item_type.requires_provider_affinity() && app_state.active_provider.is_over_limit(&session.provider) {
             let stream_channel = create_stream_channel_with_type(target.id, &pli, item_type);
             if playback_ext == HLS_EXT {
                 return hls_admission_failure_manifest_response(

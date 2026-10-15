@@ -89,3 +89,5 @@ backend/app/Cargo.lock
 /config/bouquets
 /docker/config/
 /docker/data/
+
+.tmp-validate/
