@@ -1712,6 +1712,21 @@ fn emit_disconnect_record(
     provider_error_class: Option<&str>,
     provider_http_status: Option<u16>,
 ) {
+    let duration_secs = shared::utils::current_time_secs().saturating_sub(info.ts);
+    warn!(
+        "Active stream disconnected: addr={}, stream_uid={}, virtual_id={}, provider={}, channel={}, duration_secs={}, bytes_sent={:?}, reason={:?}, provider_error_class={:?}, provider_http_status={:?}, reconnect_count={:?}",
+        info.addr,
+        info.uid,
+        info.channel.virtual_id,
+        sanitize_sensitive_info(info.provider.as_ref()),
+        sanitize_sensitive_info(info.channel.title.as_ref()),
+        duration_secs,
+        qos.bytes_sent,
+        reason,
+        provider_error_class,
+        provider_http_status,
+        qos.provider_reconnect_count,
+    );
     let guard = writer.load();
     let Some(w) = guard.as_ref() else { return };
     w.send_record(
