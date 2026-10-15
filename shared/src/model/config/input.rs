@@ -265,6 +265,22 @@ impl InputFetchMethod {
     pub fn is_default(value: &InputFetchMethod) -> bool { matches!(value, Self::GET) }
 }
 
+#[derive(
+    Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default, EnumString, AsRefStr, Display,
+)]
+#[strum(serialize_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionLimitPolicy {
+    #[default]
+    Strict,
+    BypassLocalCap,
+    RotateOnFull,
+}
+
+pub fn is_default_connection_limit_policy(v: &ConnectionLimitPolicy) -> bool {
+    *v == ConnectionLimitPolicy::default()
+}
+
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -277,6 +293,8 @@ pub struct ConfigInputOptionsDto {
     pub skip_series: bool,
     #[serde(default, skip_serializing_if = "ConfigInputUpdateQualityDto::is_disabled")]
     pub update_quality: ConfigInputUpdateQualityDto,
+    #[serde(default, skip_serializing_if = "is_default_connection_limit_policy")]
+    pub connection_limit_policy: ConnectionLimitPolicy,
     #[serde(default = "default_xtream_live_stream_use_prefix", skip_serializing_if = "is_true")]
     pub xtream_live_stream_use_prefix: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -329,6 +347,7 @@ impl Default for ConfigInputOptionsDto {
             skip_vod: false,
             skip_series: false,
             update_quality: ConfigInputUpdateQualityDto::default(),
+            connection_limit_policy: ConnectionLimitPolicy::default(),
             xtream_live_stream_use_prefix: default_xtream_live_stream_use_prefix(),
             xtream_live_stream_without_extension: false,
             disable_hls_streaming: false,
@@ -358,6 +377,7 @@ impl ConfigInputOptionsDto {
             && !self.skip_vod
             && !self.skip_series
             && self.update_quality.is_empty()
+            && is_default_connection_limit_policy(&self.connection_limit_policy)
             && self.xtream_live_stream_use_prefix
             && !self.xtream_live_stream_without_extension
             && !self.disable_hls_streaming
@@ -382,6 +402,7 @@ impl ConfigInputOptionsDto {
         self.skip_vod = false;
         self.skip_series = false;
         self.update_quality.clean();
+        self.connection_limit_policy = ConnectionLimitPolicy::default();
         self.xtream_live_stream_use_prefix = default_as_true();
         self.xtream_live_stream_without_extension = false;
         self.disable_hls_streaming = false;
@@ -2178,6 +2199,31 @@ mod tests {
     fn disable_hls_streaming_defaults_to_false() -> Result<(), serde_json::Error> {
         let options: ConfigInputOptionsDto = serde_json::from_str("{}")?;
         assert!(!options.disable_hls_streaming);
+        Ok(())
+    }
+
+    #[test]
+    fn connection_limit_policy_defaults_to_strict_and_is_omitted_on_serialize() -> Result<(), serde_json::Error> {
+        let options: ConfigInputOptionsDto = serde_json::from_str("{}")?;
+        assert_eq!(options.connection_limit_policy, ConnectionLimitPolicy::Strict);
+        assert!(options.is_empty());
+
+        let json = serde_json::to_value(&options)?;
+        assert!(json.get("connection_limit_policy").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn connection_limit_policy_round_trips_non_default() -> Result<(), serde_json::Error> {
+        let options = ConfigInputOptionsDto {
+            connection_limit_policy: ConnectionLimitPolicy::RotateOnFull,
+            ..ConfigInputOptionsDto::default()
+        };
+        assert!(!options.is_empty());
+        let json = serde_json::to_string(&options)?;
+        assert!(json.contains("rotate_on_full"));
+        let restored: ConfigInputOptionsDto = serde_json::from_str(&json)?;
+        assert_eq!(restored.connection_limit_policy, ConnectionLimitPolicy::RotateOnFull);
         Ok(())
     }
 

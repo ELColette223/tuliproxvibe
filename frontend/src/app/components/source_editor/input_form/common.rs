@@ -1,6 +1,10 @@
 use super::{
+    connection_limit_policy_from_id, connection_limit_policy_label_key, connection_limit_policy_to_id,
     input_persist_hint_key, input_url_hint_key, ConfigInputFormAction, ConfigInputFormState,
-    ConfigInputOptionsDtoFormState, ConfigInputOptionsFormAction, LABEL_CACHE_DURATION, LABEL_DISABLE_HLS_STREAMING,
+    ConfigInputOptionsDtoFormState, ConfigInputOptionsFormAction, CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP,
+    CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL, CONNECTION_LIMIT_POLICY_STRICT, LABEL_CACHE_DURATION,
+    LABEL_CONNECTION_LIMIT_POLICY, LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP,
+    LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL, LABEL_CONNECTION_LIMIT_POLICY_STRICT, LABEL_DISABLE_HLS_STREAMING,
     LABEL_ENABLED, LABEL_EXP_DATE, LABEL_FETCH_METHOD, LABEL_HEADERS, LABEL_LIVE, LABEL_LIVE_STREAMS,
     LABEL_MAX_CONNECTIONS, LABEL_METADATA, LABEL_NAME, LABEL_PASSWORD, LABEL_PERSIST, LABEL_PRIORITY, LABEL_PROBE,
     LABEL_PROBE_DELAY_SEC, LABEL_PROBE_FILTER, LABEL_PROBE_LIVE, LABEL_PROBE_LIVE_INTERVAL_HOURS, LABEL_PROBE_SERIES,
@@ -10,7 +14,10 @@ use super::{
     LABEL_XTREAM_LIVE_STREAM_USE_PREFIX, LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION,
 };
 use crate::{
-    app::components::{Card, FilterInput, KeyValueEditor, RadioButtonGroup, RangeSlider, TitledCard, ToolAction},
+    app::components::{
+        select::Select, selection_first, Card, DropDownOption, DropDownSelection, FilterInput, KeyValueEditor,
+        RadioButtonGroup, RangeSlider, TitledCard, ToolAction,
+    },
     config_field, config_field_bool, config_field_child, config_field_custom, config_field_optional,
     config_field_optional_hide, edit_field_bool, edit_field_exp_date, edit_field_number_i16,
     edit_field_number_option_u32, edit_field_number_u16, edit_field_number_u32, edit_field_text,
@@ -19,7 +26,7 @@ use crate::{
     utils::content_cluster_presentation,
 };
 use shared::{
-    model::{ConfigInputUpdateQualityDto, InputFetchMethod, XtreamCluster},
+    model::{ConfigInputUpdateQualityDto, ConnectionLimitPolicy, InputFetchMethod, XtreamCluster},
     utils::BATCH_SCHEME_PREFIX,
 };
 use std::{collections::HashMap, rc::Rc};
@@ -316,9 +323,54 @@ pub(super) fn InputOptionsForm(props: &InputOptionsFormProps) -> Html {
         (false, OptionsKind::Xtream) => xtream_options_readonly(&state, &translate, update_quality),
         (true, OptionsKind::Xtream) => xtream_options_editable(&state, &translate, update_quality),
     };
+    let connection_limit_policy_options = Rc::new(vec![
+        DropDownOption::new(
+            CONNECTION_LIMIT_POLICY_STRICT,
+            html! { { translate.t(LABEL_CONNECTION_LIMIT_POLICY_STRICT) } },
+            connection_limit_policy_to_id(state.form.connection_limit_policy) == CONNECTION_LIMIT_POLICY_STRICT,
+        ),
+        DropDownOption::new(
+            CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP,
+            html! { { translate.t(LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP) } },
+            connection_limit_policy_to_id(state.form.connection_limit_policy)
+                == CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP,
+        ),
+        DropDownOption::new(
+            CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL,
+            html! { { translate.t(LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL) } },
+            connection_limit_policy_to_id(state.form.connection_limit_policy)
+                == CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL,
+        ),
+    ]);
+    let connection_policy_state = state.clone();
+    let handle_connection_policy_select = Callback::from(move |(_, selection): (String, DropDownSelection)| {
+        let policy =
+            selection_first(&selection).map_or(ConnectionLimitPolicy::default(), connection_limit_policy_from_id);
+        connection_policy_state.dispatch(ConfigInputOptionsFormAction::ConnectionLimitPolicy(policy));
+    });
+
     html! {
         <Card class="tp__config-view__card">
             {type_options}
+            <TitledCard title={translate.t(LABEL_CONNECTION_LIMIT_POLICY)}>
+                if props.allow_write {
+                    { config_field_child!(translate.t(LABEL_CONNECTION_LIMIT_POLICY), "CONFIG_INPUT_OPTIONS.CONNECTION_LIMIT_POLICY", {
+                        html! {
+                            <Select
+                                name={"connection_limit_policy"}
+                                multi_select={false}
+                                on_select={handle_connection_policy_select}
+                                options={connection_limit_policy_options}
+                            />
+                        }
+                    })}
+                } else {
+                    { config_field_custom!(
+                        translate.t(LABEL_CONNECTION_LIMIT_POLICY),
+                        translate.t(connection_limit_policy_label_key(state.form.connection_limit_policy))
+                    ) }
+                }
+            </TitledCard>
             <TitledCard title={translate.t(LABEL_METADATA)}>
                 if props.allow_write {
                     { edit_field_bool!(state, translate.t(LABEL_RESOLVE_TMDB), resolve_tmdb, ConfigInputOptionsFormAction::ResolveTmdb) }

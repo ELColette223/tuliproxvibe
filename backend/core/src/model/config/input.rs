@@ -10,9 +10,9 @@ use shared::{
     foundation::Filter,
     model::{
         ClusterFlags, ConfigInputAliasDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto,
-        InputFetchMethod, InputType, MediaServerCatalogConfigDto, MediaServerImagePolicy, MediaServerInputConfigDto,
-        MediaServerLibrarySelector, MediaServerPlaybackConfigDto, StagedInputType, StalkerAuthMode,
-        StalkerDeviceProfileDto, StalkerEndpointPreference, StalkerInputConfigDto, StalkerMagPreset,
+        ConnectionLimitPolicy, InputFetchMethod, InputType, MediaServerCatalogConfigDto, MediaServerImagePolicy,
+        MediaServerInputConfigDto, MediaServerLibrarySelector, MediaServerPlaybackConfigDto, StagedInputType,
+        StalkerAuthMode, StalkerDeviceProfileDto, StalkerEndpointPreference, StalkerInputConfigDto, StalkerMagPreset,
     },
     utils::{
         get_credentials_from_url, get_credentials_from_url_str, is_non_blank_optional_string,
@@ -58,6 +58,7 @@ create_bitset!(
 #[derive(Debug, Clone)]
 pub struct ConfigInputOptions {
     pub flags: ConfigInputFlagsSet,
+    pub connection_limit_policy: ConnectionLimitPolicy,
     pub update_quality: ConfigInputUpdateQuality,
     pub resolve_delay: u16,
     pub probe_delay: u16,
@@ -104,6 +105,7 @@ impl From<&ConfigInputOptionsDto> for ConfigInputOptions {
 
         Self {
             flags,
+            connection_limit_policy: dto.connection_limit_policy,
             update_quality: ConfigInputUpdateQuality::from(&dto.update_quality),
             resolve_delay: dto.resolve_delay,
             probe_delay: dto.probe_delay,
@@ -591,6 +593,21 @@ impl ConfigInput {
 
     #[inline]
     pub fn has_flag(&self, flag: ConfigInputFlags) -> bool { self.has_flag_or(flag, false) }
+
+    #[inline]
+    pub fn connection_limit_policy(&self) -> ConnectionLimitPolicy {
+        self.options.as_ref().map_or(ConnectionLimitPolicy::Strict, |options| options.connection_limit_policy)
+    }
+
+    #[inline]
+    pub fn bypass_local_connection_cap(&self) -> bool {
+        matches!(self.connection_limit_policy(), ConnectionLimitPolicy::BypassLocalCap)
+    }
+
+    #[inline]
+    pub fn rotate_on_connection_full(&self) -> bool {
+        matches!(self.connection_limit_policy(), ConnectionLimitPolicy::RotateOnFull)
+    }
 
     #[inline]
     /// Returns `default` when `self.options` is `None`; unlike `has_flag`, which returns
