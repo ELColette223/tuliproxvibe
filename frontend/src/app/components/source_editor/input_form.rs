@@ -95,9 +95,6 @@ pub(super) const LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP: &str =
 pub(super) const LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL: &str =
     "LABEL.CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL";
 const LABEL_RESOLVE_TMDB: &str = "LABEL.RESOLVE_TMDB";
-pub(super) const CONNECTION_LIMIT_POLICY_STRICT: &str = "strict";
-pub(super) const CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP: &str = "bypass_local_cap";
-pub(super) const CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL: &str = "rotate_on_full";
 const LABEL_RESOLVE: &str = "LABEL.RESOLVE";
 const LABEL_PROBE: &str = "LABEL.PROBE";
 const LABEL_RESOLVE_DELAY_SEC: &str = "LABEL.RESOLVE_DELAY_SEC";
@@ -227,22 +224,6 @@ fn provider_url_selection_policy_label_key(policy: ProviderUrlSelectionPolicy) -
     match policy {
         ProviderUrlSelectionPolicy::ResumeLastWorking => LABEL_PROVIDER_URL_SELECTION_RESUME_LAST_WORKING,
         ProviderUrlSelectionPolicy::RestartFromFirst => LABEL_PROVIDER_URL_SELECTION_RESTART_FROM_FIRST,
-    }
-}
-
-pub(super) fn connection_limit_policy_to_id(policy: ConnectionLimitPolicy) -> &'static str {
-    match policy {
-        ConnectionLimitPolicy::Strict => CONNECTION_LIMIT_POLICY_STRICT,
-        ConnectionLimitPolicy::BypassLocalCap => CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP,
-        ConnectionLimitPolicy::RotateOnFull => CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL,
-    }
-}
-
-pub(super) fn connection_limit_policy_from_id(id: &str) -> ConnectionLimitPolicy {
-    match id {
-        CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP => ConnectionLimitPolicy::BypassLocalCap,
-        CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL => ConnectionLimitPolicy::RotateOnFull,
-        _ => ConnectionLimitPolicy::Strict,
     }
 }
 

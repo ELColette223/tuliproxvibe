@@ -1311,10 +1311,11 @@ async fn open_provider_stream_with_optional_rotation(
                 };
                 *request_url = Arc::<str>::from(rewritten_url);
                 streaming_strategy.provider_handle = Some(managed);
-                debug_if_enabled!(
-                    "rotate_on_full: attempt {} failed with {}; retrying with next provider",
+                warn!(
+                    "rotate_on_full: attempt {} failed with {} (status {}); retrying with next provider",
                     attempt + 1,
-                    provider_error_class
+                    provider_error_class,
+                    status
                 );
                 continue;
             }

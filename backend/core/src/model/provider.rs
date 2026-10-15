@@ -9,7 +9,7 @@ use crate::{
     model::{is_input_expired, ConfigInput, ConfigInputAlias, InputUserInfo},
     utils::debug_if_enabled,
 };
-use log::debug;
+use log::{debug, info};
 use shared::{model::InputType, utils::sanitize_sensitive_info, write_if_some};
 use std::{
     fmt,
@@ -392,7 +392,7 @@ impl ProviderConfig {
     #[inline]
     pub fn is_over_limit(&self, grace_period_timeout_secs: u64) -> bool {
         let max = self.max_connections;
-        if max == 0 {
+        if max == 0 || self.bypass_local_cap {
             return false;
         }
         let guard = self.read_connection();
@@ -432,7 +432,7 @@ impl ProviderConfig {
         let connections = guard.current_connections;
         if connections < self.max_connections || self.bypass_local_cap {
             if self.bypass_local_cap && connections >= self.max_connections {
-                debug!(
+                info!(
                     "Provider {} bypassing configured connection cap (current_connections={}, max_connections={})",
                     sanitize_sensitive_info(&self.name),
                     connections,
@@ -470,7 +470,7 @@ impl ProviderConfig {
             return false;
         }
 
-        if self.max_connections == 0 {
+        if self.max_connections == 0 || self.bypass_local_cap {
             return true;
         }
         let mut guard = self.write_connection();
@@ -649,6 +649,25 @@ mod tests {
         assert!(matches!(provider.try_allocate(false, 10), ProviderConfigAllocation::Available));
         assert_eq!(provider.get_current_connections(), 2);
         assert!(provider.is_exhausted());
+        assert!(!provider.is_over_limit(10));
+        assert!(provider.get_next(false, 10));
+    }
+
+    #[tokio::test]
+    async fn strict_policy_still_blocks_over_limit_and_get_next() {
+        let provider = build_test_config_with_policy(1, ConnectionLimitPolicy::Strict);
+        assert!(matches!(provider.try_allocate(false, 10), ProviderConfigAllocation::Available));
+        assert!(matches!(provider.try_allocate(false, 10), ProviderConfigAllocation::Exhausted));
+        assert!(provider.is_exhausted());
+        assert!(!provider.is_over_limit(10));
+        assert!(!provider.get_next(false, 10));
+
+        // Force a true over-limit state via grace release semantics path.
+        {
+            let mut guard = provider.write_connection();
+            guard.current_connections = 2;
+        }
+        assert!(provider.is_over_limit(10));
     }
 
     #[tokio::test]
