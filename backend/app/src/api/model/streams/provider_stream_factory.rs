@@ -414,6 +414,31 @@ fn classify_provider_status_error(status: StatusCode) -> &'static str {
     }
 }
 
+fn bandwidth_limit_exceeded_status() -> StatusCode {
+    StatusCode::from_u16(509).unwrap_or(StatusCode::SERVICE_UNAVAILABLE)
+}
+
+fn is_account_full_status(status: StatusCode) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS
+        || status == StatusCode::SERVICE_UNAVAILABLE
+        || status == bandwidth_limit_exceeded_status()
+}
+
+fn looks_like_connection_limit_message(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    const MARKERS: [&str; 8] = [
+        "max connections",
+        "maximum connections",
+        "connection limit",
+        "connections limit",
+        "too many connections",
+        "active_cons",
+        "no connections available",
+        "device limit",
+    ];
+    MARKERS.iter().any(|marker| lower.contains(marker))
+}
+
 fn provider_content_type_looks_like_html(headers: &HeaderMap) -> bool {
     headers
         .get(reqwest::header::CONTENT_TYPE)
@@ -428,6 +453,15 @@ fn should_reject_success_response_content_type(item_type: PlaylistItemType, head
 #[derive(Clone, Copy, Debug)]
 enum ProviderStreamRequestFailure {
     Status { status: StatusCode, provider_error_class: &'static str, serve_channel_unavailable: bool },
+    AccountFull { status: StatusCode, provider_error_class: &'static str },
+}
+
+/// Typed provider-open outcome used by callers that need account-full rotation before
+/// converting the failure into a custom error video.
+pub enum ProviderStreamOpenOutcome {
+    Opened(ProviderStreamFactoryResponse),
+    AccountFull { status: StatusCode, provider_error_class: &'static str },
+    Failed,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -460,21 +494,26 @@ impl ProviderStreamPreparationError {
 impl ProviderStreamRequestFailure {
     fn status(self) -> StatusCode {
         match self {
-            Self::Status { status, .. } => status,
+            Self::Status { status, .. } | Self::AccountFull { status, .. } => status,
         }
     }
 
     fn provider_error_class(self) -> &'static str {
         match self {
-            Self::Status { provider_error_class, .. } => provider_error_class,
+            Self::Status { provider_error_class, .. } | Self::AccountFull { provider_error_class, .. } => {
+                provider_error_class
+            }
         }
     }
 
     fn should_serve_channel_unavailable(self) -> bool {
         match self {
             Self::Status { serve_channel_unavailable, .. } => serve_channel_unavailable,
+            Self::AccountFull { .. } => true,
         }
     }
+
+    fn is_account_full(self) -> bool { matches!(self, Self::AccountFull { .. }) }
 }
 
 fn classify_provider_io_error(err: &std::io::Error) -> &'static str {
@@ -944,6 +983,13 @@ async fn provider_stream_request(
                         "Provider returned HTML content for non-adaptive stream {}",
                         sanitize_sensitive_info(stream_options.get_log_url().as_ref())
                     );
+                    let preview = response.text().await.unwrap_or_default();
+                    if looks_like_connection_limit_message(&preview) {
+                        return Err(ProviderStreamRequestFailure::AccountFull {
+                            status: StatusCode::TOO_MANY_REQUESTS,
+                            provider_error_class: "account_full_html",
+                        });
+                    }
                     return Err(ProviderStreamRequestFailure::Status {
                         status: StatusCode::BAD_GATEWAY,
                         provider_error_class: "unexpected_content_type",
@@ -971,6 +1017,13 @@ async fn provider_stream_request(
                 return Ok(Some(response));
             }
 
+            if is_account_full_status(status) {
+                debug!("Account-full status response : {status}");
+                return Err(ProviderStreamRequestFailure::AccountFull {
+                    status,
+                    provider_error_class: "account_full",
+                });
+            }
             if status.is_client_error() {
                 debug!("Client error status response : {status}");
                 return match status {
@@ -996,7 +1049,6 @@ async fn provider_stream_request(
                 return match status {
                     StatusCode::INTERNAL_SERVER_ERROR
                     | StatusCode::BAD_GATEWAY
-                    | StatusCode::SERVICE_UNAVAILABLE
                     | StatusCode::GATEWAY_TIMEOUT => Err(ProviderStreamRequestFailure::Status {
                         status,
                         provider_error_class: classify_provider_status_error(status),
@@ -1157,11 +1209,11 @@ impl Drop for ProviderOpenGuard {
 }
 
 #[allow(clippy::too_many_lines)]
-pub async fn create_provider_stream(
+pub async fn create_provider_stream_outcome(
     ctx: &ProviderStreamCtx,
     client: &reqwest::Client,
     stream_options: ProviderStreamFactoryOptions,
-) -> Option<ProviderStreamFactoryResponse> {
+) -> ProviderStreamOpenOutcome {
     let mut open_guard = ProviderOpenGuard { token: stream_options.get_completion_token(), handed_off: false };
     match get_provider_stream(ctx, client, &stream_options).await {
         Ok(Some(ProviderStreamFactoryResponse { stream: init_stream, info, provider_session_headers, .. })) => {
@@ -1178,7 +1230,7 @@ pub async fn create_provider_stream(
                 if let Some(reason) = reason {
                     record_provider_open_failure(ctx, &stream_options, reason, None, None);
                 }
-                return Some(ProviderStreamFactoryResponse {
+                return ProviderStreamOpenOutcome::Opened(ProviderStreamFactoryResponse {
                     stream: ClientStream::new(init_stream, continue_signal, None, stream_options.get_url_as_str())
                         .boxed(),
                     info,
@@ -1232,7 +1284,7 @@ pub async fn create_provider_stream(
             )
             .boxed();
 
-            Some(ProviderStreamFactoryResponse {
+            ProviderStreamOpenOutcome::Opened(ProviderStreamFactoryResponse {
                 stream: ClientStream::new(stream, continue_signal.clone(), None, stream_options.get_url_as_str())
                     .boxed(),
                 info,
@@ -1240,30 +1292,64 @@ pub async fn create_provider_stream(
                 has_upstream_owner: true,
             })
         }
-        Ok(None) => None,
+        Ok(None) => ProviderStreamOpenOutcome::Failed,
         Err(failure) => {
             let status = failure.status();
+            let provider_error_class = failure.provider_error_class();
+            if failure.is_account_full() {
+                record_provider_open_failure(
+                    ctx,
+                    &stream_options,
+                    ConnectFailureReason::ProviderConnectionsExhausted,
+                    Some(status),
+                    Some(provider_error_class),
+                );
+                return ProviderStreamOpenOutcome::AccountFull { status, provider_error_class };
+            }
             record_provider_open_failure(
                 ctx,
                 &stream_options,
                 ConnectFailureReason::ChannelUnavailable,
                 Some(status),
-                Some(failure.provider_error_class()),
+                Some(provider_error_class),
             );
             if let (Some(boxed_provider_stream), response_info) = create_channel_unavailable_stream(
                 &ctx.app_config,
                 &get_response_headers(stream_options.get_headers()),
                 StatusCode::OK,
             ) {
-                return Some(ProviderStreamFactoryResponse {
+                return ProviderStreamOpenOutcome::Opened(ProviderStreamFactoryResponse {
                     stream: boxed_provider_stream,
                     info: response_info,
                     provider_session_headers: HashMap::new(),
                     has_upstream_owner: false,
                 });
             }
-            None
+            ProviderStreamOpenOutcome::Failed
         }
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+pub async fn create_provider_stream(
+    ctx: &ProviderStreamCtx,
+    client: &reqwest::Client,
+    stream_options: ProviderStreamFactoryOptions,
+) -> Option<ProviderStreamFactoryResponse> {
+    let response_headers = get_response_headers(stream_options.get_headers());
+    match create_provider_stream_outcome(ctx, client, stream_options).await {
+        ProviderStreamOpenOutcome::Opened(response) => Some(response),
+        ProviderStreamOpenOutcome::AccountFull { .. } => {
+            let (boxed_provider_stream, response_info) =
+                create_channel_unavailable_stream(&ctx.app_config, &response_headers, StatusCode::OK);
+            boxed_provider_stream.map(|stream| ProviderStreamFactoryResponse {
+                stream,
+                info: response_info,
+                provider_session_headers: HashMap::new(),
+                has_upstream_owner: false,
+            })
+        }
+        ProviderStreamOpenOutcome::Failed => None,
     }
 }
 
@@ -1293,12 +1379,12 @@ impl ProviderStreamOpenLifecycle {
     pub fn register_body_owner(&self) -> bool { self.manager.register_body_owner(self.allocation_id) }
 }
 
-pub async fn open_provider_stream_with_lifecycle(
+pub async fn open_provider_stream_outcome_with_lifecycle(
     ctx: &ProviderStreamCtx,
     client: &reqwest::Client,
     mut stream_options: ProviderStreamFactoryOptions,
     lifecycle: Option<ProviderStreamOpenLifecycle>,
-) -> Option<ProviderStreamFactoryResponse> {
+) -> ProviderStreamOpenOutcome {
     if let Some(ref lc) = lifecycle {
         lc.mark_opening();
         stream_options.set_provider_handle_tokens(
@@ -1307,15 +1393,42 @@ pub async fn open_provider_stream_with_lifecycle(
             lc.close_reason.clone(),
         );
     }
-    let response = create_provider_stream(ctx, client, stream_options).await?;
-    if response.has_upstream_owner {
-        if let Some(ref lc) = lifecycle {
-            if !lc.register_body_owner() {
-                return None;
+    match create_provider_stream_outcome(ctx, client, stream_options).await {
+        ProviderStreamOpenOutcome::Opened(response) => {
+            if response.has_upstream_owner {
+                if let Some(ref lc) = lifecycle {
+                    if !lc.register_body_owner() {
+                        return ProviderStreamOpenOutcome::Failed;
+                    }
+                }
             }
+            ProviderStreamOpenOutcome::Opened(response)
         }
+        other => other,
     }
-    Some(response)
+}
+
+pub async fn open_provider_stream_with_lifecycle(
+    ctx: &ProviderStreamCtx,
+    client: &reqwest::Client,
+    stream_options: ProviderStreamFactoryOptions,
+    lifecycle: Option<ProviderStreamOpenLifecycle>,
+) -> Option<ProviderStreamFactoryResponse> {
+    let response_headers = get_response_headers(stream_options.get_headers());
+    match open_provider_stream_outcome_with_lifecycle(ctx, client, stream_options, lifecycle).await {
+        ProviderStreamOpenOutcome::Opened(response) => Some(response),
+        ProviderStreamOpenOutcome::AccountFull { .. } => {
+            let (boxed_provider_stream, response_info) =
+                create_channel_unavailable_stream(&ctx.app_config, &response_headers, StatusCode::OK);
+            boxed_provider_stream.map(|stream| ProviderStreamFactoryResponse {
+                stream,
+                info: response_info,
+                provider_session_headers: HashMap::new(),
+                has_upstream_owner: false,
+            })
+        }
+        ProviderStreamOpenOutcome::Failed => None,
+    }
 }
 
 #[cfg(test)]

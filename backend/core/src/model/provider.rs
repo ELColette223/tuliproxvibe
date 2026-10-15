@@ -213,6 +213,7 @@ pub struct ProviderConfig {
     max_connections: usize,
     priority: i16,
     exp_date: Option<i64>,
+    bypass_local_cap: bool,
     connection: Arc<RwLock<ProviderConfigConnection>>,
     on_connection_change: ProviderConnectionChangeCallback,
 }
@@ -251,6 +252,7 @@ impl PartialEq for ProviderConfig {
             && self.max_connections == other.max_connections
             && self.priority == other.priority
             && self.exp_date == other.exp_date
+            && self.bypass_local_cap == other.bypass_local_cap
         // Note: self.connection is skipped
     }
 }
@@ -323,6 +325,7 @@ impl ProviderConfig {
             max_connections: effective_max_connections,
             priority: cfg.priority,
             exp_date: cfg.exp_date,
+            bypass_local_cap: cfg.bypass_local_connection_cap(),
             connection,
             on_connection_change,
         }
@@ -354,6 +357,7 @@ impl ProviderConfig {
             max_connections: effective_max_connections,
             priority: alias.priority,
             exp_date: alias.exp_date,
+            bypass_local_cap: cfg.bypass_local_connection_cap(),
             connection,
             on_connection_change,
         }
@@ -426,7 +430,15 @@ impl ProviderConfig {
             return ProviderConfigAllocation::Available;
         }
         let connections = guard.current_connections;
-        if connections < self.max_connections {
+        if connections < self.max_connections || self.bypass_local_cap {
+            if self.bypass_local_cap && connections >= self.max_connections {
+                debug!(
+                    "Provider {} bypassing configured connection cap (current_connections={}, max_connections={})",
+                    sanitize_sensitive_info(&self.name),
+                    connections,
+                    self.max_connections
+                );
+            }
             guard.grace_started_at = None;
             modify_connections!(self, guard, +1);
             return ProviderConfigAllocation::Available;
@@ -551,13 +563,18 @@ impl PartialEq for ProviderAllocation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::model::{InputFetchMethod, InputType, StagedInputType};
+    use crate::model::ConfigInputOptions;
+    use shared::model::{ConnectionLimitPolicy, InputFetchMethod, InputType, StagedInputType};
     use std::{
         collections::HashMap,
         sync::atomic::{AtomicUsize, Ordering},
     };
 
     fn build_test_config(max_connections: u16) -> ProviderConfig {
+        build_test_config_with_policy(max_connections, ConnectionLimitPolicy::Strict)
+    }
+
+    fn build_test_config_with_policy(max_connections: u16, policy: ConnectionLimitPolicy) -> ProviderConfig {
         let input = ConfigInput {
             id: 1,
             name: Arc::from("test-provider"),
@@ -573,7 +590,10 @@ mod tests {
             persist: None,
             enabled: true,
             sequential_group: None,
-            options: None,
+            options: Some(ConfigInputOptions {
+                connection_limit_policy: policy,
+                ..ConfigInputOptions::defaults().clone()
+            }),
             media_server: None,
             aliases: None,
             method: InputFetchMethod::default(),
@@ -620,6 +640,15 @@ mod tests {
         let guard = provider.read_connection();
         assert_eq!(guard.current_connections, 1, "release must still decrement connection count");
         assert!(guard.grace_started_at.is_some(), "release must not clear grace state for unlimited provider");
+    }
+
+    #[tokio::test]
+    async fn bypass_local_cap_allows_allocation_above_configured_max() {
+        let provider = build_test_config_with_policy(1, ConnectionLimitPolicy::BypassLocalCap);
+        assert!(matches!(provider.try_allocate(false, 10), ProviderConfigAllocation::Available));
+        assert!(matches!(provider.try_allocate(false, 10), ProviderConfigAllocation::Available));
+        assert_eq!(provider.get_current_connections(), 2);
+        assert!(provider.is_exhausted());
     }
 
     #[tokio::test]
