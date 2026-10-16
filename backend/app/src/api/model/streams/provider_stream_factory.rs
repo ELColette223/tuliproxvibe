@@ -542,6 +542,21 @@ fn classify_provider_io_error(err: &std::io::Error) -> &'static str {
     }
 }
 
+/// The low-level HTTP helpers turn non-success statuses into `io::Error`
+/// (`Request failed (429 Too Many Requests): ...`). Recover the status so
+/// `rotate_on_full` can treat account-full responses as `AccountFull`
+/// instead of a generic channel-unavailable failure.
+fn account_full_status_from_io_error(err: &std::io::Error) -> Option<StatusCode> {
+    let message = err.to_string();
+    let Some(rest) = message.strip_prefix("Request failed (") else {
+        return None;
+    };
+    let code_token = rest.split([' ', ')']).next()?;
+    let code = code_token.parse::<u16>().ok()?;
+    let status = StatusCode::from_u16(code).ok()?;
+    is_account_full_status(status).then_some(status)
+}
+
 fn should_wrap_provider_stream_in_buffer(stream_options: &ProviderStreamFactoryOptions) -> bool {
     !stream_options.is_piped()
         && !stream_options.flags.contains(ProviderStreamFactoryFlags::ShareStream)
@@ -1075,6 +1090,13 @@ async fn provider_stream_request(
                 sanitize_sensitive_info(&err.to_string()),
                 sanitize_sensitive_info(&diagnostics)
             );
+            if let Some(status) = account_full_status_from_io_error(&err) {
+                debug!("Account-full status recovered from transport error: {status}");
+                return Err(ProviderStreamRequestFailure::AccountFull {
+                    status,
+                    provider_error_class: "account_full",
+                });
+            }
             Err(ProviderStreamRequestFailure::Status {
                 status: StatusCode::SERVICE_UNAVAILABLE,
                 provider_error_class: classify_provider_io_error(&err),
@@ -2691,5 +2713,20 @@ mod tests {
 
         assert!(matches!(error, StreamError::ContentDecoding(_)));
         assert_eq!(requests.load(Ordering::SeqCst), 1, "a body-stream failure cannot trigger a new request");
+    }
+
+    #[test]
+    fn account_full_status_is_recovered_from_transport_error_message() {
+        let err = std::io::Error::other("Request failed (429 Too Many Requests): http://provider.example/live/1.ts");
+        assert_eq!(account_full_status_from_io_error(&err), Some(StatusCode::TOO_MANY_REQUESTS));
+
+        let err = std::io::Error::other("Request failed (503 Service Unavailable): http://provider.example/live/1.ts");
+        assert_eq!(account_full_status_from_io_error(&err), Some(StatusCode::SERVICE_UNAVAILABLE));
+
+        let err = std::io::Error::other("Request failed (403 Forbidden): http://provider.example/live/1.ts");
+        assert_eq!(account_full_status_from_io_error(&err), None);
+
+        let err = std::io::Error::other("connection reset by peer");
+        assert_eq!(account_full_status_from_io_error(&err), None);
     }
 }
