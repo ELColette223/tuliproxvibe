@@ -7,8 +7,9 @@ use crate::{
             is_seekable_media_request, is_session_based_playback, is_stream_share_enabled, local_stream_response,
             log_resource_rejection, redirect, redirect_response, reentry_suppressed_response, rejection_status,
             resolve_initial_stalker_playback_url, resolve_resource, resource_response, separate_number_and_remainder,
-            should_allow_exhausted_shared_reconnect, stream_response, try_option_bad_request, try_result_bad_request,
-            try_result_not_found, try_unwrap_body, RedirectParams, ResourceFetchOptions,
+            shared_live_mpeg_ts_key, should_allow_exhausted_shared_reconnect, stream_response_with_shared_key,
+            try_option_bad_request, try_result_bad_request, try_result_not_found, try_unwrap_body, RedirectParams,
+            ResourceFetchOptions,
         },
         endpoints::{
             hls_api::{
@@ -292,6 +293,16 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
         crate::api::api_utils::EvictionReentryGuard::SocketPlayback { virtual_id: pli.virtual_id }
     };
     let user_session = app_state.active_users.get_and_update_user_session(&user.username, &session_key).await;
+    let share_stream = is_stream_share_enabled(pli.item_type, &target);
+    let shared_key = shared_live_mpeg_ts_key(
+        target.id,
+        pli.input_name.as_ref(),
+        pli.get_input_stream_id().as_deref(),
+        pli.virtual_id.get(),
+    );
+    let session_matches_shared_key =
+        user_session.as_ref().is_some_and(|session| session.shared_stream_key.as_deref() == Some(shared_key.as_str()))
+            && user_session.as_ref().is_some_and(|session| session.virtual_id == virtual_id.get());
 
     let session_url = if let Some(session) = &user_session {
         if session.permission == UserConnectionPermission::Exhausted {
@@ -363,6 +374,8 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
         }
         if pli.item_type == PlaylistItemType::Catchup {
             pli.url.clone()
+        } else if session_matches_shared_key {
+            pli.url.clone()
         } else {
             session.stream_url.clone()
         }
@@ -387,12 +400,8 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
         .kind()
         .or(user_session.as_ref().and_then(|session| session.connection_kind))
         .unwrap_or(crate::api::model::ConnectionKind::Normal);
-    let allow_exhausted_shared_reconnect = should_allow_exhausted_shared_reconnect(
-        is_stream_share_enabled(pli.item_type, &target),
-        user_session.as_ref(),
-        virtual_id.get(),
-        session_url.as_ref(),
-    );
+    let allow_exhausted_shared_reconnect =
+        should_allow_exhausted_shared_reconnect(share_stream, user_session.as_ref(), virtual_id.get(), &shared_key);
     if connection_permission == UserConnectionPermission::Exhausted && !allow_exhausted_shared_reconnect {
         if connection_admission.is_reentry_suppressed() {
             return reentry_suppressed_response();
@@ -487,7 +496,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
     let pinned_provider =
         user_session.as_ref().filter(|_| pli.item_type.requires_provider_affinity()).map(|session| &session.provider);
 
-    stream_response(
+    stream_response_with_shared_key(
         fingerprint,
         app_state,
         &session_key,
@@ -503,6 +512,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
         connection_kind,
         allow_exhausted_shared_reconnect,
         grace_mode,
+        Some(&shared_key),
     )
     .await
     .into_response()

@@ -68,7 +68,9 @@ fn get_adaptive_session_ttl_secs(config: &Config) -> u64 {
         .map_or_else(default_hls_session_ttl_secs, |s| s.hls_session_ttl_secs)
 }
 
-fn stream_history_session_id(ts: u64, uid: u32) -> u64 { (ts << 32) | u64::from(uid) }
+fn stream_history_session_id(ts: u64, uid: u32) -> u64 {
+    (ts << 32) | u64::from(uid)
+}
 
 fn decide_connection_kind(
     counts: UserConnectionCounts,
@@ -126,7 +128,9 @@ impl PlaybackLifecycle {
     /// Returns true for lifecycle states that own a counted admission lease.
     /// Both `Active` and `GraceActive` count — `GraceActive` is a provisional
     /// counted state for `GraceMode::Instant` sessions.
-    pub fn is_counted(&self) -> bool { matches!(self, Self::Active | Self::GraceActive) }
+    pub fn is_counted(&self) -> bool {
+        matches!(self, Self::Active | Self::GraceActive)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -136,6 +140,7 @@ pub struct UserSession {
     pub virtual_id: u32,
     pub provider: Arc<str>,
     pub stream_url: Arc<str>,
+    pub shared_stream_key: Option<Arc<str>>,
     pub provider_session_headers: HashMap<String, String>,
     /// Stable suffix appended to upstream User-Agent headers for this playback session.
     pub user_agent_stream_index: Option<u64>,
@@ -194,11 +199,17 @@ impl ConnectionAdmission {
         }
     }
 
-    pub fn permission(&self) -> UserConnectionPermission { self.permission }
+    pub fn permission(&self) -> UserConnectionPermission {
+        self.permission
+    }
 
-    pub fn kind(&self) -> Option<ConnectionKind> { self.kind }
+    pub fn kind(&self) -> Option<ConnectionKind> {
+        self.kind
+    }
 
-    pub fn rejection_reason(&self) -> Option<AdmissionRejectionReason> { self.rejection_reason }
+    pub fn rejection_reason(&self) -> Option<AdmissionRejectionReason> {
+        self.rejection_reason
+    }
 
     pub fn is_reentry_suppressed(&self) -> bool {
         self.rejection_reason == Some(AdmissionRejectionReason::RecentEvictionReentry)
@@ -227,7 +238,9 @@ pub enum StreamRequestDetach {
 }
 
 impl StreamRequestDetach {
-    pub fn request_was_detached(&self) -> bool { !matches!(self, Self::NotFound) }
+    pub fn request_was_detached(&self) -> bool {
+        !matches!(self, Self::NotFound)
+    }
 
     pub fn stream_info(&self) -> Option<&StreamInfo> {
         match self {
@@ -636,7 +649,9 @@ fn clear_session_addr(session: &mut UserSession, addr: &SocketAddr) -> bool {
 }
 
 impl SocketRegistration {
-    fn anonymous() -> Self { Self { usernames: HashSet::new(), ts: current_time_secs() } }
+    fn anonymous() -> Self {
+        Self { usernames: HashSet::new(), ts: current_time_secs() }
+    }
 
     fn add_user(&mut self, username: &str, ts: u64) {
         if !username.is_empty() && !self.usernames.contains(username) {
@@ -650,13 +665,21 @@ impl SocketRegistration {
         self.usernames.is_empty()
     }
 
-    fn is_empty(&self) -> bool { self.usernames.is_empty() }
+    fn is_empty(&self) -> bool {
+        self.usernames.is_empty()
+    }
 
-    fn primary_username(&self) -> Option<&str> { self.usernames.iter().map(String::as_str).min() }
+    fn primary_username(&self) -> Option<&str> {
+        self.usernames.iter().map(String::as_str).min()
+    }
 
-    fn all_usernames(&self) -> Vec<String> { self.usernames.iter().cloned().collect() }
+    fn all_usernames(&self) -> Vec<String> {
+        self.usernames.iter().cloned().collect()
+    }
 
-    fn into_usernames(self) -> HashSet<String> { self.usernames }
+    fn into_usernames(self) -> HashSet<String> {
+        self.usernames
+    }
 }
 
 struct UserSessionParams<'a> {
@@ -730,7 +753,9 @@ struct DivergenceSnapshot {
 }
 
 impl ActiveUserManager {
-    pub fn shutdown(&self) { self.adaptive_expiry_cancel.cancel(); }
+    pub fn shutdown(&self) {
+        self.adaptive_expiry_cancel.cancel();
+    }
 
     pub fn start_adaptive_expiry_worker(self: &Arc<Self>) {
         if self
@@ -768,7 +793,9 @@ impl ActiveUserManager {
     /// Exposed so the admission path can report a refusal without
     /// `AdmissionCtx` growing a second handle to the same manager.
     #[must_use]
-    pub fn events(&self) -> &Arc<EventManager> { &self.event_manager }
+    pub fn events(&self) -> &Arc<EventManager> {
+        &self.event_manager
+    }
 
     pub fn new(config: &Config, geoip: &Arc<ArcSwapOption<GeoIp>>, event_manager: &Arc<EventManager>) -> Self {
         let log_active_user: bool = config.log.as_ref().is_some_and(|l| l.log_active_user);
@@ -804,10 +831,14 @@ impl ActiveUserManager {
 
     /// Cumulative count of admission requests quietly suppressed by the recent-eviction
     /// reentry guard. A diagnostic counter, not a failure metric.
-    pub fn reentry_suppressed_total(&self) -> u64 { self.reentry_suppressed_total.load(Ordering::Relaxed) }
+    pub fn reentry_suppressed_total(&self) -> u64 {
+        self.reentry_suppressed_total.load(Ordering::Relaxed)
+    }
 
     /// Records one suppressed reentry retry.
-    pub fn record_reentry_suppressed(&self) { self.reentry_suppressed_total.fetch_add(1, Ordering::Relaxed); }
+    pub fn record_reentry_suppressed(&self) {
+        self.reentry_suppressed_total.fetch_add(1, Ordering::Relaxed);
+    }
 
     fn transition_gate_key(username: &str, token: &str) -> String {
         let mut key = String::with_capacity(username.len() + token.len() + 1);
@@ -875,7 +906,9 @@ impl ActiveUserManager {
             || incoming_channel.item_type.requires_provider_affinity()
     }
 
-    pub fn set_cleanup_sender(&self, tx: mpsc::Sender<CleanupEvent>) { let _ = self.cleanup_tx.set(tx); }
+    pub fn set_cleanup_sender(&self, tx: mpsc::Sender<CleanupEvent>) {
+        let _ = self.cleanup_tx.set(tx);
+    }
 
     pub fn set_provider_manager(&self, provider_manager: Arc<ActiveProviderManager>) {
         let _ = self.provider_manager.set(provider_manager);
@@ -1919,7 +1952,9 @@ impl ActiveUserManager {
         Some(stream_info)
     }
 
-    fn is_log_user_enabled(&self) -> bool { self.log_active_user.load(Ordering::Relaxed) }
+    fn is_log_user_enabled(&self) -> bool {
+        self.log_active_user.load(Ordering::Relaxed)
+    }
 
     fn build_preserved_stream_expiry(
         &self,
@@ -1975,6 +2010,7 @@ impl ActiveUserManager {
             virtual_id: params.virtual_id,
             provider: params.provider.intern(),
             stream_url: params.stream_url.intern(),
+            shared_stream_key: None,
             provider_session_headers: HashMap::new(),
             user_agent_stream_index: None,
             addr: *params.addr,
@@ -3107,6 +3143,20 @@ impl ActiveUserManager {
 
     pub async fn get_and_update_user_session(&self, username: &str, token: &str) -> Option<UserSession> {
         self.update_user_session(username, token).await
+    }
+
+    pub async fn set_session_shared_stream_key(&self, username: &str, token: &str, key: &str) -> bool {
+        let mut user_connections = self.connections.write().await;
+        let Some(session) = user_connections
+            .by_key
+            .get_mut(username)
+            .and_then(|connection_data| connection_data.sessions.iter_mut().find(|session| session.token == token))
+        else {
+            return false;
+        };
+        session.shared_stream_key = Some(key.intern());
+        session.ts = current_time_secs();
+        true
     }
 
     /// Session for target-scoped `virtual_id` and request token (used to recover leaked relative DVR segment paths).

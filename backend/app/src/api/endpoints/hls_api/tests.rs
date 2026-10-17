@@ -3986,7 +3986,9 @@ async fn hls_gc_session_removal_cleans_access_leases_and_repair_state() {
     assert_eq!(repair_after.generations, 0);
 }
 
-fn test_app_state() -> Arc<AppState> { test_app_state_with_hls_proxy(Arc::new(HlsProxyManager::new())) }
+fn test_app_state() -> Arc<AppState> {
+    test_app_state_with_hls_proxy(Arc::new(HlsProxyManager::new()))
+}
 
 #[tokio::test]
 async fn lease_snapshot_limit_rejection_is_controlled_and_observable() {
@@ -5770,11 +5772,17 @@ async fn hls_access_lease_gc_prepass_releases_user_without_detaching_origin_bind
     assert_eq!(session.activity.origin_work_generation, old_generation);
 }
 
-fn test_addr() -> SocketAddr { "127.0.0.1:55123".parse().unwrap_or_else(|_| unreachable!()) }
+fn test_addr() -> SocketAddr {
+    "127.0.0.1:55123".parse().unwrap_or_else(|_| unreachable!())
+}
 
-fn test_addr_with_port(port: u16) -> SocketAddr { SocketAddr::from(([127, 0, 0, 1], port)) }
+fn test_addr_with_port(port: u16) -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], port))
+}
 
-fn test_fingerprint() -> Fingerprint { Fingerprint::new("test".to_string(), "127.0.0.1".to_string(), test_addr()) }
+fn test_fingerprint() -> Fingerprint {
+    Fingerprint::new("test".to_string(), "127.0.0.1".to_string(), test_addr())
+}
 
 fn test_fingerprint_with_addr(addr: SocketAddr) -> Fingerprint {
     Fingerprint::new(format!("test-{}", addr.port()), "127.0.0.1".to_string(), addr)
@@ -8796,7 +8804,9 @@ fn media_uri_count(body: &str) -> usize {
     body.lines().filter(|line| !line.is_empty() && !line.starts_with('#')).count()
 }
 
-fn normal_manifest_body(proxy_session_id: &str) -> String { normal_manifest_body_from_sequence(proxy_session_id, 0, 6) }
+fn normal_manifest_body(proxy_session_id: &str) -> String {
+    normal_manifest_body_from_sequence(proxy_session_id, 0, 6)
+}
 
 fn normal_manifest_body_from_sequence(proxy_session_id: &str, first_sequence: u64, count: usize) -> String {
     let mut body = format!("#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXT-X-MEDIA-SEQUENCE:{first_sequence}\n");
@@ -10773,7 +10783,9 @@ async fn single_variant_master_playlist(response: Response<Body>) -> (u32, Strin
     (bandwidth, uri)
 }
 
-async fn single_variant_uri(response: Response<Body>) -> String { single_variant_master_playlist(response).await.1 }
+async fn single_variant_uri(response: Response<Body>) -> String {
+    single_variant_master_playlist(response).await.1
+}
 
 fn access_lease_id_from_variant_uri(uri: &str) -> &str {
     uri.trim_end_matches("/manifest.m3u8").rsplit('/').next().expect("access lease id in variant URI")
@@ -10844,6 +10856,7 @@ fn stats_provider_test_user_session(provider: &str) -> UserSession {
         virtual_id: 12345,
         provider: Arc::from(provider),
         stream_url: Arc::from("http://origin.example.com/live/12345.m3u8"),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: test_addr(),
@@ -11014,15 +11027,23 @@ struct TestSegmentOrigin {
 }
 
 impl Drop for TestSegmentOrigin {
-    fn drop(&mut self) { self.task.abort(); }
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 impl TestSegmentOrigin {
-    fn key_request_count(&self) -> usize { self.key_requests.load(Ordering::SeqCst) }
+    fn key_request_count(&self) -> usize {
+        self.key_requests.load(Ordering::SeqCst)
+    }
 
-    fn manifest_request_count(&self) -> usize { self.manifest_requests.load(Ordering::SeqCst) }
+    fn manifest_request_count(&self) -> usize {
+        self.manifest_requests.load(Ordering::SeqCst)
+    }
 
-    fn segment_request_count(&self) -> usize { self.segment_requests.load(Ordering::SeqCst) }
+    fn segment_request_count(&self) -> usize {
+        self.segment_requests.load(Ordering::SeqCst)
+    }
 
     async fn set_key_bytes(&self, bytes: Arc<[u8]>) {
         if let Some(key_bytes) = &self.key_bytes {
@@ -11150,7 +11171,9 @@ struct TestBinaryOriginResponse {
 }
 
 impl TestBinaryOriginResponse {
-    fn new(status: StatusCode, body: Arc<[u8]>) -> Self { Self { status, location: None, body } }
+    fn new(status: StatusCode, body: Arc<[u8]>) -> Self {
+        Self { status, location: None, body }
+    }
 
     fn redirect(location: String) -> Self {
         Self { status: StatusCode::FOUND, location: Some(location), body: Arc::from(&b""[..]) }
@@ -11221,7 +11244,9 @@ struct TestEncodedManifestOrigin {
 }
 
 impl Drop for TestEncodedManifestOrigin {
-    fn drop(&mut self) { self.task.abort(); }
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 async fn spawn_test_encoded_manifest_origin(
@@ -11350,7 +11375,9 @@ struct TestTransientOrigin {
 }
 
 impl Drop for TestTransientOrigin {
-    fn drop(&mut self) { self.task.abort(); }
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 async fn spawn_test_transient_origin() -> TestTransientOrigin {

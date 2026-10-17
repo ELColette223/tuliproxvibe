@@ -45,6 +45,7 @@ pub const PROVIDER_END_NOT_SET: u8 = 0;
 pub const PROVIDER_END_CLOSED: u8 = 1; // Provider EOF
 pub const PROVIDER_END_ERROR: u8 = 2; // Provider Err
 pub const PROVIDER_END_PREEMPTED: u8 = 3; // Preempted by higher priority
+pub const PROVIDER_END_SUBSCRIBER_LAGGED: u8 = 4; // Subscriber fell behind burst buffer
 const PREEMPT_REENTRY_BLOCK_SECS: u64 = 3;
 // Bounded wait for a mandatory cleanup admission right before a request registration.
 const CLEANUP_ADMISSION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -256,6 +257,8 @@ pub enum CleanupEvent {
         subscriber_id: SharedSubscriberId,
         request_id: Option<tuliprox_core::model::PlaybackRequestId>,
         owner: Option<Arc<str>>,
+        provider_end_reason: u8,
+        provider_error_class: Option<&'static str>,
     },
     ReleaseStream {
         request_id: Option<tuliprox_core::model::PlaybackRequestId>,
@@ -1067,7 +1070,15 @@ impl ConnectionManager {
             history_writer,
         };
         tokio::spawn(async move {
+            #[cfg(test)]
+            eprintln!("WORKER: task started");
+            let mut loop_count = 0u32;
             loop {
+                #[cfg(test)]
+                if loop_count < 30 {
+                    eprintln!("WORKER: loop top {loop_count}");
+                }
+                loop_count += 1;
                 let event = tokio::select! {
                     biased;
                     () = shutdown_token.cancelled() => break,
@@ -1075,16 +1086,27 @@ impl ConnectionManager {
                     event = rx.recv() => event,
                 };
                 let Some(event) = event else { break };
+                #[cfg(test)]
+                eprintln!("WORKER: processing event={:?}", std::mem::discriminant(&event));
                 match event {
-                    CleanupEvent::ReleaseSharedSubscriber { addr, subscriber_id, request_id, owner } => {
+                    CleanupEvent::ReleaseSharedSubscriber {
+                        addr,
+                        subscriber_id,
+                        request_id,
+                        owner,
+                        provider_end_reason,
+                        provider_error_class,
+                    } => {
+                        #[cfg(test)]
+                        eprintln!("WORKER: ReleaseSharedSubscriber id={subscriber_id:?} reason={provider_end_reason}");
                         deps.shared_stream_manager.release_subscriber(subscriber_id).await;
                         handle_release_stream(
                             &deps,
                             addr,
                             Some(subscriber_id.stream_uid()),
-                            PROVIDER_END_NOT_SET,
+                            provider_end_reason,
                             0,
-                            None,
+                            provider_error_class,
                             None,
                             request_id,
                             owner,
@@ -1658,6 +1680,7 @@ fn resolve_disconnect_reason(provider_end_reason: u8, stream_info: &StreamInfo) 
         PROVIDER_END_CLOSED => DisconnectReason::ProviderClosed,
         PROVIDER_END_ERROR => DisconnectReason::ProviderError,
         PROVIDER_END_PREEMPTED => DisconnectReason::Preempted,
+        PROVIDER_END_SUBSCRIBER_LAGGED => DisconnectReason::SubscriberLagged,
         _ => DisconnectReason::ClientClosed,
     }
 }
@@ -1669,6 +1692,7 @@ fn resolve_disconnect_reason_from_provider_end(provider_end_reason: u8) -> Disco
         PROVIDER_END_CLOSED => DisconnectReason::ProviderClosed,
         PROVIDER_END_ERROR => DisconnectReason::ProviderError,
         PROVIDER_END_PREEMPTED => DisconnectReason::Preempted,
+        PROVIDER_END_SUBSCRIBER_LAGGED => DisconnectReason::SubscriberLagged,
         _ => DisconnectReason::ClientClosed,
     }
 }
@@ -1695,6 +1719,7 @@ fn playback_outcome_for_reason(reason: DisconnectReason) -> PlaybackRequestOutco
         | DisconnectReason::ProviderClosed
         | DisconnectReason::ServerError
         | DisconnectReason::IntermediateFailures(_) => PlaybackRequestOutcome::ProviderFailed,
+        DisconnectReason::SubscriberLagged => PlaybackRequestOutcome::ClientClosed,
     }
 }
 

@@ -18,7 +18,7 @@ use crate::{
         },
     },
 };
-use futures::{StreamExt, TryStreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use log::{debug, log_enabled, warn};
 use reqwest::{
     header::{HeaderMap, HeaderValue, CONTENT_RANGE, RANGE},
@@ -38,6 +38,7 @@ use std::{
     sync::{atomic::AtomicU8, Arc},
     time::{Duration, Instant},
 };
+use tokio::time::Instant as TokioInstant;
 use tokio_util::{io::ReaderStream, sync::CancellationToken};
 use tuliprox_core::{model::AllocationId, utils::request_headers::get_headers_from_request};
 use tuliprox_hls::api::{
@@ -49,12 +50,13 @@ use tuliprox_session::{
     stream_ctx::ProviderStreamCtx,
     stream_options::StreamOptions,
     streams::{ProviderBodyOwner, ProviderBodyOwnerConfig},
-    ActiveProviderManager, ManagedProviderHandle,
+    ActiveProviderManager, BoxedProviderStream, ManagedProviderHandle,
 };
 use url::Url;
 
 const RETRY_SECONDS: u64 = 5;
 const ERR_MAX_RETRY_COUNT: u32 = 5;
+const SHARED_MPEGTS_BODY_IDLE: Duration = Duration::from_secs(40);
 
 /// Describes whether the provider response head is available before Tuliprox commits the client response head.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -290,6 +292,37 @@ impl ProviderStreamFactoryOptions {
     #[inline]
     pub fn should_retry_provider_request(&self) -> bool {
         self.flags.contains(ProviderStreamFactoryFlags::RetryEnabled)
+    }
+
+    fn shared_mpegts_recovery_enabled(
+        &self,
+        info: &Option<(Vec<(String, String)>, StatusCode, Option<Url>, Option<CustomVideoStreamType>)>,
+    ) -> bool {
+        self.should_retry_provider_request() && self.shared_mpegts_compatible_response(info)
+    }
+
+    fn shared_mpegts_compatible_response(
+        &self,
+        info: &Option<(Vec<(String, String)>, StatusCode, Option<Url>, Option<CustomVideoStreamType>)>,
+    ) -> bool {
+        self.flags.contains(ProviderStreamFactoryFlags::ShareStream)
+            && self.item_type == PlaylistItemType::Live
+            && !self.was_range_requested()
+            && matches!(self.content_representation, ProviderContentRepresentationMode::PreserveOrigin)
+            && info.as_ref().is_some_and(|(headers, status, _, custom)| {
+                *status == StatusCode::OK
+                    && custom.is_none()
+                    && headers.iter().any(|(name, value)| {
+                        name.eq_ignore_ascii_case("content-type")
+                            && value.to_ascii_lowercase().starts_with("video/mp2t")
+                    })
+                    && !headers.iter().any(|(name, value)| {
+                        name.eq_ignore_ascii_case("content-length")
+                            || name.eq_ignore_ascii_case("content-range")
+                            || (name.eq_ignore_ascii_case("content-encoding")
+                                && !value.eq_ignore_ascii_case("identity"))
+                    })
+            })
     }
 
     fn requires_public_destination(&self) -> bool {
@@ -1034,10 +1067,7 @@ async fn provider_stream_request(
 
             if is_account_full_status(status) {
                 debug!("Account-full status response : {status}");
-                return Err(ProviderStreamRequestFailure::AccountFull {
-                    status,
-                    provider_error_class: "account_full",
-                });
+                return Err(ProviderStreamRequestFailure::AccountFull { status, provider_error_class: "account_full" });
             }
             if status.is_client_error() {
                 debug!("Client error status response : {status}");
@@ -1062,13 +1092,13 @@ async fn provider_stream_request(
             if status.is_server_error() {
                 debug!("Server error status response : {status}");
                 return match status {
-                    StatusCode::INTERNAL_SERVER_ERROR
-                    | StatusCode::BAD_GATEWAY
-                    | StatusCode::GATEWAY_TIMEOUT => Err(ProviderStreamRequestFailure::Status {
-                        status,
-                        provider_error_class: classify_provider_status_error(status),
-                        serve_channel_unavailable: true,
-                    }),
+                    StatusCode::INTERNAL_SERVER_ERROR | StatusCode::BAD_GATEWAY | StatusCode::GATEWAY_TIMEOUT => {
+                        Err(ProviderStreamRequestFailure::Status {
+                            status,
+                            provider_error_class: classify_provider_status_error(status),
+                            serve_channel_unavailable: true,
+                        })
+                    }
                     _ => Err(ProviderStreamRequestFailure::Status {
                         status,
                         provider_error_class: classify_provider_status_error(status),
@@ -1092,10 +1122,7 @@ async fn provider_stream_request(
             );
             if let Some(status) = account_full_status_from_io_error(&err) {
                 debug!("Account-full status recovered from transport error: {status}");
-                return Err(ProviderStreamRequestFailure::AccountFull {
-                    status,
-                    provider_error_class: "account_full",
-                });
+                return Err(ProviderStreamRequestFailure::AccountFull { status, provider_error_class: "account_full" });
             }
             Err(ProviderStreamRequestFailure::Status {
                 status: StatusCode::SERVICE_UNAVAILABLE,
@@ -1230,6 +1257,63 @@ impl Drop for ProviderOpenGuard {
     }
 }
 
+/// Shared live MPEG-TS bodies must not be reopened mid-response: a new upstream
+/// HTTP body cannot be proven to continue the same transport stream, so the
+/// origin ends and the next client request opens a fresh response.
+fn enforce_shared_mpegts_body_continuity(
+    initial: BoxedProviderStream,
+    options: ProviderStreamFactoryOptions,
+) -> BoxedProviderStream {
+    stream::unfold(
+        (initial, options, TokioInstant::now() + SHARED_MPEGTS_BODY_IDLE),
+        |(mut body, options, mut idle_deadline)| async move {
+            if !options.should_continue() {
+                return None;
+            }
+            loop {
+                let chunk = tokio::select! {
+                    biased;
+                    () = options.reconnect_flag.cancelled() => return None,
+                    result = tokio::time::timeout_at(idle_deadline, body.next()) => result,
+                };
+                match chunk {
+                    Ok(Some(Ok(bytes))) if !bytes.is_empty() => {
+                        // Media progress pushes the idle deadline forward; only a
+                        // genuinely silent upstream reaches it.
+                        idle_deadline = TokioInstant::now() + SHARED_MPEGTS_BODY_IDLE;
+                        return Some((Ok(bytes), (body, options, idle_deadline)));
+                    }
+                    Ok(Some(Ok(_))) => {
+                        if TokioInstant::now() >= idle_deadline {
+                            warn!("Shared MPEG-TS upstream body idle timeout; ending origin");
+                            return Some((Err(StreamError::ProviderIdleTimeout), (body, options, idle_deadline)));
+                        }
+                        tokio::select! {
+                            biased;
+                            () = options.reconnect_flag.cancelled() => return None,
+                            () = tokio::time::sleep_until(idle_deadline) => {},
+                            () = tokio::time::sleep(Duration::from_millis(5)) => {},
+                        }
+                    }
+                    Ok(Some(Err(error))) => {
+                        warn!("Shared MPEG-TS upstream body error; ending origin");
+                        return Some((Err(error), (body, options, idle_deadline)));
+                    }
+                    Ok(None) => {
+                        debug_if_enabled!("Shared MPEG-TS upstream body ended; closing origin");
+                        return None;
+                    }
+                    Err(_) => {
+                        warn!("Shared MPEG-TS upstream body idle timeout; ending origin");
+                        return Some((Err(StreamError::ProviderIdleTimeout), (body, options, idle_deadline)));
+                    }
+                }
+            }
+        },
+    )
+    .boxed()
+}
+
 #[allow(clippy::too_many_lines)]
 pub async fn create_provider_stream_outcome(
     ctx: &ProviderStreamCtx,
@@ -1239,6 +1323,12 @@ pub async fn create_provider_stream_outcome(
     let mut open_guard = ProviderOpenGuard { token: stream_options.get_completion_token(), handed_off: false };
     match get_provider_stream(ctx, client, &stream_options).await {
         Ok(Some(ProviderStreamFactoryResponse { stream: init_stream, info, provider_session_headers, .. })) => {
+            let continuity_guarded = stream_options.shared_mpegts_recovery_enabled(&info);
+            let init_stream = if continuity_guarded {
+                enforce_shared_mpegts_body_continuity(init_stream, stream_options.clone())
+            } else {
+                init_stream
+            };
             let continue_signal = stream_options.get_reconnect_flag_clone();
             if let Some((_headers, _status, _response_url, Some(custom_video_type))) = &info {
                 let reason = match custom_video_type {
@@ -1457,7 +1547,7 @@ pub async fn open_provider_stream_with_lifecycle(
 mod tests {
     use super::*;
     use crate::{
-        api::model::BoxedProviderStream,
+        api::{api_utils::tests::create_test_app_state, model::BoxedProviderStream},
         model::{Config, MediaToolCapabilities, SourcesConfig},
         utils::FileLockManager,
     };
@@ -1613,6 +1703,304 @@ mod tests {
         assert_redirect_request_headers(&first_requests[0], true);
         assert_redirect_request_headers(&second_request, false);
         assert_redirect_request_headers(&first_requests[1], false);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn shared_mpegts_empty_chunks_do_not_block_idle_timeout() {
+        let url = Url::parse("http://localhost/live.ts").unwrap();
+        let stream_options = StreamOptions {
+            stream_retry: true,
+            buffer_enabled: false,
+            buffer_size: 0,
+            buffer_max_bytes: 0,
+            pipe_provider_stream: false,
+        };
+        let options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
+            addr: "127.0.0.1:8080".parse().unwrap(),
+            item_type: PlaylistItemType::Live,
+            share_stream: true,
+            stream_options: &stream_options,
+            stream_url: &url,
+            req_headers: &HeaderMap::new(),
+            input_headers: None,
+            session_headers: None,
+            disabled_headers: None,
+            default_user_agent: None,
+            username: None,
+            client_ip: None,
+            stream_channel: None,
+            connect_failure_stage: None,
+            content_representation: ProviderContentRepresentationMode::PreserveOrigin,
+        });
+        let initial = stream::repeat(Ok::<Bytes, StreamError>(Bytes::new())).boxed();
+        let mut guarded = enforce_shared_mpegts_body_continuity(initial, options);
+        let result = tokio::time::timeout(SHARED_MPEGTS_BODY_IDLE + Duration::from_secs(1), guarded.next())
+            .await
+            .expect("empty upstream chunks must not spin past the idle deadline");
+        assert!(matches!(result, Some(Err(StreamError::ProviderIdleTimeout))));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn shared_mpegts_continuous_media_never_hits_idle_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/live.ts", listener.local_addr().unwrap())).unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let _ = read_http_request(&mut socket).await;
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await
+                .unwrap();
+            for _ in 0..30 {
+                socket.write_all(b"1\r\nx\r\n").await.unwrap();
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        });
+        let stream_options = StreamOptions {
+            stream_retry: true,
+            buffer_enabled: false,
+            buffer_size: 0,
+            buffer_max_bytes: 0,
+            pipe_provider_stream: false,
+        };
+        let options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
+            addr: "127.0.0.1:8080".parse().unwrap(),
+            item_type: PlaylistItemType::Live,
+            share_stream: true,
+            stream_options: &stream_options,
+            stream_url: &url,
+            req_headers: &HeaderMap::new(),
+            input_headers: None,
+            session_headers: None,
+            disabled_headers: None,
+            default_user_agent: None,
+            username: None,
+            client_ip: None,
+            stream_channel: None,
+            connect_failure_stage: None,
+            content_representation: ProviderContentRepresentationMode::PreserveOrigin,
+        });
+        let app_state = create_test_app_state();
+        let mut response = create_provider_stream(&app_state.provider_stream_ctx(), &reqwest::Client::new(), options)
+            .await
+            .expect("first upstream opens");
+        for _ in 0..30 {
+            let chunk = tokio::time::timeout(Duration::from_secs(10), response.stream.next())
+                .await
+                .expect("media keeps arriving well past 40 seconds of playback")
+                .expect("active media must not be terminated by the idle deadline")
+                .expect("media chunk succeeds");
+            assert_eq!(chunk, Bytes::from_static(b"x"));
+        }
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn shared_mpegts_idle_body_ends_origin_without_reopen() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/live.ts", listener.local_addr().unwrap())).unwrap();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let request_count = Arc::clone(&requests);
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let _ = read_http_request(&mut socket).await;
+            request_count.fetch_add(1, Ordering::SeqCst);
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await
+                .unwrap();
+            socket.write_all(b"5\r\nfirst\r\n").await.unwrap();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(90)).await;
+                drop(socket);
+            });
+        });
+        let stream_options = StreamOptions {
+            stream_retry: true,
+            buffer_enabled: false,
+            buffer_size: 0,
+            buffer_max_bytes: 0,
+            pipe_provider_stream: false,
+        };
+        let options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
+            addr: "127.0.0.1:8080".parse().unwrap(),
+            item_type: PlaylistItemType::Live,
+            share_stream: true,
+            stream_options: &stream_options,
+            stream_url: &url,
+            req_headers: &HeaderMap::new(),
+            input_headers: None,
+            session_headers: None,
+            disabled_headers: None,
+            default_user_agent: None,
+            username: None,
+            client_ip: None,
+            stream_channel: None,
+            connect_failure_stage: None,
+            content_representation: ProviderContentRepresentationMode::PreserveOrigin,
+        });
+        let app_state = create_test_app_state();
+        let mut response = create_provider_stream(&app_state.provider_stream_ctx(), &reqwest::Client::new(), options)
+            .await
+            .expect("first upstream opens");
+        assert_eq!(response.stream.next().await.unwrap().unwrap(), Bytes::from_static(b"first"));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(45), response.stream.next())
+                .await
+                .expect("idle body terminates the origin"),
+            Some(Err(StreamError::ProviderIdleTimeout))
+        ));
+        assert_eq!(requests.load(Ordering::SeqCst), 1, "no second upstream request may be spliced");
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn shared_mpegts_eof_ends_origin_without_reopen() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/live.ts", listener.local_addr().unwrap())).unwrap();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let request_count = Arc::clone(&requests);
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let _ = read_http_request(&mut socket).await;
+            request_count.fetch_add(1, Ordering::SeqCst);
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await
+                .unwrap();
+            socket.write_all(b"5\r\nfirst\r\n0\r\n\r\n").await.unwrap();
+        });
+        let stream_options = StreamOptions {
+            stream_retry: true,
+            buffer_enabled: false,
+            buffer_size: 0,
+            buffer_max_bytes: 0,
+            pipe_provider_stream: false,
+        };
+        let options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
+            addr: "127.0.0.1:8080".parse().unwrap(),
+            item_type: PlaylistItemType::Live,
+            share_stream: true,
+            stream_options: &stream_options,
+            stream_url: &url,
+            req_headers: &HeaderMap::new(),
+            input_headers: None,
+            session_headers: None,
+            disabled_headers: None,
+            default_user_agent: None,
+            username: None,
+            client_ip: None,
+            stream_channel: None,
+            connect_failure_stage: None,
+            content_representation: ProviderContentRepresentationMode::PreserveOrigin,
+        });
+        let app_state = create_test_app_state();
+        let mut response = create_provider_stream(&app_state.provider_stream_ctx(), &reqwest::Client::new(), options)
+            .await
+            .expect("first upstream opens");
+        assert_eq!(response.stream.next().await.unwrap().unwrap(), Bytes::from_static(b"first"));
+        assert!(tokio::time::timeout(Duration::from_secs(10), response.stream.next())
+            .await
+            .expect("EOF terminates promptly")
+            .is_none());
+        assert_eq!(requests.load(Ordering::SeqCst), 1, "EOF must not trigger a second upstream request");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn shared_mpegts_disconnected_body_ends_origin_without_reopen() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/live.ts", listener.local_addr().unwrap())).unwrap();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let request_count = Arc::clone(&requests);
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let _ = read_http_request(&mut socket).await;
+            request_count.fetch_add(1, Ordering::SeqCst);
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nTransfer-Encoding: chunked\r\n\r\n")
+                .await
+                .unwrap();
+            socket.write_all(b"5\r\nfirst\r\n").await.unwrap();
+        });
+        let stream_options = StreamOptions {
+            stream_retry: true,
+            buffer_enabled: false,
+            buffer_size: 0,
+            buffer_max_bytes: 0,
+            pipe_provider_stream: false,
+        };
+        let options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
+            addr: "127.0.0.1:8080".parse().unwrap(),
+            item_type: PlaylistItemType::Live,
+            share_stream: true,
+            stream_options: &stream_options,
+            stream_url: &url,
+            req_headers: &HeaderMap::new(),
+            input_headers: None,
+            session_headers: None,
+            disabled_headers: None,
+            default_user_agent: None,
+            username: None,
+            client_ip: None,
+            stream_channel: None,
+            connect_failure_stage: None,
+            content_representation: ProviderContentRepresentationMode::PreserveOrigin,
+        });
+        let app_state = create_test_app_state();
+        let mut response = create_provider_stream(&app_state.provider_stream_ctx(), &reqwest::Client::new(), options)
+            .await
+            .expect("initial MPEG-TS upstream opens");
+        assert_eq!(response.stream.next().await.unwrap().unwrap(), Bytes::from_static(b"first"));
+        let terminal = tokio::time::timeout(Duration::from_secs(10), response.stream.next())
+            .await
+            .expect("dropped body terminates promptly")
+            .expect("terminal classification expected");
+        assert!(terminal.is_err(), "transport failure must surface as a stream error, not silent EOF");
+        assert_eq!(requests.load(Ordering::SeqCst), 1, "no reopen may follow a transport failure");
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn shared_mpegts_recovery_requires_compatible_unbounded_live_response() {
+        let url = Url::parse("http://localhost/live.ts").unwrap();
+        let stream_options = StreamOptions {
+            stream_retry: true,
+            buffer_enabled: false,
+            buffer_size: 0,
+            buffer_max_bytes: 0,
+            pipe_provider_stream: false,
+        };
+        let mut options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
+            addr: "127.0.0.1:8080".parse().unwrap(),
+            item_type: PlaylistItemType::Live,
+            share_stream: true,
+            stream_options: &stream_options,
+            stream_url: &url,
+            req_headers: &HeaderMap::new(),
+            input_headers: None,
+            session_headers: None,
+            disabled_headers: None,
+            default_user_agent: None,
+            username: None,
+            client_ip: None,
+            stream_channel: None,
+            connect_failure_stage: None,
+            content_representation: ProviderContentRepresentationMode::PreserveOrigin,
+        });
+        let compatible =
+            Some((vec![("content-type".to_string(), "video/mp2t".to_string())], StatusCode::OK, None, None));
+        assert!(options.shared_mpegts_recovery_enabled(&compatible));
+        for name in ["content-length", "content-range", "content-encoding"] {
+            let mut incompatible = compatible.clone();
+            incompatible.as_mut().unwrap().0.push((name.to_string(), "gzip".to_string()));
+            assert!(!options.shared_mpegts_recovery_enabled(&incompatible), "{name} must disable recovery");
+        }
+        options.flags.unset(ProviderStreamFactoryFlags::RetryEnabled);
+        assert!(!options.shared_mpegts_recovery_enabled(&compatible));
+        options.flags.set(ProviderStreamFactoryFlags::RetryEnabled);
+        options.item_type = PlaylistItemType::Catchup;
+        assert!(!options.shared_mpegts_recovery_enabled(&compatible));
     }
 
     fn test_options(

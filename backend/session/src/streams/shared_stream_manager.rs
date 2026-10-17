@@ -1,12 +1,14 @@
 use crate::{
     streams::buffered_stream::CHANNEL_SIZE, ActiveProviderManager, BoxedProviderStream, CleanupEvent,
-    ConnectionManager, ConnectionRejectionReason, ManagedProviderHandle, SharedCleanupCapability,
+    ConnectionManager, ConnectionRejectionReason, ManagedProviderHandle, SharedCleanupCapability, PROVIDER_END_CLOSED,
+    PROVIDER_END_ERROR, PROVIDER_END_NOT_SET, PROVIDER_END_SUBSCRIBER_LAGGED,
 };
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use log::{debug, warn};
 use shared::utils::sanitize_sensitive_info;
 use std::{
+    any::Any,
     collections::{HashMap, VecDeque},
     fmt,
     fmt::{Debug, Formatter},
@@ -41,6 +43,38 @@ const SHARED_CLEANUP_ADMISSION_TIMEOUT: Duration = Duration::from_secs(5);
 // is byte-bounded already; this caps how many of its entries are cloned into the
 // per-subscriber vector at once so a long backlog cannot balloon that vector.
 const MAX_SUBSCRIBER_LIVE_BATCH_CHUNKS: usize = 64;
+
+/// Typed terminal outcome of a shared origin, replacing the old boolean flag.
+/// Stored once by the broadcaster when the provider body ends or errors; each
+/// subscriber drains remaining burst data and then propagates this outcome.
+#[derive(Debug, Clone)]
+enum TerminalOutcome {
+    /// Provider body ended normally (EOF).
+    ProviderEof,
+    /// Provider body produced a terminal `StreamError`.
+    ProviderError(StreamError),
+}
+
+impl TerminalOutcome {
+    /// The `StreamError` to deliver to each subscriber, if any.
+    fn as_stream_error(&self) -> Option<StreamError> {
+        match self {
+            Self::ProviderEof => None,
+            Self::ProviderError(e) => Some(e.clone()),
+        }
+    }
+
+    /// Classification constants for the cleanup event.
+    fn cleanup_classification(&self) -> (u8, Option<&'static str>) {
+        match self {
+            Self::ProviderEof => (PROVIDER_END_CLOSED, None),
+            Self::ProviderError(e) => (PROVIDER_END_ERROR, Some(e.provider_error_class())),
+        }
+    }
+
+    /// Whether this outcome represents a provider failure (not a clean EOF).
+    fn is_failure(&self) -> bool { matches!(self, Self::ProviderError(_)) }
+}
 
 pub struct PendingSharedSubscriberCleanup {
     permit: Option<tokio::sync::mpsc::OwnedPermit<CleanupEvent>>,
@@ -144,6 +178,8 @@ impl Drop for PendingSharedSubscriberCleanup {
                 subscriber_id: self.subscriber_id,
                 request_id: self.request_id,
                 owner: self.owner.take(),
+                provider_end_reason: PROVIDER_END_NOT_SET,
+                provider_error_class: None,
             });
         }
     }
@@ -161,6 +197,22 @@ struct ReceiverStreamWrapper<S> {
     owner: Option<Arc<str>>,
     deadline: Option<Pin<Box<Sleep>>>,
     released: bool,
+    terminal_outcome: Arc<std::sync::Mutex<Option<TerminalOutcome>>>,
+    terminal_observed: bool,
+    /// Subscriber-local terminal error slot (e.g. `SubscriberLagged`), shared with the
+    /// forwarder task. When the forwarder detects lag it records the error here instead
+    /// of cancelling the subscriber, so the wrapper can deliver the error to the client
+    /// and only then classify its reserved cleanup. Takes precedence over the origin's
+    /// terminal outcome.
+    subscriber_terminal_error: Arc<std::sync::Mutex<Option<StreamError>>>,
+    cancel_token: CancellationToken,
+    preempted_token: CancellationToken,
+}
+
+impl<S> ReceiverStreamWrapper<S> {
+    fn peek_subscriber_terminal_error(&self) -> Option<StreamError> {
+        self.subscriber_terminal_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
 }
 
 impl<S> ReceiverStreamWrapper<S> {
@@ -168,12 +220,43 @@ impl<S> ReceiverStreamWrapper<S> {
         if !self.released {
             self.released = true;
             if let Some(permit) = self.permit.take() {
-                permit.send(CleanupEvent::ReleaseSharedSubscriber {
+                #[cfg(test)]
+                eprintln!(
+                    "WRAPPER: release() firing permit for subscriber {:?} observed={} cancelled={}",
+                    self.subscriber_id,
+                    self.terminal_observed,
+                    self.cancel_token.is_cancelled()
+                );
+                let (provider_end_reason, provider_error_class) = if self.terminal_observed
+                    && !self.cancel_token.is_cancelled()
+                    && !self.preempted_token.is_cancelled()
+                {
+                    // Use the subscriber-local terminal error if set (e.g. SubscriberLagged),
+                    // otherwise fall back to the origin's terminal outcome classification.
+                    if let Some(local_err) = self.peek_subscriber_terminal_error() {
+                        match local_err {
+                            StreamError::SubscriberLagged => {
+                                (PROVIDER_END_SUBSCRIBER_LAGGED, Some(local_err.provider_error_class()))
+                            }
+                            other => (PROVIDER_END_ERROR, Some(other.provider_error_class())),
+                        }
+                    } else {
+                        let guard = self.terminal_outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        guard.as_ref().map_or((PROVIDER_END_NOT_SET, None), TerminalOutcome::cleanup_classification)
+                    }
+                } else {
+                    (PROVIDER_END_NOT_SET, None)
+                };
+                let send_result = permit.send(CleanupEvent::ReleaseSharedSubscriber {
                     addr: self.addr,
                     subscriber_id: self.subscriber_id,
                     request_id: self.request_id,
                     owner: self.owner.take(),
+                    provider_end_reason,
+                    provider_error_class,
                 });
+                #[cfg(test)]
+                eprintln!("WRAPPER: permit send result={send_result:?}");
             }
         }
     }
@@ -195,7 +278,27 @@ where
         }
         match Pin::new(&mut self.stream).poll_next(cx) {
             Poll::Ready(Some(bytes)) => Poll::Ready(Some(Ok(bytes))),
-            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Ready(None) => {
+                // Inner queue closed. Check for a subscriber-local error first (e.g. lag),
+                // then fall back to the origin's terminal outcome.
+                if !self.terminal_observed && !self.cancel_token.is_cancelled() && !self.preempted_token.is_cancelled()
+                {
+                    if let Some(local_err) = self.peek_subscriber_terminal_error() {
+                        self.terminal_observed = true;
+                        return Poll::Ready(Some(Err(local_err)));
+                    }
+                    let terminal_err = {
+                        let guard = self.terminal_outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        guard.as_ref().and_then(TerminalOutcome::as_stream_error)
+                    };
+                    if let Some(err) = terminal_err {
+                        self.terminal_observed = true;
+                        return Poll::Ready(Some(Err(err)));
+                    }
+                }
+                self.release();
+                Poll::Ready(None)
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -420,6 +523,7 @@ pub struct SharedStreamState {
     stop_token: CancellationToken,
     burst_buffer: Arc<Mutex<BurstBuffer>>,
     live_notification: Arc<Notify>,
+    terminal_outcome: Arc<std::sync::Mutex<Option<TerminalOutcome>>>,
     task_handles: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
     subscriber_idle_timeout_secs: u64,
     subscriber_max_duration: Option<Duration>,
@@ -450,6 +554,7 @@ impl SharedStreamState {
             stop_token: CancellationToken::new(),
             burst_buffer: Arc::new(Mutex::new(BurstBuffer::new(burst_buffer_size_in_bytes))),
             live_notification: Arc::new(Notify::new()),
+            terminal_outcome: Arc::new(std::sync::Mutex::new(None)),
             task_handles: std::sync::Mutex::new(Vec::new()),
             subscriber_idle_timeout_secs: DEFAULT_SUBSCRIBER_IDLE_TIMEOUT_SECS,
             subscriber_max_duration: None,
@@ -469,6 +574,21 @@ impl SharedStreamState {
     fn decrement_pending_joins(&self) { self.pending_joins.fetch_sub(1, Ordering::AcqRel); }
 
     fn has_pending_joins(&self) -> bool { self.pending_joins.load(Ordering::Acquire) > 0 }
+
+    fn lock_terminal_outcome(&self) -> std::sync::MutexGuard<'_, Option<TerminalOutcome>> {
+        self.terminal_outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn set_terminal_outcome(&self, outcome: TerminalOutcome) {
+        let mut guard = self.lock_terminal_outcome();
+        if guard.is_none() {
+            *guard = Some(outcome);
+        }
+    }
+
+    fn terminal_is_failure(&self) -> bool {
+        self.lock_terminal_outcome().as_ref().is_some_and(TerminalOutcome::is_failure)
+    }
 
     fn lock_task_handles(&self) -> std::sync::MutexGuard<'_, Vec<tokio::task::JoinHandle<()>>> {
         self.task_handles.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -497,6 +617,7 @@ impl SharedStreamState {
         let cancel_token = CancellationToken::new();
         let queue_byte_budget = self.buf_size.saturating_mul(SHARED_BURST_BYTES_PER_BUFFER_SLOT);
         let byte_budget = Arc::new(Semaphore::new(queue_byte_budget));
+        let subscriber_terminal_error = Arc::new(std::sync::Mutex::new(None::<StreamError>));
 
         {
             let mut handles = self.lock_task_handles();
@@ -514,14 +635,15 @@ impl SharedStreamState {
         let live_notification = Arc::clone(&self.live_notification);
         let timeout_duration = Duration::from_secs(self.subscriber_idle_timeout_secs);
         let idle_check_interval = Duration::from_secs(1);
-        let mut last_lag_log = Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now);
-        let mut consecutive_lag_count: u32 = 0;
         let subscriber_buf_size = self.buf_size;
         let preempted_token = self.preempted_token.clone();
+        let terminal_outcome = Arc::clone(&self.terminal_outcome);
         let low_priority_preempted = self.low_priority_preempted.clone();
         let address = *addr;
         let subscriber_started_at = Instant::now();
 
+        let forwarder_cancel_token = cancel_token.clone();
+        let forwarder_terminal_error_slot = Arc::clone(&subscriber_terminal_error);
         let handle = tokio::spawn(async move {
             // Wait for the response to be polled, but respect cancellation/shutdown so a
             // body that is never polled cannot keep the forwarder task alive indefinitely.
@@ -559,11 +681,14 @@ impl SharedStreamState {
                         "Shared stream subscriber {} burst replay failed ({outcome:?}); terminating",
                         sanitize_sensitive_info(&address.to_string())
                     );
+                    cancel_token.cancel();
                     cleanup_manager.send_cleanup(CleanupEvent::ReleaseSharedSubscriber {
                         addr: address,
                         subscriber_id,
                         request_id: None,
                         owner: None,
+                        provider_end_reason: PROVIDER_END_NOT_SET,
+                        provider_error_class: None,
                     });
                     return;
                 }
@@ -588,21 +713,30 @@ impl SharedStreamState {
                 };
                 next_sequence = read.next_sequence;
                 if read.skipped > 0 {
-                    consecutive_lag_count = consecutive_lag_count.saturating_add(1);
-                    if last_lag_log.elapsed() > Duration::from_secs(5) {
-                        let buffered_bytes = {
-                            let buffer = burst_buffer_for_log.lock().await;
-                            buffer.current_bytes
-                        };
-                        warn!(
-                            "Shared stream client lagged behind {address}. Skipped {} messages \
-                             (buffered {buffered_bytes} bytes, consecutive lags={consecutive_lag_count})",
-                            read.skipped
-                        );
-                        last_lag_log = Instant::now();
-                    }
-                } else if !read_chunks.is_empty() {
-                    consecutive_lag_count = 0;
+                    // Subscriber fell behind the burst buffer — fail-closed.
+                    // Stop only this subscriber; the origin and other subscribers continue.
+                    // The lag error is recorded in the shared slot so the response wrapper
+                    // delivers `SubscriberLagged` to the client and only then classifies its
+                    // reserved cleanup (exact-once, no early unclassified release). The
+                    // cancel token must stay uncancelled for that classification to hold.
+                    let (ring_chunks, buffered_bytes) = {
+                        let buffer = burst_buffer_for_log.lock().await;
+                        (buffer.buffer.len(), buffer.current_bytes)
+                    };
+                    warn!(
+                        "Shared stream subscriber {} lagged behind burst buffer \
+                         (skipped={} chunks, ring_occupancy={} chunks/{} bytes); \
+                         terminating subscriber only",
+                        sanitize_sensitive_info(&address.to_string()),
+                        read.skipped,
+                        ring_chunks,
+                        buffered_bytes,
+                    );
+                    *forwarder_terminal_error_slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                        Some(StreamError::SubscriberLagged);
+                    // Dropping client_tx by returning closes the client queue, which is what
+                    // surfaces the recorded error on the subscriber's next poll.
+                    return;
                 }
 
                 trace_if_enabled!(
@@ -628,11 +762,14 @@ impl SharedStreamState {
                             SendOutcome::Sent => {}
                             outcome => {
                                 debug!("Shared stream client send error ({outcome:?}): {address}");
+                                cancel_token.cancel();
                                 cleanup_manager.send_cleanup(CleanupEvent::ReleaseSharedSubscriber {
                                     addr: address,
                                     subscriber_id,
                                     request_id: None,
                                     owner: None,
+                                    provider_end_reason: PROVIDER_END_NOT_SET,
+                                    provider_error_class: None,
                                 });
                                 return;
                             }
@@ -664,6 +801,12 @@ impl SharedStreamState {
                         last_active = Instant::now();
                     }
                     continue;
+                }
+
+                // The source can terminate after its last push. Drain that final burst
+                // before closing the queue so every active response sees the same bytes.
+                if terminal_outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
+                    break;
                 }
 
                 tokio::select! {
@@ -725,12 +868,23 @@ impl SharedStreamState {
                 }
             }
 
-            cleanup_manager.send_cleanup(CleanupEvent::ReleaseSharedSubscriber {
-                addr: address,
-                subscriber_id,
-                request_id: None,
-                owner: None,
-            });
+            if !terminal_outcome
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(TerminalOutcome::is_failure)
+                || cancel_token.is_cancelled()
+                || preempted_token.is_cancelled()
+            {
+                cleanup_manager.send_cleanup(CleanupEvent::ReleaseSharedSubscriber {
+                    addr: address,
+                    subscriber_id,
+                    request_id: None,
+                    owner: None,
+                    provider_end_reason: PROVIDER_END_NOT_SET,
+                    provider_error_class: None,
+                });
+            }
         });
 
         self.lock_task_handles().push(handle);
@@ -748,6 +902,11 @@ impl SharedStreamState {
                 owner,
                 deadline: self.subscriber_max_duration.map(|duration| Box::pin(sleep(duration))),
                 released: false,
+                terminal_outcome: Arc::clone(&self.terminal_outcome),
+                terminal_observed: false,
+                subscriber_terminal_error,
+                cancel_token: forwarder_cancel_token,
+                preempted_token: self.preempted_token.clone(),
             }
             .boxed(),
             provider,
@@ -759,7 +918,7 @@ impl SharedStreamState {
     fn broadcast<S, E>(self: &Arc<Self>, stream_url: &str, bytes_stream: S, shared_streams: Arc<SharedStreamManager>)
     where
         S: Stream<Item = Result<Bytes, E>> + Unpin + 'static + Send,
-        E: std::fmt::Debug + Send,
+        E: std::fmt::Debug + Send + 'static,
     {
         let streaming_url = stream_url.to_string();
         let origin_state = Arc::clone(self);
@@ -774,6 +933,8 @@ impl SharedStreamState {
             let idle_timeout = Duration::from_secs(STREAM_IDLE_TIMEOUT);
             let idle = sleep(idle_timeout);
             tokio::pin!(idle);
+            let idle_warning = sleep(idle_timeout / 2);
+            tokio::pin!(idle_warning);
             let mut first_source_chunk_logged = false;
             let mut startup_chunks_seen = 0_usize;
             let mut startup_bytes_seen = 0_usize;
@@ -803,17 +964,41 @@ impl SharedStreamState {
                             STREAM_IDLE_TIMEOUT,
                             sanitize_sensitive_info(&streaming_url)
                         );
-                        stop_token.cancel();
+                        // Classify a genuinely idle origin as a provider timeout so
+                        // subscriber cleanup records a terminal cause instead of
+                        // falling back to ClientClosed after subscriber cancellation.
+                        if !stop_token.is_cancelled() && !origin_state.preempted_token.is_cancelled() {
+                            origin_state.set_terminal_outcome(TerminalOutcome::ProviderError(
+                                StreamError::ProviderIdleTimeout,
+                            ));
+                            live_notification.notify_waiters();
+                        } else {
+                            stop_token.cancel();
+                        }
                         break;
+                    }
+
+                    () = &mut idle_warning, if !idle_warning_emitted => {
+                        if let Some(last) = last_push_at {
+                            warn!(
+                                "shared_stream.broadcast: no upstream bytes for {}s on url={}; source may be stalled",
+                                last.elapsed().as_secs(),
+                                sanitize_sensitive_info(&streaming_url)
+                            );
+                        }
+                        idle_warning_emitted = true;
                     }
 
                     chunk = source_stream.next() => {
                         // Only successful chunks count as liveness; resetting on Err would let an
                         // error-spinning source dodge the idle timeout forever
-                        if matches!(chunk, Some(Ok(_))) {
-                            idle.as_mut().reset(Instant::now() + idle_timeout);
+                        if matches!(chunk, Some(Ok(ref bytes)) if !bytes.is_empty()) {
+                            let now = Instant::now();
+                            idle.as_mut().reset(now + idle_timeout);
+                            idle_warning.as_mut().reset(now + idle_warn_threshold);
                         }
                         match chunk {
+                            Some(Ok(data)) if data.is_empty() => continue,
                             Some(Ok(data)) => {
                                 let chunk_len = data.len();
                                 let push_seq = {
@@ -867,6 +1052,16 @@ impl SharedStreamState {
                                     sanitize_sensitive_info(&streaming_url),
                                     e
                                 );
+                                // Check if the error is a typed StreamError that is terminal.
+                                if let Some(stream_err) = (&e as &dyn Any).downcast_ref::<StreamError>() {
+                                    if stream_err.is_terminal_origin_error() {
+                                        if !stop_token.is_cancelled() && !origin_state.preempted_token.is_cancelled() {
+                                            origin_state.set_terminal_outcome(TerminalOutcome::ProviderError(stream_err.clone()));
+                                            live_notification.notify_waiters();
+                                        }
+                                        break;
+                                    }
+                                }
                                 tokio::task::yield_now().await;
                             }
                             None => {
@@ -874,27 +1069,13 @@ impl SharedStreamState {
                                     "Shared stream source stream ended for {}",
                                     sanitize_sensitive_info(&streaming_url)
                                 );
+                                if !stop_token.is_cancelled() && !origin_state.preempted_token.is_cancelled() {
+                                    origin_state.set_terminal_outcome(TerminalOutcome::ProviderEof);
+                                    live_notification.notify_waiters();
+                                }
                                 break;
                             }
                         }
-                    }
-                }
-
-                // Edge-triggered stall warning: fires once when the broadcast has
-                // not seen an upstream push for STREAM_IDLE_TIMEOUT/2 seconds, then
-                // resets on the next successful push. Operators correlate this
-                // warning with the "stuck in resending same buffer" symptom (H1).
-                if let Some(last) = last_push_at {
-                    let stalled_for = last.elapsed();
-                    if stalled_for >= idle_warn_threshold && !idle_warning_emitted {
-                        warn!(
-                            "shared_stream.broadcast: no upstream bytes for {}s on url={}; \
-                             source may be stalled. Subscribers will see cached burst until {}s timeout.",
-                            stalled_for.as_secs(),
-                            sanitize_sensitive_info(&streaming_url),
-                            STREAM_IDLE_TIMEOUT
-                        );
-                        idle_warning_emitted = true;
                     }
                 }
             }
@@ -904,7 +1085,7 @@ impl SharedStreamState {
                 sanitize_sensitive_info(&streaming_url),
                 last_push_at.map_or(0, |t| t.elapsed().as_secs())
             );
-            shared_streams.unregister(&streaming_url, &origin_state).await;
+            shared_streams.unregister(&streaming_url, &origin_state, origin_state.terminal_is_failure()).await;
         });
 
         // Keep the broadcast handle so shutdown can join it instead of leaving a detached task.
@@ -1056,7 +1237,7 @@ impl SharedStreamManager {
         }
     }
 
-    async fn unregister(&self, stream_url: &str, expected: &Arc<SharedStreamState>) {
+    async fn unregister(&self, stream_url: &str, expected: &Arc<SharedStreamState>, terminal_failure: bool) {
         let mut register = self.shared_streams.write().await;
         let state = {
             if !register.by_key.get(stream_url).is_some_and(|state| Arc::ptr_eq(state, expected)) {
@@ -1067,7 +1248,17 @@ impl SharedStreamManager {
         };
         drop(register);
         if let Some(state) = state {
-            self.finish_unregister(stream_url, &state).await;
+            if terminal_failure && !state.stop_token.is_cancelled() && !state.preempted_token.is_cancelled() {
+                // Do not cancel active forwarders before they have drained the final
+                // burst and closed their queues. Their reserved response cleanup permits
+                // then carry the terminal classification after the error is observed.
+                self.remove_meter_uid_if_owned_by(stream_url, state.provider_guard.as_ref().map(|h| h.allocation_id));
+                if let Some(handle) = &state.provider_guard {
+                    self.provider_manager.release_handle(handle);
+                }
+            } else {
+                self.finish_unregister(stream_url, &state).await;
+            }
         }
     }
 
@@ -1237,7 +1428,7 @@ impl SharedStreamManager {
     ) -> Option<(BoxedProviderStream, Option<Arc<str>>, SharedCleanupCapability)>
     where
         S: Stream<Item = Result<Bytes, E>> + Unpin + 'static + Send,
-        E: std::fmt::Debug + Send,
+        E: std::fmt::Debug + Send + 'static,
     {
         let _admission = ctx.connection_manager.begin_admission().await?;
         let registration_started_at = Instant::now();
@@ -1617,6 +1808,8 @@ mod tests {
             subscriber_id: first_id,
             request_id: None,
             owner: None,
+            provider_end_reason: crate::PROVIDER_END_NOT_SET,
+            provider_error_class: None,
         });
         tx.send(Ok(Bytes::from_static(b"second chunk"))).await?;
         assert_eq!(
@@ -1627,6 +1820,90 @@ mod tests {
         assert_eq!(users.active_streams().await.first().map(|stream| stream.uid), Some(second_id.stream_uid()));
 
         drop(second);
+        timeout(Duration::from_secs(2), async {
+            while !users.active_streams().await.is_empty() || providers.get_provider_connections_count() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        assert!(manager.get_shared_state(url).await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn terminal_source_failure_reaches_active_subscribers_but_not_a_dropped_client(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let app_cfg = Arc::new(create_test_app_config());
+        let events = Arc::new(EventManager::new());
+        let (providers, users, manager, connections) = create_test_connection_manager(&app_cfg, &events);
+        let addr = "127.0.0.1:41011".parse()?;
+        let ids: Vec<_> = (0..3).map(|_| SharedSubscriberId::from_stream_uid(connections.next_stream_uid())).collect();
+        let url = "https://example.invalid/live/recovery-exhausted.ts";
+        for (index, id) in ids.iter().enumerate() {
+            register_user(&users, addr, id.stream_uid(), &format!("viewer-{index}"), url).await?;
+        }
+        let allocation = ManagedProviderHandle::new(
+            Arc::clone(&providers),
+            providers
+                .acquire_connection(&"provider_1".intern(), &addr, 0, ConnectionKind::Normal)
+                .ok_or("provider allocation missing")?,
+        );
+        let ctx = super::SharedStreamCtx {
+            app_config: &app_cfg,
+            shared_stream_manager: &manager,
+            active_provider: &providers,
+            connection_manager: &connections,
+        };
+        let (tx, rx) = mpsc::channel::<Result<Bytes, tuliprox_core::model::StreamError>>(8);
+        let pending = SharedStreamManager::reserve_subscriber_cleanup(&connections, ids[0], addr)
+            .await
+            .map_err(|_| "shared cleanup admission failed")?;
+        let (mut first, _, _) = SharedStreamManager::register_shared_stream(
+            ctx,
+            url,
+            ReceiverStream::new(rx),
+            &addr,
+            ids[0],
+            Vec::new(),
+            8,
+            Some(allocation),
+            pending,
+            0,
+            ConnectionKind::Normal,
+        )
+        .await
+        .ok_or("first subscription missing")?;
+        let (mut second, _, _) =
+            SharedStreamManager::subscribe_shared_stream(ctx, url, &addr, ids[1], 0, ConnectionKind::Normal)
+                .await
+                .map_err(|_| "second cleanup admission failed")?
+                .ok_or("second subscription missing")?;
+        let (mut closed, _, _) =
+            SharedStreamManager::subscribe_shared_stream(ctx, url, &addr, ids[2], 0, ConnectionKind::Normal)
+                .await
+                .map_err(|_| "third cleanup admission failed")?
+                .ok_or("third subscription missing")?;
+
+        tx.send(Ok(Bytes::from_static(b"last valid chunk"))).await?;
+        for body in [&mut first, &mut second, &mut closed] {
+            assert_eq!(
+                timeout(Duration::from_secs(2), body.next()).await?.ok_or("body ended early")??,
+                Bytes::from_static(b"last valid chunk")
+            );
+        }
+        drop(closed);
+        timeout(Duration::from_secs(2), async {
+            while users.active_streams().await.len() != 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        tx.send(Err(tuliprox_core::model::StreamError::RecoveryExhausted)).await?;
+        for body in [&mut first, &mut second] {
+            let result = timeout(Duration::from_secs(2), body.next()).await?.ok_or("terminal error missing")?;
+            assert!(matches!(result, Err(tuliprox_core::model::StreamError::RecoveryExhausted)));
+            assert!(timeout(Duration::from_secs(2), body.next()).await?.is_none());
+        }
         timeout(Duration::from_secs(2), async {
             while !users.active_streams().await.is_empty() || providers.get_provider_connections_count() != 0 {
                 tokio::task::yield_now().await;
@@ -1718,6 +1995,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn terminal_shared_cleanup_uses_reserved_permit_after_error_delivery(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (tx, mut rx) = mpsc::channel(1);
+        let permit = tx.reserve_owned().await?;
+        let terminal_outcome = Arc::new(std::sync::Mutex::new(Some(super::TerminalOutcome::ProviderError(
+            tuliprox_core::model::StreamError::RecoveryExhausted,
+        ))));
+        let id = SharedSubscriberId::from_stream_uid(45);
+        let addr = "127.0.0.1:41045".parse()?;
+        let mut response = super::ReceiverStreamWrapper {
+            stream: futures::stream::empty::<Bytes>(),
+            start: None,
+            subscriber_id: id,
+            addr,
+            permit: Some(permit),
+            request_id: None,
+            owner: None,
+            deadline: None,
+            released: false,
+            terminal_outcome,
+            terminal_observed: false,
+            subscriber_terminal_error: Arc::new(std::sync::Mutex::new(None)),
+            cancel_token: CancellationToken::new(),
+            preempted_token: CancellationToken::new(),
+        };
+        assert!(matches!(response.next().await, Some(Err(tuliprox_core::model::StreamError::RecoveryExhausted))));
+        assert!(rx.try_recv().is_err(), "cleanup must follow terminal error delivery");
+        assert!(response.next().await.is_none());
+        let Some(crate::CleanupEvent::ReleaseSharedSubscriber {
+            subscriber_id,
+            provider_end_reason,
+            provider_error_class,
+            ..
+        }) = rx.recv().await
+        else {
+            panic!("reserved cleanup event missing");
+        };
+        assert_eq!(subscriber_id, id);
+        assert_eq!(provider_end_reason, crate::PROVIDER_END_ERROR);
+        assert_eq!(provider_error_class, Some("recovery_exhausted"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn preempted_shared_response_does_not_classify_terminal_provider_failure(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (tx, mut rx) = mpsc::channel(1);
+        let permit = tx.reserve_owned().await?;
+        let preempted_token = CancellationToken::new();
+        preempted_token.cancel();
+        let mut response = super::ReceiverStreamWrapper {
+            stream: futures::stream::empty::<Bytes>(),
+            start: None,
+            subscriber_id: SharedSubscriberId::from_stream_uid(46),
+            addr: "127.0.0.1:41046".parse()?,
+            permit: Some(permit),
+            request_id: None,
+            owner: None,
+            deadline: None,
+            released: false,
+            terminal_outcome: Arc::new(std::sync::Mutex::new(Some(super::TerminalOutcome::ProviderError(
+                tuliprox_core::model::StreamError::RecoveryExhausted,
+            )))),
+            terminal_observed: false,
+            subscriber_terminal_error: Arc::new(std::sync::Mutex::new(None)),
+            cancel_token: CancellationToken::new(),
+            preempted_token,
+        };
+        assert!(response.next().await.is_none());
+        let Some(crate::CleanupEvent::ReleaseSharedSubscriber { provider_end_reason, provider_error_class, .. }) =
+            rx.recv().await
+        else {
+            panic!("reserved cleanup event missing");
+        };
+        assert_eq!(provider_end_reason, crate::PROVIDER_END_NOT_SET);
+        assert_eq!(provider_error_class, None);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn shared_timeout_ends_only_its_subscriber() -> Result<(), Box<dyn std::error::Error>> {
         let app_cfg = create_test_app_config();
         let events = Arc::new(EventManager::new());
@@ -1734,7 +2091,7 @@ mod tests {
         state.register_subscriber(second, &addr, surviving_token.clone()).await;
         {
             let mut register = manager.shared_streams.write().await;
-            register.by_key.insert(Arc::clone(&url), state);
+            register.by_key.insert(Arc::clone(&url), Arc::clone(&state));
             register.key_by_subscriber.insert(first, Arc::clone(&url));
             register.key_by_subscriber.insert(second, Arc::clone(&url));
         }
@@ -1749,6 +2106,11 @@ mod tests {
             owner: None,
             deadline: Some(Box::pin(tokio::time::sleep(Duration::ZERO))),
             released: false,
+            terminal_outcome: Arc::clone(&state.terminal_outcome),
+            terminal_observed: false,
+            subscriber_terminal_error: Arc::new(std::sync::Mutex::new(None)),
+            cancel_token: CancellationToken::new(),
+            preempted_token: state.preempted_token.clone(),
         };
         assert!(timeout(Duration::from_secs(2), response.next()).await?.is_none());
         timeout(Duration::from_secs(2), async {
@@ -1772,7 +2134,7 @@ mod tests {
         let old = Arc::new(SharedStreamState::new(Vec::new(), CHANNEL_SIZE, None, 1024, None));
         let current = Arc::new(SharedStreamState::new(Vec::new(), CHANNEL_SIZE, None, 1024, None));
         manager.shared_streams.write().await.by_key.insert(Arc::from(url), Arc::clone(&current));
-        manager.unregister(url, &old).await;
+        manager.unregister(url, &old, false).await;
         assert!(manager.get_shared_state(url).await.is_some_and(|state| Arc::ptr_eq(&state, &current)));
         assert!(!current.stop_token.is_cancelled());
     }
@@ -2032,6 +2394,33 @@ mod tests {
         let result = admission.await?;
         assert!(result.is_err(), "saturated shared subscription admission must be rejected, not fall back");
         Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silent_shared_source_times_out_and_removes_origin() {
+        let app_cfg = create_test_app_config();
+        let events = Arc::new(EventManager::new());
+        let providers = Arc::new(ActiveProviderManager::new(&app_cfg, &events));
+        let manager = Arc::new(SharedStreamManager::new(providers));
+        let key = "mpegts:input:channel";
+        let state = Arc::new(SharedStreamState::new(Vec::new(), CHANNEL_SIZE.max(8), None, 1024, None));
+        manager.shared_streams.write().await.by_key.insert(Arc::from(key), Arc::clone(&state));
+        let (sender, receiver) = mpsc::channel::<Result<Bytes, std::io::Error>>(8);
+        state.broadcast(key, ReceiverStream::new(receiver), Arc::clone(&manager));
+        sender.send(Ok(Bytes::from_static(b"first"))).await.unwrap();
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::task::yield_now().await;
+        assert!(manager.get_shared_state(key).await.is_some(), "warning threshold must not terminate origin");
+        tokio::time::advance(Duration::from_secs(30)).await;
+        for _ in 0..20 {
+            if manager.get_shared_state(key).await.is_none() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(manager.get_shared_state(key).await.is_none(), "silent source must unregister after idle deadline");
+        drop(sender);
     }
 
     #[tokio::test]
@@ -2631,5 +3020,538 @@ mod tests {
 
         manager.shutdown().await;
         assert_eq!(manager.meter_count(), 0);
+    }
+
+    // ── Subscriber-lag fail-closed tests ──────────────────────────────────────
+
+    #[test]
+    fn burst_buffer_read_detects_skipped_chunks() {
+        // When the buffer wraps, a slow subscriber that was at sequence 0
+        // must see skipped > 0 on its next read.
+        let mut buffer = BurstBuffer::new(10);
+        buffer.push(Bytes::from_static(b"aaaa"));
+        buffer.push(Bytes::from_static(b"bbbb"));
+        // third push evicts first
+        buffer.push(Bytes::from_static(b"cccc"));
+
+        let mut chunks = Vec::new();
+        let read = buffer.read_from_into(0, &mut chunks, usize::MAX);
+        assert!(read.skipped > 0, "slow subscriber must see skipped > 0 after buffer wrap");
+        assert_eq!(chunks.len(), 2, "only the surviving chunks are returned");
+    }
+
+    #[tokio::test]
+    async fn subscriber_lagged_cleanup_uses_distinct_provider_end_reason() -> Result<(), Box<dyn std::error::Error>> {
+        // ReceiverStreamWrapper with a subscriber_terminal_error of SubscriberLagged
+        // must emit PROVIDER_END_SUBSCRIBER_LAGGED and class "subscriber_lagged".
+        let (tx, mut rx) = mpsc::channel(1);
+        let permit = tx.reserve_owned().await?;
+        let id = SharedSubscriberId::from_stream_uid(90);
+        let addr = "127.0.0.1:41090".parse()?;
+        let mut response = super::ReceiverStreamWrapper {
+            stream: futures::stream::empty::<Bytes>(),
+            start: None,
+            subscriber_id: id,
+            addr,
+            permit: Some(permit),
+            request_id: None,
+            owner: None,
+            deadline: None,
+            released: false,
+            terminal_outcome: Arc::new(std::sync::Mutex::new(None)),
+            terminal_observed: false,
+            subscriber_terminal_error: Arc::new(std::sync::Mutex::new(Some(
+                tuliprox_core::model::StreamError::SubscriberLagged,
+            ))),
+            cancel_token: CancellationToken::new(),
+            preempted_token: CancellationToken::new(),
+        };
+        // First poll must yield the SubscriberLagged error.
+        let result = response.next().await.expect("terminal error expected");
+        assert!(
+            matches!(result, Err(tuliprox_core::model::StreamError::SubscriberLagged)),
+            "subscriber must receive SubscriberLagged error"
+        );
+        // Second poll closes the stream and fires cleanup.
+        assert!(response.next().await.is_none());
+        let Some(crate::CleanupEvent::ReleaseSharedSubscriber { provider_end_reason, provider_error_class, .. }) =
+            rx.recv().await
+        else {
+            panic!("cleanup event missing");
+        };
+        assert_eq!(provider_end_reason, crate::PROVIDER_END_SUBSCRIBER_LAGGED);
+        assert_eq!(provider_error_class, Some("subscriber_lagged"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn tmp_repro_poll_context_send() -> Result<(), Box<dyn std::error::Error>> {
+        use std::{
+            future::Future,
+            pin::Pin,
+            task::{Context, Poll},
+        };
+
+        let (tx, rx) = mpsc::channel::<u32>(16);
+        let (_control_tx, mut control_rx) = mpsc::channel::<u32>(4);
+        let shutdown_token = tokio_util::sync::CancellationToken::new();
+
+        // Pre-reserve the permit BEFORE the receiver parks (mirrors the wrapper).
+        let permit = tx.reserve_owned().await?;
+
+        // Worker mirroring spawn_cleanup_worker's biased select.
+        let worker = tokio::spawn(async move {
+            let mut rx = rx;
+            loop {
+                let event = tokio::select! {
+                    biased;
+                    () = shutdown_token.cancelled() => break,
+                    control_event = control_rx.recv() => control_event,
+                    event = rx.recv() => event,
+                };
+                let Some(event) = event else { break };
+                eprintln!("REPRO-WORKER: got event {event}");
+            }
+        });
+        // Let the worker park.
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+
+        // Send from within a poll (our task is being polled while this runs).
+        struct SendInPoll {
+            permit: Option<mpsc::OwnedPermit<u32>>,
+        }
+        impl Future for SendInPoll {
+            type Output = ();
+            fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {
+                self.permit.take().unwrap().send(42);
+                eprintln!("REPRO: sent from poll context");
+                Poll::Ready(())
+            }
+        }
+        SendInPoll { permit: Some(permit) }.await;
+
+        let done = timeout(Duration::from_millis(500), worker).await;
+        eprintln!("REPRO: done={}", done.is_ok());
+        assert!(done.is_ok(), "poll-context send did not wake the receiver");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn probe_permit_delivery() -> Result<(), Box<dyn std::error::Error>> {
+        let app_cfg = create_test_app_config();
+        let events = Arc::new(EventManager::new());
+        let (_providers, users, manager, connections) = create_test_connection_manager(&app_cfg, &events);
+        let addr = "127.0.0.1:41999".parse()?;
+        let id = SharedSubscriberId::from_stream_uid(connections.next_stream_uid());
+        let url: Arc<str> = Arc::from("https://example.invalid/live/probe.ts");
+        register_user(&users, addr, id.stream_uid(), "probe-user", &url).await?;
+        let state = Arc::new(SharedStreamState::new(Vec::new(), CHANNEL_SIZE, None, 1024, None));
+        state.register_subscriber(id, &addr, CancellationToken::new()).await;
+        {
+            let mut register = manager.shared_streams.write().await;
+            register.by_key.insert(Arc::clone(&url), Arc::clone(&state));
+            register.key_by_subscriber.insert(id, Arc::clone(&url));
+        }
+        let permit = connections.cleanup_tx().reserve_owned().await?;
+        permit.send(crate::CleanupEvent::ReleaseSharedSubscriber {
+            addr,
+            subscriber_id: id,
+            request_id: None,
+            owner: None,
+            provider_end_reason: crate::PROVIDER_END_SUBSCRIBER_LAGGED,
+            provider_error_class: Some("subscriber_lagged"),
+        });
+        eprintln!("PROBE: event sent, waiting");
+        timeout(Duration::from_secs(2), async {
+            while users.active_streams().await.len() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        eprintln!("PROBE: released");
+        Ok(())
+    }
+
+    /// Shared harness for deterministic forwarder lag tests.
+    ///
+    /// The burst ring is shrunk to two 5-byte chunks. Pushes without a notification
+    /// never wake the parked forwarder (the push loop has no yield points), so the
+    /// ring can be wrapped deterministically behind the subscriber's `next_sequence`
+    /// and a single final `notify_waiters` triggers the lag decision.
+    async fn lag_harness(consume_live_chunk: bool) -> Result<(), Box<dyn std::error::Error>> {
+        let app_cfg = create_test_app_config();
+        let events = Arc::new(EventManager::new());
+        let (providers, users, manager, connections) = create_test_connection_manager(&app_cfg, &events);
+        let addr = "127.0.0.1:41096".parse()?;
+        let lagging = SharedSubscriberId::from_stream_uid(connections.next_stream_uid());
+        let survivor = SharedSubscriberId::from_stream_uid(connections.next_stream_uid());
+        let url: Arc<str> = Arc::from(if consume_live_chunk {
+            "https://example.invalid/live/ongoing-lag.ts"
+        } else {
+            "https://example.invalid/live/first-live-lag.ts"
+        });
+        register_user(&users, addr, lagging.stream_uid(), "lag-user", &url).await?;
+        register_user(&users, addr, survivor.stream_uid(), "survivor-user", &url).await?;
+
+        let state = Arc::new(SharedStreamState::new(Vec::new(), CHANNEL_SIZE, None, 1024, None));
+        // Two 5-byte chunks fit; a third push evicts the oldest.
+        *state.burst_buffer.lock().await = BurstBuffer::new(10);
+        let surviving_token = CancellationToken::new();
+        state.register_subscriber(survivor, &addr, surviving_token.clone()).await;
+        {
+            let mut register = manager.shared_streams.write().await;
+            register.by_key.insert(Arc::clone(&url), Arc::clone(&state));
+            register.key_by_subscriber.insert(lagging, Arc::clone(&url));
+            register.key_by_subscriber.insert(survivor, Arc::clone(&url));
+        }
+        let pending_cleanup = SharedStreamManager::reserve_subscriber_cleanup(&connections, lagging, addr)
+            .await
+            .map_err(|_| "shared cleanup admission failed")?;
+
+        state.burst_buffer.lock().await.push(Bytes::from_static(b"aaaaa"));
+        let (mut body, _, _) = state
+            .subscribe(&addr, lagging, Arc::clone(&connections), pending_cleanup, super::PendingJoinGuard::new(&state))
+            .await;
+
+        eprintln!("HARNESS: waiting for replay");
+        // The replay of the single buffered chunk arrives on the first poll; the
+        // forwarder then parks on an empty live read.
+        assert_eq!(
+            timeout(Duration::from_secs(2), body.next()).await?.ok_or("body ended before replay")??,
+            Bytes::from_static(b"aaaaa")
+        );
+
+        eprintln!("HARNESS: replay done");
+        if consume_live_chunk {
+            // Steady state: consume one live chunk so the gap later happens mid-stream
+            // rather than between replay and first live data.
+            state.burst_buffer.lock().await.push(Bytes::from_static(b"bbbbb"));
+            state.live_notification.notify_waiters();
+            assert_eq!(
+                timeout(Duration::from_secs(2), body.next()).await?.ok_or("body ended before live chunk")??,
+                Bytes::from_static(b"bbbbb")
+            );
+            // Let the forwarder finish its empty re-read and park.
+            for _ in 0..5 {
+                tokio::task::yield_now().await;
+            }
+        }
+
+        // Wrap the ring far past the subscriber's position without notifying, then
+        // wake the forwarder once: its next read must see an eviction gap.
+        for _ in 0..8 {
+            state.burst_buffer.lock().await.push(Bytes::from_static(b"ccccc"));
+        }
+        state.live_notification.notify_waiters();
+
+        eprintln!("HARNESS: waiting for terminal");
+        // Buffered chunks may drain first, but the terminal item must be the
+        // subscriber-local lag error, followed by end-of-stream.
+        let terminal = timeout(Duration::from_secs(2), async {
+            loop {
+                match body.next().await {
+                    Some(Ok(_)) => continue,
+                    Some(Err(e)) => return e,
+                    None => panic!("body ended without the lag error"),
+                }
+            }
+        })
+        .await?;
+        assert!(
+            matches!(terminal, tuliprox_core::model::StreamError::SubscriberLagged),
+            "subscriber must terminate with SubscriberLagged, got {terminal:?}"
+        );
+        assert!(timeout(Duration::from_secs(2), body.next()).await?.is_none());
+
+        eprintln!("HARNESS: terminal done, sending probe event");
+        let connections_for_probe = Arc::clone(&connections);
+        let probe_permit = connections_for_probe.cleanup_tx().reserve_owned().await?;
+        probe_permit.send(crate::CleanupEvent::ReleaseConnection { addr: "127.0.0.1:41998".parse()? });
+        eprintln!("HARNESS: probe event sent, waiting for cleanup");
+        // Only the lagging subscriber is released; the survivor and the origin continue.
+        let drain = timeout(Duration::from_secs(2), async {
+            let mut ticks = 0;
+            loop {
+                let active = users.active_streams().await.len();
+                let reg = manager.shared_streams.read().await;
+                let subs = state.subscribers.read().await.len();
+                if ticks < 5 || active == 1 {
+                    eprintln!(
+                        "HARNESS: tick={ticks} active={active} key_by_sub={} subs={subs}",
+                        reg.key_by_subscriber.len()
+                    );
+                }
+                drop(reg);
+                if active == 1 {
+                    break;
+                }
+                ticks += 1;
+                eprintln!("HARNESS: sleeping");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await;
+        eprintln!("HARNESS: drain result={}", drain.is_ok());
+        drain?;
+        assert_eq!(users.active_streams().await.first().map(|stream| stream.uid), Some(survivor.stream_uid()));
+        assert!(!surviving_token.is_cancelled(), "lag must not cancel other subscribers");
+        assert!(manager.get_shared_state(&url).await.is_some(), "origin must survive subscriber lag");
+        assert_eq!(providers.get_provider_connections_count(), 0, "no provider handle was allocated");
+        drop(body);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn first_live_replay_gap_terminates_only_the_lagging_subscriber() -> Result<(), Box<dyn std::error::Error>> {
+        lag_harness(false).await
+    }
+
+    #[tokio::test]
+    async fn ongoing_gap_terminates_only_the_lagging_subscriber() -> Result<(), Box<dyn std::error::Error>> {
+        lag_harness(true).await
+    }
+
+    #[tokio::test]
+    async fn provider_eof_terminal_outcome_classifies_as_closed_no_error() -> Result<(), Box<dyn std::error::Error>> {
+        let (tx, mut rx) = mpsc::channel(1);
+        let permit = tx.reserve_owned().await?;
+        let id = SharedSubscriberId::from_stream_uid(91);
+        let addr = "127.0.0.1:41091".parse()?;
+        let mut response = super::ReceiverStreamWrapper {
+            stream: futures::stream::empty::<Bytes>(),
+            start: None,
+            subscriber_id: id,
+            addr,
+            permit: Some(permit),
+            request_id: None,
+            owner: None,
+            deadline: None,
+            released: false,
+            terminal_outcome: Arc::new(std::sync::Mutex::new(Some(super::TerminalOutcome::ProviderEof))),
+            terminal_observed: false,
+            subscriber_terminal_error: Arc::new(std::sync::Mutex::new(None)),
+            cancel_token: CancellationToken::new(),
+            preempted_token: CancellationToken::new(),
+        };
+        // EOF does not produce an error item; stream closes cleanly.
+        assert!(response.next().await.is_none());
+        let Some(crate::CleanupEvent::ReleaseSharedSubscriber { provider_end_reason, provider_error_class, .. }) =
+            rx.recv().await
+        else {
+            panic!("cleanup event missing");
+        };
+        assert_eq!(provider_end_reason, crate::PROVIDER_END_NOT_SET, "EOF is not a provider failure");
+        assert_eq!(provider_error_class, None, "EOF must not carry an error class");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn provider_idle_timeout_terminal_outcome_delivers_typed_error() -> Result<(), Box<dyn std::error::Error>> {
+        let (tx, mut rx) = mpsc::channel(1);
+        let permit = tx.reserve_owned().await?;
+        let id = SharedSubscriberId::from_stream_uid(92);
+        let addr = "127.0.0.1:41092".parse()?;
+        let mut response = super::ReceiverStreamWrapper {
+            stream: futures::stream::empty::<Bytes>(),
+            start: None,
+            subscriber_id: id,
+            addr,
+            permit: Some(permit),
+            request_id: None,
+            owner: None,
+            deadline: None,
+            released: false,
+            terminal_outcome: Arc::new(std::sync::Mutex::new(Some(super::TerminalOutcome::ProviderError(
+                tuliprox_core::model::StreamError::ProviderIdleTimeout,
+            )))),
+            terminal_observed: false,
+            subscriber_terminal_error: Arc::new(std::sync::Mutex::new(None)),
+            cancel_token: CancellationToken::new(),
+            preempted_token: CancellationToken::new(),
+        };
+        let result = response.next().await.expect("terminal error expected");
+        assert!(
+            matches!(result, Err(tuliprox_core::model::StreamError::ProviderIdleTimeout)),
+            "subscriber must receive ProviderIdleTimeout error"
+        );
+        assert!(response.next().await.is_none());
+        let Some(crate::CleanupEvent::ReleaseSharedSubscriber { provider_end_reason, provider_error_class, .. }) =
+            rx.recv().await
+        else {
+            panic!("cleanup event missing");
+        };
+        assert_eq!(provider_end_reason, crate::PROVIDER_END_ERROR);
+        assert_eq!(provider_error_class, Some("timeout"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cancelled_subscriber_does_not_classify_lag_or_terminal_error() -> Result<(), Box<dyn std::error::Error>> {
+        let (tx, mut rx) = mpsc::channel(1);
+        let permit = tx.reserve_owned().await?;
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let mut response = super::ReceiverStreamWrapper {
+            stream: futures::stream::empty::<Bytes>(),
+            start: None,
+            subscriber_id: SharedSubscriberId::from_stream_uid(93),
+            addr: "127.0.0.1:41093".parse()?,
+            permit: Some(permit),
+            request_id: None,
+            owner: None,
+            deadline: None,
+            released: false,
+            terminal_outcome: Arc::new(std::sync::Mutex::new(Some(super::TerminalOutcome::ProviderError(
+                tuliprox_core::model::StreamError::RecoveryExhausted,
+            )))),
+            terminal_observed: false,
+            subscriber_terminal_error: Arc::new(std::sync::Mutex::new(Some(
+                tuliprox_core::model::StreamError::SubscriberLagged,
+            ))),
+            cancel_token: cancel,
+            preempted_token: CancellationToken::new(),
+        };
+        // Cancellation suppresses both subscriber-local and origin errors.
+        assert!(response.next().await.is_none());
+        let Some(crate::CleanupEvent::ReleaseSharedSubscriber { provider_end_reason, provider_error_class, .. }) =
+            rx.recv().await
+        else {
+            panic!("cleanup event missing");
+        };
+        assert_eq!(provider_end_reason, crate::PROVIDER_END_NOT_SET);
+        assert_eq!(provider_error_class, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn preempted_subscriber_does_not_classify_lag_or_terminal_error() -> Result<(), Box<dyn std::error::Error>> {
+        let (tx, mut rx) = mpsc::channel(1);
+        let permit = tx.reserve_owned().await?;
+        let preempted = CancellationToken::new();
+        preempted.cancel();
+        let mut response = super::ReceiverStreamWrapper {
+            stream: futures::stream::empty::<Bytes>(),
+            start: None,
+            subscriber_id: SharedSubscriberId::from_stream_uid(94),
+            addr: "127.0.0.1:41094".parse()?,
+            permit: Some(permit),
+            request_id: None,
+            owner: None,
+            deadline: None,
+            released: false,
+            terminal_outcome: Arc::new(std::sync::Mutex::new(Some(super::TerminalOutcome::ProviderError(
+                tuliprox_core::model::StreamError::RecoveryExhausted,
+            )))),
+            terminal_observed: false,
+            subscriber_terminal_error: Arc::new(std::sync::Mutex::new(Some(
+                tuliprox_core::model::StreamError::SubscriberLagged,
+            ))),
+            cancel_token: CancellationToken::new(),
+            preempted_token: preempted,
+        };
+        assert!(response.next().await.is_none());
+        let Some(crate::CleanupEvent::ReleaseSharedSubscriber { provider_end_reason, provider_error_class, .. }) =
+            rx.recv().await
+        else {
+            panic!("cleanup event missing");
+        };
+        assert_eq!(provider_end_reason, crate::PROVIDER_END_NOT_SET);
+        assert_eq!(provider_error_class, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn terminal_provider_idle_timeout_reaches_active_subscribers() -> Result<(), Box<dyn std::error::Error>> {
+        // End-to-end: ProviderIdleTimeout through the broadcast pipeline reaches subscribers.
+        let app_cfg = Arc::new(create_test_app_config());
+        let events = Arc::new(EventManager::new());
+        let (providers, users, manager, connections) = create_test_connection_manager(&app_cfg, &events);
+        let addr = "127.0.0.1:41095".parse()?;
+        let id = SharedSubscriberId::from_stream_uid(connections.next_stream_uid());
+        let url = "https://example.invalid/live/idle-timeout.ts";
+        register_user(&users, addr, id.stream_uid(), "idle-viewer", url).await?;
+        let allocation = ManagedProviderHandle::new(
+            Arc::clone(&providers),
+            providers
+                .acquire_connection(&"provider_1".intern(), &addr, 0, ConnectionKind::Normal)
+                .ok_or("provider allocation missing")?,
+        );
+        let ctx = super::SharedStreamCtx {
+            app_config: &app_cfg,
+            shared_stream_manager: &manager,
+            active_provider: &providers,
+            connection_manager: &connections,
+        };
+        let (tx, rx) = mpsc::channel::<Result<Bytes, tuliprox_core::model::StreamError>>(8);
+        let pending = SharedStreamManager::reserve_subscriber_cleanup(&connections, id, addr)
+            .await
+            .map_err(|_| "shared cleanup admission failed")?;
+        let (mut body, _, _) = SharedStreamManager::register_shared_stream(
+            ctx,
+            url,
+            ReceiverStream::new(rx),
+            &addr,
+            id,
+            Vec::new(),
+            8,
+            Some(allocation),
+            pending,
+            0,
+            ConnectionKind::Normal,
+        )
+        .await
+        .ok_or("subscription missing")?;
+        tx.send(Ok(Bytes::from_static(b"live data"))).await?;
+        assert_eq!(
+            timeout(Duration::from_secs(2), body.next()).await?.ok_or("body ended early")??,
+            Bytes::from_static(b"live data")
+        );
+        tx.send(Err(tuliprox_core::model::StreamError::ProviderIdleTimeout)).await?;
+        let result = timeout(Duration::from_secs(2), body.next()).await?.ok_or("terminal error missing")?;
+        assert!(
+            matches!(result, Err(tuliprox_core::model::StreamError::ProviderIdleTimeout)),
+            "subscriber must receive ProviderIdleTimeout"
+        );
+        assert!(timeout(Duration::from_secs(2), body.next()).await?.is_none());
+        timeout(Duration::from_secs(2), async {
+            while !users.active_streams().await.is_empty() || providers.get_provider_connections_count() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        assert!(manager.get_shared_state(url).await.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn terminal_outcome_eof_cleanup_classification() {
+        let outcome = super::TerminalOutcome::ProviderEof;
+        let (reason, class) = outcome.cleanup_classification();
+        assert_eq!(reason, crate::PROVIDER_END_CLOSED);
+        assert_eq!(class, None);
+        assert!(!outcome.is_failure());
+        assert!(outcome.as_stream_error().is_none());
+    }
+
+    #[test]
+    fn terminal_outcome_recovery_exhausted_cleanup_classification() {
+        let outcome = super::TerminalOutcome::ProviderError(tuliprox_core::model::StreamError::RecoveryExhausted);
+        let (reason, class) = outcome.cleanup_classification();
+        assert_eq!(reason, crate::PROVIDER_END_ERROR);
+        assert_eq!(class, Some("recovery_exhausted"));
+        assert!(outcome.is_failure());
+        assert!(matches!(outcome.as_stream_error(), Some(tuliprox_core::model::StreamError::RecoveryExhausted)));
+    }
+
+    #[test]
+    fn terminal_outcome_idle_timeout_cleanup_classification() {
+        let outcome = super::TerminalOutcome::ProviderError(tuliprox_core::model::StreamError::ProviderIdleTimeout);
+        let (reason, class) = outcome.cleanup_classification();
+        assert_eq!(reason, crate::PROVIDER_END_ERROR);
+        assert_eq!(class, Some("timeout"));
+        assert!(outcome.is_failure());
+        assert!(matches!(outcome.as_stream_error(), Some(tuliprox_core::model::StreamError::ProviderIdleTimeout)));
     }
 }

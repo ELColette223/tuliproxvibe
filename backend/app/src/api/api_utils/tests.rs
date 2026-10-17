@@ -881,7 +881,9 @@ fn test_resolve_request_url_for_logging_respects_sanitization_setting() {
     let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     struct SanitizeSettingGuard(bool);
     impl Drop for SanitizeSettingGuard {
-        fn drop(&mut self) { shared::utils::set_sanitize_sensitive_info(self.0); }
+        fn drop(&mut self) {
+            shared::utils::set_sanitize_sensitive_info(self.0);
+        }
     }
 
     let prev = shared::utils::is_sanitize_sensitive_info_enabled();
@@ -1098,6 +1100,7 @@ async fn forced_legacy_hls_test_response(
         virtual_id: 41,
         provider: Arc::clone(&input.name),
         stream_url: origin_url.as_str().intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: client_addr,
@@ -1246,6 +1249,7 @@ async fn forced_reopen_stays_on_pinned_provider_account() {
         virtual_id: 41,
         provider: Arc::clone(&input.name),
         stream_url: format!("http://{origin_a}/live/1.ts").intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: client_addr,
@@ -1325,6 +1329,7 @@ async fn overlapping_vod_range_requests_return_correct_account_bytes() {
         virtual_id: 42,
         provider: Arc::clone(&input.name),
         stream_url: format!("http://{origin_addr}/movie/1.ts").intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: client_addr,
@@ -1443,6 +1448,7 @@ async fn parallel_series_range_requests_keep_both_claims_active() {
         virtual_id: 43,
         provider: Arc::clone(&input.name),
         stream_url: format!("http://{origin_addr}/series/1.ts").intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: client_addr,
@@ -1600,7 +1606,9 @@ fn load_test_rss_kib() -> Option<u64> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn load_test_rss_kib() -> Option<u64> { None }
+fn load_test_rss_kib() -> Option<u64> {
+    None
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[ignore = "HTTP load test: cargo +stable test -p tuliprox --release --bin tuliprox -- --ignored --nocapture http_provider_lease_load_test"]
@@ -1793,6 +1801,7 @@ fn load_test_session(input: &ConfigInput, origin_addr: SocketAddr, token: &str, 
         virtual_id: 42,
         provider: Arc::clone(&input.name),
         stream_url: format!("http://{origin_addr}/live/42.ts").intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr,
@@ -2078,6 +2087,7 @@ async fn direct_ts_eof_before_first_byte_releases_slot_without_idle_lease() {
         virtual_id: 42,
         provider: Arc::clone(&input.name),
         stream_url: format!("http://{origin_addr}/live/42.ts").intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: client_addr,
@@ -2167,6 +2177,7 @@ async fn direct_ts_abort_while_waiting_for_first_byte_releases_exact_request() {
         virtual_id: 42,
         provider: Arc::clone(&input.name),
         stream_url: format!("http://{origin_addr}/live/42.ts").intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: client_addr,
@@ -2532,6 +2543,7 @@ async fn parallel_vod_abort_preserves_sibling_claim_and_provider_stickiness() {
         virtual_id: 42,
         provider: Arc::clone(&input.name),
         stream_url: format!("http://{origin_addr}/movie/1.ts").intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: client_addr,
@@ -2691,6 +2703,7 @@ async fn parallel_series_abort_then_seek_reuses_account_without_stale_claim() {
         virtual_id: 43,
         provider: Arc::clone(&input.name),
         stream_url: format!("http://{origin_addr}/series/1.ts").intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: client_addr,
@@ -3019,7 +3032,8 @@ async fn shared_proxy_clients_keep_independent_bodies_and_cleanup() {
     let mut channel2 = load_test_channel(&input, origin_addr);
     channel2.url = stream_url.as_str().intern();
 
-    let resp1 = stream_response(
+    let stable_key = shared_live_mpeg_ts_key(target.id, input.name.as_ref(), Some("source-chan-55"), 55);
+    let resp1 = stream_response_with_shared_key(
         &fp1,
         &app_state,
         "shared-session-1",
@@ -3035,18 +3049,21 @@ async fn shared_proxy_clients_keep_independent_bodies_and_cleanup() {
         crate::api::model::ConnectionKind::Normal,
         false,
         None,
+        Some(&stable_key),
     )
     .await
     .into_response();
     assert_eq!(resp1.status(), StatusCode::OK);
 
-    let resp2 = stream_response(
+    let alias_url = format!("http://{origin_addr}/live/rotated-alias.ts");
+    channel2.url = alias_url.as_str().intern();
+    let resp2 = stream_response_with_shared_key(
         &fp2,
         &app_state,
         "shared-session-2",
         None,
         channel2,
-        &stream_url,
+        &alias_url,
         None,
         &HeaderMap::default(),
         &input,
@@ -3056,17 +3073,51 @@ async fn shared_proxy_clients_keep_independent_bodies_and_cleanup() {
         crate::api::model::ConnectionKind::Normal,
         false,
         None,
+        Some(&stable_key),
     )
     .await
     .into_response();
     assert_eq!(resp2.status(), StatusCode::OK);
+    assert!(app_state
+        .active_users
+        .get_and_update_user_session(&user2.username, "shared-session-2")
+        .await
+        .is_some_and(|session| session.shared_stream_key.as_deref() == Some(stable_key.as_str())));
 
     assert_eq!(app_state.active_provider.get_provider_connections_count(), 1, "only 1 shared origin connection");
 
+    let no_origin = stream_response_with_shared_key(
+        &create_test_fingerprint("127.0.0.1:55143".parse().unwrap()),
+        &app_state,
+        "shared-session-3",
+        None,
+        create_test_live_channel(&alias_url),
+        &alias_url,
+        None,
+        &HeaderMap::default(),
+        &input,
+        &target,
+        &user2,
+        UserConnectionPermission::Exhausted,
+        crate::api::model::ConnectionKind::Normal,
+        true,
+        None,
+        Some("mpegts:provider_shared_p:missing-origin"),
+    )
+    .await
+    .into_response();
+    assert_ne!(no_origin.status(), StatusCode::OK, "exhausted reconnect must not open a new provider origin");
+    assert_eq!(app_state.active_provider.get_provider_connections_count(), 1);
+
     drop(resp1);
 
-    let body2 = resp2.into_body().collect().await.expect("client 2 body collects").to_bytes();
-    assert!(!body2.is_empty(), "client 2 receives stream bytes after client 1 dropped");
+    let mut body2 = resp2.into_body().into_data_stream();
+    let first_chunk = tokio::time::timeout(std::time::Duration::from_secs(2), futures::StreamExt::next(&mut body2))
+        .await
+        .expect("client 2 receives data promptly")
+        .expect("client 2 body has data")
+        .expect("client 2 chunk succeeds");
+    assert!(!first_chunk.is_empty(), "client 2 receives stream bytes after client 1 dropped");
     drop(body2);
 
     for _ in 0..50 {
@@ -3308,6 +3359,7 @@ async fn catchup_abort_seek_and_window_change_preserve_correct_affinity() {
         virtual_id: 41,
         provider: Arc::clone(&input.name),
         stream_url: format!("http://{origin_a}/timeshift/1.ts?window={window}").intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: client_addr,
@@ -4391,6 +4443,15 @@ async fn resolve_streaming_strategy_accepts_session_requested_stream_url() {
 }
 
 #[test]
+fn shared_live_mpeg_ts_key_uses_origin_id_or_target_virtual_fallback() {
+    assert_eq!(shared_live_mpeg_ts_key(7, "input", Some("origin-1"), 99), "mpegts:origin:5:inputorigin-1");
+    assert_eq!(shared_live_mpeg_ts_key(7, "input", Some("   "), 99), "mpegts:fallback:7:99");
+    assert_eq!(shared_live_mpeg_ts_key(7, "input", None, 99), "mpegts:fallback:7:99");
+    assert_ne!(shared_live_mpeg_ts_key(7, "7", Some("99"), 99), shared_live_mpeg_ts_key(7, "7", None, 99));
+    assert_ne!(shared_live_mpeg_ts_key(7, "a:b", Some("c"), 99), shared_live_mpeg_ts_key(7, "a", Some("b:c"), 99));
+}
+
+#[test]
 fn test_should_allow_exhausted_shared_reconnect_only_for_matching_shared_session() {
     let session = UserSession {
         transition_version: 1,
@@ -4399,6 +4460,7 @@ fn test_should_allow_exhausted_shared_reconnect_only_for_matching_shared_session
         virtual_id: 282,
         provider: Arc::<str>::from("provider"),
         stream_url: Arc::<str>::from("http://provider/live/449924.ts"),
+        shared_stream_key: Some("mpegts:provider:449924".intern()),
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: "127.0.0.1:1234".parse().unwrap_or_else(|_| unreachable!()),
@@ -4410,10 +4472,22 @@ fn test_should_allow_exhausted_shared_reconnect_only_for_matching_shared_session
         lifecycle: crate::api::model::PlaybackLifecycle::Active,
     };
 
-    assert!(should_allow_exhausted_shared_reconnect(true, Some(&session), 282, "http://provider/live/449924.ts"));
-    assert!(!should_allow_exhausted_shared_reconnect(false, Some(&session), 282, "http://provider/live/449924.ts"));
-    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&session), 999, "http://provider/live/449924.ts"));
-    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&session), 282, "http://provider/live/other.ts"));
+    assert!(should_allow_exhausted_shared_reconnect(true, Some(&session), 282, "mpegts:provider:449924"));
+    assert!(!should_allow_exhausted_shared_reconnect(false, Some(&session), 282, "mpegts:provider:449924"));
+    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&session), 999, "mpegts:provider:449924"));
+    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&session), 282, "mpegts:provider:other"));
+    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&session), 282, "mpegts:other-provider:449924"));
+    let mut exhausted_session = session.clone();
+    exhausted_session.permission = UserConnectionPermission::Exhausted;
+    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&exhausted_session), 282, "mpegts:provider:449924"));
+    let mut session_without_identity = session.clone();
+    session_without_identity.shared_stream_key = None;
+    assert!(!should_allow_exhausted_shared_reconnect(
+        true,
+        Some(&session_without_identity),
+        282,
+        "mpegts:provider:449924"
+    ));
 }
 
 fn create_test_app_config() -> AppConfig {
@@ -4634,7 +4708,9 @@ fn create_test_dual_provider_app_config() -> AppConfig {
     }
 }
 
-fn create_test_app_state() -> Arc<AppState> { create_test_app_state_for_config(Arc::new(create_test_app_config())) }
+pub(crate) fn create_test_app_state() -> Arc<AppState> {
+    create_test_app_state_for_config(Arc::new(create_test_app_config()))
+}
 
 #[tokio::test]
 async fn create_api_proxy_user_defaults_output_clusters_to_all() {
@@ -5009,6 +5085,7 @@ fn create_test_session(
             PlaylistItemType::LiveHls => "http://provider-1.example/live/42.m3u8",
             _ => "http://provider-1.example/live/42.ts",
         }),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: "127.0.0.1:55555".parse().unwrap_or_else(|_| unreachable!()),
@@ -8924,6 +9001,7 @@ fn session_reacquire_cleanup_addrs_excludes_current_and_deduplicates() {
         virtual_id: 9001,
         provider: "provider-a".intern(),
         stream_url: "http://localhost/movie.mkv".intern(),
+        shared_stream_key: None,
         provider_session_headers: HashMap::new(),
         user_agent_stream_index: None,
         addr: seek,
@@ -9111,7 +9189,9 @@ fn assert_network_decision(
 }
 
 /// `Arc<ArcSwapOption<GeoIp>>` with no `GeoIP` database loaded.
-fn empty_geoip() -> Arc<ArcSwapOption<GeoIp>> { Arc::new(ArcSwapOption::<GeoIp>::default()) }
+fn empty_geoip() -> Arc<ArcSwapOption<GeoIp>> {
+    Arc::new(ArcSwapOption::<GeoIp>::default())
+}
 
 /// `Arc<ArcSwapOption<GeoIp>>` with a mock `GeoIP` that always reports the
 /// given country for any lookup.

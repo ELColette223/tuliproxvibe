@@ -189,6 +189,43 @@ async fn user_agent_stream_index_is_stable_per_session_and_unique_between_sessio
 /// When a new request arrives on an expired session, the lifecycle should be
 /// reset to Prepared so that full activation evaluation happens.
 #[tokio::test]
+async fn shared_stream_key_is_stored_on_the_session() {
+    let config = Config::default();
+    let geoip = Arc::new(ArcSwapOption::<GeoIp>::default());
+    let event_manager = Arc::new(EventManager::new());
+    let manager = ActiveUserManager::new(&config, &geoip, &event_manager);
+    let addr = SocketAddr::from(([127, 0, 0, 1], 55_501));
+    let mut user = ProxyUserCredentials::default();
+    user.username = "shared-key-user".to_string();
+
+    manager
+        .create_user_session(CreateUserSessionParams {
+            user: &user,
+            session_token: "shared-key-session",
+            virtual_id: 42,
+            provider: "provider-a",
+            stream_url: "http://localhost/live/42.ts",
+            addr: &addr,
+            connection_permission: UserConnectionPermission::Allowed,
+            connection_kind: Some(ConnectionKind::Normal),
+            socket_bound: false,
+        })
+        .await;
+
+    assert!(
+        manager.set_session_shared_stream_key(&user.username, "shared-key-session", "mpegts:input:origin-42").await
+    );
+    assert!(manager
+        .get_and_update_user_session(&user.username, "shared-key-session")
+        .await
+        .is_some_and(|session| session.shared_stream_key.as_deref() == Some("mpegts:input:origin-42")));
+    assert!(!manager
+        .get_and_update_user_session(&user.username, "other-session")
+        .await
+        .is_some_and(|session| session.shared_stream_key.is_some()));
+}
+
+#[tokio::test]
 async fn create_user_session_normalizes_expired_lifecycle() {
     let config = Config::default();
     let geoip = Arc::new(ArcSwapOption::<GeoIp>::default());
@@ -209,6 +246,7 @@ async fn create_user_session_normalizes_expired_lifecycle() {
             virtual_id: 7001,
             provider: "provider-a".intern(),
             stream_url: "http://localhost/live.m3u8".intern(),
+            shared_stream_key: None,
             provider_session_headers: HashMap::new(),
             user_agent_stream_index: None,
             addr,
@@ -271,6 +309,7 @@ async fn create_user_session_does_not_normalize_pending_provider_lifecycle() {
             virtual_id: 7002,
             provider: "provider-a".intern(),
             stream_url: "http://localhost/live.m3u8".intern(),
+            shared_stream_key: None,
             provider_session_headers: HashMap::new(),
             user_agent_stream_index: None,
             addr,
@@ -5843,6 +5882,7 @@ async fn check_divergence_detects_connection_count_mismatch() {
             virtual_id: 9002,
             provider: "provider-a".intern(),
             stream_url: "http://localhost/stream.ts".intern(),
+            shared_stream_key: None,
             provider_session_headers: HashMap::new(),
             user_agent_stream_index: None,
             addr,
@@ -5887,6 +5927,7 @@ async fn check_divergence_detects_stream_without_counted_session() {
             virtual_id: 9003,
             provider: "provider-a".intern(),
             stream_url: "http://localhost/stream.ts".intern(),
+            shared_stream_key: None,
             provider_session_headers: HashMap::new(),
             user_agent_stream_index: None,
             addr,
@@ -5972,6 +6013,7 @@ async fn divergence_log_rate_limited_within_cooldown_window() {
             virtual_id: 9004,
             provider: "provider-a".intern(),
             stream_url: "http://localhost/stream.ts".intern(),
+            shared_stream_key: None,
             provider_session_headers: HashMap::new(),
             user_agent_stream_index: None,
             addr,

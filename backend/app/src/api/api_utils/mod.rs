@@ -9,12 +9,13 @@ use crate::{
         model::{
             create_active_client_stream, create_channel_unavailable_stream, create_custom_video_stream_response,
             create_provider_connections_exhausted_stream, get_custom_stream_response_error_status,
-            get_stream_response_with_headers, is_custom_video_stream_enabled, open_provider_stream_outcome_with_lifecycle,
-            open_provider_stream_with_lifecycle, tee_stream, AppState, BoxedProviderStream, CustomVideoStreamType,
-            PendingProviderReason, PlaybackLeaseRef, ProviderAllocation, ProviderConfig, ProviderStreamCustomReason,
-            ProviderStreamFactoryOptions, ProviderStreamInfo, ProviderStreamOpenLifecycle, ProviderStreamOpenOutcome,
-            ProviderStreamState, SharedStreamCtx, SharedStreamManager, StreamAdmissionError, StreamDetails, StreamError,
-            StreamingStrategy, ThrottledStream, UserApiRequest, UserSession,
+            get_stream_response_with_headers, is_custom_video_stream_enabled,
+            open_provider_stream_outcome_with_lifecycle, open_provider_stream_with_lifecycle, tee_stream, AppState,
+            BoxedProviderStream, CustomVideoStreamType, PendingProviderReason, PlaybackLeaseRef, ProviderAllocation,
+            ProviderConfig, ProviderStreamCustomReason, ProviderStreamFactoryOptions, ProviderStreamInfo,
+            ProviderStreamOpenLifecycle, ProviderStreamOpenOutcome, ProviderStreamState, SharedStreamCtx,
+            SharedStreamManager, StreamAdmissionError, StreamDetails, StreamError, StreamingStrategy, ThrottledStream,
+            UserApiRequest, UserSession,
         },
     },
     auth::Fingerprint,
@@ -205,7 +206,9 @@ fn stream_admission_rejected_response(error: StreamAdmissionError, username: &st
 }
 
 /// Produces a quiet termination response when a recently evicted stream retries.
-pub fn reentry_suppressed_response() -> axum::response::Response { StatusCode::NO_CONTENT.into_response() }
+pub fn reentry_suppressed_response() -> axum::response::Response {
+    StatusCode::NO_CONTENT.into_response()
+}
 
 #[macro_export]
 macro_rules! try_option_bad_request {
@@ -355,9 +358,13 @@ pub fn get_server_time() -> String {
 static PROCESS_START: LazyLock<std::time::Instant> = LazyLock::new(std::time::Instant::now);
 
 /// Anchors the uptime clock; call once at process startup.
-pub fn init_uptime_clock() { let _ = *PROCESS_START; }
+pub fn init_uptime_clock() {
+    let _ = *PROCESS_START;
+}
 
-pub fn get_uptime_secs() -> u64 { PROCESS_START.elapsed().as_secs() }
+pub fn get_uptime_secs() -> u64 {
+    PROCESS_START.elapsed().as_secs()
+}
 
 pub fn get_build_time() -> Option<String> {
     BUILD_TIMESTAMP
@@ -1272,7 +1279,10 @@ async fn open_provider_stream_with_optional_rotation(
                 drop(streaming_strategy.provider_handle.take());
 
                 let lease = session_owner.map(|owner| {
-                    PlaybackLeaseRef::new(owner, PlaybackKind::classify(item_type, extract_extension_from_url(stream_url)))
+                    PlaybackLeaseRef::new(
+                        owner,
+                        PlaybackKind::classify(item_type, extract_extension_from_url(stream_url)),
+                    )
                 });
                 let Some(next_handle) = app_state
                     .active_provider
@@ -1289,10 +1299,8 @@ async fn open_provider_stream_with_optional_rotation(
                 else {
                     break;
                 };
-                let managed = tuliprox_session::ManagedProviderHandle::new(
-                    Arc::clone(&app_state.active_provider),
-                    next_handle,
-                );
+                let managed =
+                    tuliprox_session::ManagedProviderHandle::new(Arc::clone(&app_state.active_provider), next_handle);
                 let Some(provider_cfg) = managed.handle().and_then(|handle| handle.allocation.provider()) else {
                     drop(managed);
                     break;
@@ -2458,6 +2466,45 @@ pub(crate) async fn stream_response(
     app_state: &Arc<AppState>,
     session_token: &str,
     request_class: Option<PlaybackRequestClass>,
+    stream_channel: StreamChannel,
+    stream_url: &str,
+    pinned_provider: Option<&Arc<str>>,
+    req_headers: &HeaderMap,
+    input: &Arc<ConfigInput>,
+    target: &Arc<ConfigTarget>,
+    user: &ProxyUserCredentials,
+    connection_permission: UserConnectionPermission,
+    connection_kind: crate::api::model::ConnectionKind,
+    allow_exhausted_shared_reconnect: bool,
+    grace_mode: Option<crate::api::model::GraceMode>,
+) -> impl IntoResponse + Send {
+    stream_response_with_shared_key(
+        fingerprint,
+        app_state,
+        session_token,
+        request_class,
+        stream_channel,
+        stream_url,
+        pinned_provider,
+        req_headers,
+        input,
+        target,
+        user,
+        connection_permission,
+        connection_kind,
+        allow_exhausted_shared_reconnect,
+        grace_mode,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub(crate) async fn stream_response_with_shared_key(
+    fingerprint: &Fingerprint,
+    app_state: &Arc<AppState>,
+    session_token: &str,
+    request_class: Option<PlaybackRequestClass>,
     mut stream_channel: StreamChannel,
     stream_url: &str,
     pinned_provider: Option<&Arc<str>>,
@@ -2469,6 +2516,7 @@ pub(crate) async fn stream_response(
     connection_kind: crate::api::model::ConnectionKind,
     allow_exhausted_shared_reconnect: bool,
     grace_mode: Option<crate::api::model::GraceMode>,
+    shared_stream_key: Option<&str>,
 ) -> impl IntoResponse + Send {
     let _transition_guard = app_state.active_users.acquire_playback_transition(&user.username, session_token).await;
     let request_log_stream_url = resolve_request_url_for_logging(input, stream_url);
@@ -2503,12 +2551,21 @@ pub(crate) async fn stream_response(
     connection_permission = activation.admission.permission();
     connection_kind = activation.admission.kind().unwrap_or(connection_kind);
 
-    let allow_shared_reuse =
-        connection_permission != UserConnectionPermission::Exhausted || allow_exhausted_shared_reconnect;
-
     let share_stream = is_stream_share_enabled(item_type, target);
+    let shared_stream_key = shared_stream_key.filter(|_| share_stream);
+    let shared_key = shared_stream_key.unwrap_or(stream_url);
+    let has_matching_shared_session =
+        app_state.active_users.get_and_update_user_session(&user.username, session_token).await.is_some_and(
+            |session| {
+                session.virtual_id == virtual_id
+                    && shared_stream_key.is_some()
+                    && session.shared_stream_key.as_deref() == Some(shared_key)
+            },
+        );
+    let allow_shared_reuse = connection_permission != UserConnectionPermission::Exhausted
+        || (allow_exhausted_shared_reconnect && has_matching_shared_session);
     let _shared_lock = if share_stream {
-        let write_lock = app_state.app_config.file_locks.write_lock_str(stream_url).await;
+        let write_lock = app_state.app_config.file_locks.write_lock_str(shared_key).await;
 
         if allow_shared_reuse {
             if let Some(value) = try_shared_stream_response_if_any(
@@ -2522,6 +2579,7 @@ pub(crate) async fn stream_response(
                 session_token,
                 req_headers,
                 activation.placeholder_transition_version,
+                shared_key,
             )
             .await
             {
@@ -2544,6 +2602,7 @@ pub(crate) async fn stream_response(
                 session_token,
                 req_headers,
                 activation.placeholder_transition_version,
+                shared_key,
             )
             .await
             {
@@ -2745,7 +2804,7 @@ pub(crate) async fn stream_response(
         };
         let mut metering = prepare_stream_metering(
             app_state,
-            stream_url,
+            shared_key,
             is_stream_shared,
             stream_details.stream.is_some(),
             stream_details.has_deferred_provider_open(),
@@ -2831,7 +2890,7 @@ pub(crate) async fn stream_response(
                         active_provider: &app_state.active_provider,
                         connection_manager: &app_state.connection_manager,
                     },
-                    stream_url,
+                    shared_key,
                     stream,
                     &fingerprint.addr,
                     shared_subscriber_id,
@@ -2844,6 +2903,10 @@ pub(crate) async fn stream_response(
                 )
                 .await
             {
+                let _ = app_state
+                    .active_users
+                    .set_session_shared_stream_key(&user.username, session_token, shared_key)
+                    .await;
                 metering.commit_shared_registration();
                 let (status_code, header_map) =
                     get_stream_response_with_headers(provider_response.map(|(h, s, _, _)| (h, s)));
@@ -3289,6 +3352,7 @@ async fn try_shared_stream_response_if_any(
     session_token: &str,
     req_headers: &HeaderMap,
     placeholder_transition_version: Option<u64>,
+    shared_key: &str,
 ) -> Option<impl IntoResponse> {
     let subscriber_id =
         tuliprox_core::model::SharedSubscriberId::from_stream_uid(app_state.connection_manager.next_stream_uid());
@@ -3299,7 +3363,7 @@ async fn try_shared_stream_response_if_any(
             active_provider: &app_state.active_provider,
             connection_manager: &app_state.connection_manager,
         },
-        stream_url,
+        shared_key,
         &fingerprint.addr,
         subscriber_id,
         connection_priority_for_kind(user, connection_kind),
@@ -3322,8 +3386,8 @@ async fn try_shared_stream_response_if_any(
             return Some(stream_admission_rejected_response(reason.into(), &user.username));
         }
     };
-    debug_if_enabled!("Using shared stream {}", sanitize_sensitive_info(stream_url));
-    if let Some(headers) = app_state.shared_stream_manager.get_shared_state_headers(stream_url).await {
+    debug_if_enabled!("Using shared stream {}", sanitize_sensitive_info(shared_key));
+    if let Some(headers) = app_state.shared_stream_manager.get_shared_state_headers(shared_key).await {
         let (status_code, header_map) = get_stream_response_with_headers(Some((headers.clone(), StatusCode::OK)));
         let mut grace_period_options = app_state.get_grace_options();
         if connect_permission != UserConnectionPermission::GracePeriod {
@@ -3362,7 +3426,7 @@ async fn try_shared_stream_response_if_any(
         let (meter_uid, pending_registration) = if is_stream_metrics_enabled(app_state) {
             app_state
                 .shared_stream_manager
-                .reserve_meter_uid(stream_url, || app_state.connection_manager.next_stream_uid())
+                .reserve_meter_uid(shared_key, || app_state.connection_manager.next_stream_uid())
         } else {
             (0, None)
         };
@@ -3388,6 +3452,10 @@ async fn try_shared_stream_response_if_any(
         .await
         {
             Ok(stream) => {
+                let _ = app_state
+                    .active_users
+                    .set_session_shared_stream_key(&user.username, session_token, shared_key)
+                    .await;
                 metering.commit_shared_registration();
                 stream.boxed()
             }
@@ -3720,6 +3788,18 @@ fn is_path_within_allowed_directories(sub_path: &Path, root_paths: &[String]) ->
         }
     }
     false
+}
+
+pub(crate) fn shared_live_mpeg_ts_key(
+    target_id: u16,
+    input_name: &str,
+    input_stream_id: Option<&str>,
+    virtual_id: u32,
+) -> String {
+    match input_stream_id.filter(|id| !id.trim().is_empty()) {
+        Some(input_stream_id) => format!("mpegts:origin:{}:{input_name}{input_stream_id}", input_name.len()),
+        None => format!("mpegts:fallback:{target_id}:{virtual_id}"),
+    }
 }
 
 pub fn is_stream_share_enabled(item_type: PlaylistItemType, target: &ConfigTarget) -> bool {
@@ -4366,13 +4446,13 @@ pub(crate) fn should_allow_exhausted_shared_reconnect(
     share_stream: bool,
     user_session: Option<&UserSession>,
     requested_virtual_id: u32,
-    requested_stream_url: &str,
+    requested_shared_key: &str,
 ) -> bool {
     share_stream
         && user_session.is_some_and(|session| {
             session.permission != UserConnectionPermission::Exhausted
                 && session.virtual_id == requested_virtual_id
-                && session.stream_url.as_ref() == requested_stream_url
+                && session.shared_stream_key.as_deref() == Some(requested_shared_key)
         })
 }
 
@@ -4659,4 +4739,4 @@ pub fn empty_json_response_as_array() -> axum::http::Result<axum::response::Resp
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
