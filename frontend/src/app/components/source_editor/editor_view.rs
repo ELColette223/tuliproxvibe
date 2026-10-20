@@ -1136,7 +1136,9 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
         let editor_state_ref = editor_state_ref.clone();
 
         Callback::from(move |block_ids: HashSet<BlockId>| {
-            let mut editor_state = editor_state_ref.borrow_mut();
+            let Ok(mut editor_state) = editor_state_ref.try_borrow_mut() else {
+                return;
+            };
             if !editor_state.block_elements.is_empty() {
                 return;
             }
@@ -1714,7 +1716,11 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
                 let mouse_y = client_y as f32 - rect.top() as f32;
 
                 {
-                    let mut editor_state = editor_state_ref.borrow_mut();
+                    // A leaked borrow (e.g. from a previous panic with abort) must
+                    // degrade to a skipped frame, never a wasm trap loop.
+                    let Ok(mut editor_state) = editor_state_ref.try_borrow_mut() else {
+                        return;
+                    };
                     // Pending line snap
                     if let Some(((from_x, from_y), _)) = editor_state.pending_line {
                         let mut snapped = (mouse_x, mouse_y);
@@ -1800,7 +1806,11 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
                     }
                 }
 
-                if let Some(move_it) = compute_drag_move_params(&editor_state_ref.borrow(), mouse_x, mouse_y) {
+                // Bind the computed params first so the shared borrow from the
+                // scrutinee is dropped before `move_blocks` borrows the state
+                // mutably (an `if let` scrutinee borrow lives through the block).
+                let drag_move_params = compute_drag_move_params(&editor_state_ref.borrow(), mouse_x, mouse_y);
+                if let Some(move_it) = drag_move_params {
                     move_blocks.emit(move_it);
                     // Drag updates are applied directly to DOM for smoothness.
                     // Avoid full re-render on every mouse move while dragging blocks.
@@ -1820,7 +1830,9 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
         let cursor_grabbing = cursor_grabbing.clone();
         let force_update = force_update.clone();
         Rc::new(move || {
-            let mut editor_state = editor_state_ref.borrow_mut();
+            let Ok(mut editor_state) = editor_state_ref.try_borrow_mut() else {
+                return;
+            };
             let had_active_interaction = clear_active_interaction(&mut editor_state);
             cursor_grabbing.set(false);
             if had_active_interaction {
@@ -1897,7 +1909,9 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
                     let dx = second.client_x() as f32 - first.client_x() as f32;
                     let dy = second.client_y() as f32 - first.client_y() as f32;
                     let distance = (dx * dx + dy * dy).sqrt();
-                    let mut editor_state = editor_state_ref.borrow_mut();
+                    let Ok(mut editor_state) = editor_state_ref.try_borrow_mut() else {
+                        return;
+                    };
                     let previous_distance = editor_state.pinch_distance.unwrap_or(distance);
                     if previous_distance > 0.0 {
                         let next_zoom = editor_state.zoom_factor * (distance / previous_distance);
@@ -1928,7 +1942,11 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
                         let touch_x = client_x - rect.left() as f32;
                         let touch_y = client_y - rect.top() as f32;
 
-                        if let Some(move_it) = compute_drag_move_params(&editor_state_ref.borrow(), touch_x, touch_y) {
+                        // Drop the shared borrow before `move_blocks` borrows the
+                        // state mutably (an `if let` scrutinee borrow lives through
+                        // the whole statement).
+                        let drag_move = compute_drag_move_params(&editor_state_ref.borrow(), touch_x, touch_y);
+                        if let Some(move_it) = drag_move {
                             move_blocks.emit(move_it);
                         } else {
                             force_update.set(*force_update + 1);
@@ -1953,7 +1971,9 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
         Callback::from(move |e: WheelEvent| {
             e.prevent_default();
             e.stop_propagation();
-            let mut editor_state = editor_state_ref.borrow_mut();
+            let Ok(mut editor_state) = editor_state_ref.try_borrow_mut() else {
+                return;
+            };
 
             if e.ctrl_key() {
                 if let Some(canvas) = canvas_ref.cast::<HtmlElement>() {
