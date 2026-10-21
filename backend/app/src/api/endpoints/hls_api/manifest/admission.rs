@@ -87,6 +87,7 @@ pub(in crate::api::endpoints::hls_api) async fn prepare_hls_canonical_manifest_o
                 let strip = app_state.hls.proxy.strip();
                 match hls_provider_connections_exhausted_manifest_resolution(
                     app_state,
+                    Some(fingerprint),
                     session,
                     &context.username,
                     origin.input,
@@ -386,6 +387,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
                 join_hls_canonical_manifest_owner(
                     HlsCanonicalOwnerHandoffContext {
                         app_state,
+                        fingerprint: Some(fingerprint),
                         proxy_session_id: path_proxy_session_id,
                         access_lease_id,
                         expected_lease_issued_at_ms,
@@ -432,6 +434,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
         let strip = app_state.hls.proxy.strip();
         if let Some(response) = try_hls_cached_manifest_response(
             app_state,
+            Some(fingerprint),
             &session,
             access_lease_id,
             access_lease_state,
@@ -473,6 +476,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
             let strip = app_state.hls.proxy.strip();
             if let Some(response) = try_hls_cached_manifest_response(
                 app_state,
+                Some(fingerprint),
                 &session,
                 access_lease_id,
                 access_lease_state,
@@ -503,6 +507,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
                     let strip = app_state.hls.proxy.strip();
                     if let Some(live_response) = try_hls_cached_manifest_response(
                         app_state,
+                        Some(fingerprint),
                         &session,
                         access_lease_id,
                         access_lease_state,
@@ -536,6 +541,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
             let strip = app_state.hls.proxy.strip();
             if let Some(response) = try_hls_cached_manifest_response(
                 app_state,
+                Some(fingerprint),
                 &session,
                 access_lease_id,
                 access_lease_state,
