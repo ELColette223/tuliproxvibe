@@ -68,8 +68,12 @@ pub(super) fn prepare_target_playlist_for_persistence(
             if preserve_stream_ids {
                 // Identity-derived ids survive upstream provider id changes, so a client's
                 // saved channel keeps resolving after a source update.
-                header.uuid =
-                    shared::utils::generate_stable_channel_uuid(&target.name, &header.group, &header.get_name(), item_type);
+                header.uuid = shared::utils::generate_stable_channel_uuid(
+                    &target.name,
+                    &header.group,
+                    &header.get_name(),
+                    item_type,
+                );
                 let parent_virtual_id = if item_type.is_series() {
                     target_id_mapping.get_parent_virtual_id_by_uuid(&header.uuid).unwrap_or_default()
                 } else {

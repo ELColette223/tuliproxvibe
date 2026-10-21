@@ -175,7 +175,8 @@ async fn repaired_reduced_retry(mode: HlsStartupMode) {
             rewrite_secret: app.get_encrypt_secret().to_vec(),
             now_ms: current_time_millis(),
         },
-    ).await;
+    )
+    .await;
     request.now_ms = session.read().await.origin_refresh.next_fetch_allowed_at_ms.max(current_time_millis());
     control.recovering.store(true, Ordering::Release);
     let refresh = tokio::spawn(trigger_origin_refresh_sync(request));

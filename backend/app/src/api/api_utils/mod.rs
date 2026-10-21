@@ -321,6 +321,7 @@ pub use self::{
         is_stream_share_enabled, shared_live_mpeg_ts_key,
     },
 };
+#[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use self::{
     auth::{input_for_user, with_recording_headers},
     catchup::get_catchup_session_ttl_secs,

@@ -90,10 +90,8 @@ async fn aliased_input_is_gated_by_canonical_name() {
 #[test]
 fn gate_runs_before_shared_stream_join() {
     // A new viewer must not join a running provider stream of an input in maintenance.
-    let body = function_body(
-        include_str!("../provider_acquire.rs"),
-        "pub(crate) async fn stream_response_with_provider_handle(",
-    );
+    let body =
+        function_body(include_str!("../provider_acquire.rs"), "pub(crate) async fn stream_response_with_shared_key(");
     let gate = body.find("if blocks_new_playback(").expect("gate present");
     let join = body.find("try_shared_stream_response_if_any(").expect("shared join present");
     assert!(gate < join, "maintenance gate must run before the shared stream join");

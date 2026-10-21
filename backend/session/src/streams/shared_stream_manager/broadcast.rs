@@ -191,9 +191,7 @@ impl SharedStreamState {
                 sanitize_sensitive_info(&streaming_url),
                 last_push_at.map_or(0, |t| t.elapsed().as_secs())
             );
-            shared_streams
-                .unregister(&streaming_url, &origin_state, origin_state.terminal_is_failure())
-                .await;
+            shared_streams.unregister(&streaming_url, &origin_state, origin_state.terminal_is_failure()).await;
         });
 
         // Keep the broadcast handle so shutdown can join it instead of leaving a detached task.

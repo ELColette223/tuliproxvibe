@@ -229,17 +229,14 @@ pub fn compile_visual_rules_to_filter_dsl(
         // `!=` also contains a literal `!` that the textual placeholder scanner
         // would pair with the next one, so negation is always spelled `NOT (...)`.
         if any_bang {
-            let clauses = kept
-                .iter()
-                .map(|n| format!(r#"Caption ~ "^{}$""#, regex_escape(n)))
-                .collect::<Vec<_>>()
-                .join(" OR ");
-            format!(r#"({} AND NOT ({}))"#, group_clause(group_name), clauses)
+            let clauses =
+                kept.iter().map(|n| format!(r#"Caption ~ "^{}$""#, regex_escape(n))).collect::<Vec<_>>().join(" OR ");
+            format!(r"({} AND NOT ({}))", group_clause(group_name), clauses)
         } else if kept.len() == 1 {
             format!(r#"({} AND NOT (Caption = "{}"))"#, group_clause(group_name), escape_dsl_string(&kept[0]))
         } else {
             let values = kept.iter().map(|n| format!(r#""{}""#, escape_dsl_string(n))).collect::<Vec<_>>().join(", ");
-            format!(r#"({} AND NOT (Caption IN [{}]))"#, group_clause(group_name), values)
+            format!(r"({} AND NOT (Caption IN [{}]))", group_clause(group_name), values)
         }
     }
 
@@ -262,11 +259,8 @@ pub fn compile_visual_rules_to_filter_dsl(
         return Ok(existing_filter.map(str::to_string));
     }
 
-    let removal_combined = if removals.len() == 1 {
-        format!("NOT ({})", removals[0])
-    } else {
-        format!("NOT ({})", removals.join(" OR "))
-    };
+    let removal_combined =
+        if removals.len() == 1 { format!("NOT ({})", removals[0]) } else { format!("NOT ({})", removals.join(" OR ")) };
 
     get_filter(&removal_combined, None).map_err(|err| FilterBuilderError::root(err.to_string()))?;
 
@@ -754,7 +748,7 @@ mod tests {
             compile_filter_draft_with_templates(Some(&draft), &[], Some(&templates))
                 .expect("visual legacy tree should compile")
                 .as_deref(),
-            Some(r#"(!NO_24H! AND !NO_ADULT! AND !NO_H265!)"#)
+            Some(r"(!NO_24H! AND !NO_ADULT! AND !NO_H265!)")
         );
     }
 
@@ -838,11 +832,7 @@ mod tests {
     #[test]
     fn compile_visual_rules_produces_valid_precise_dsl() {
         let rules = vec![
-            VisualCategoryRule {
-                name: "Adultos".to_string(),
-                is_enabled: false,
-                kept_channel_names: Vec::new(),
-            },
+            VisualCategoryRule { name: "Adultos".to_string(), is_enabled: false, kept_channel_names: Vec::new() },
             VisualCategoryRule {
                 name: "Documentarios".to_string(),
                 is_enabled: true,
@@ -870,13 +860,8 @@ mod tests {
 
     #[test]
     fn compile_visual_rules_preserves_existing_templates() {
-        let rules = vec![
-            VisualCategoryRule {
-                name: "Movies".to_string(),
-                is_enabled: false,
-                kept_channel_names: Vec::new(),
-            },
-        ];
+        let rules =
+            vec![VisualCategoryRule { name: "Movies".to_string(), is_enabled: false, kept_channel_names: Vec::new() }];
 
         let dsl = compile_visual_rules_to_filter_dsl(Some("!NO_24H!"), &rules).unwrap().unwrap();
         assert_eq!(dsl, r#"(!NO_24H!) AND NOT (Group = "Movies")"#);
@@ -919,7 +904,10 @@ mod visual_dsl_tests {
             VisualCategoryRule {
                 name: "US Shows".to_string(),
                 is_enabled: true,
-                kept_channel_names: vec!["US: E!, ! Entertainment HD".to_string(), "US: Atlanta Channel HD".to_string()],
+                kept_channel_names: vec![
+                    "US: E!, ! Entertainment HD".to_string(),
+                    "US: Atlanta Channel HD".to_string(),
+                ],
             },
         ];
         let dsl = compile_visual_rules_to_filter_dsl(Some("!NO_24H!"), &rules).unwrap().unwrap();
@@ -935,8 +923,7 @@ mod visual_dsl_tests {
             placeholder: String::new(),
         }];
         crate::foundation::prepare_templates(&mut templates).unwrap();
-        get_filter(&dsl, Some(&templates))
-            .unwrap_or_else(|e| panic!("parse failed for DSL: {dsl}\nerror: {e}"));
+        get_filter(&dsl, Some(&templates)).unwrap_or_else(|e| panic!("parse failed for DSL: {dsl}\nerror: {e}"));
     }
 
     #[test]

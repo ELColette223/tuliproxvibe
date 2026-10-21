@@ -5,8 +5,8 @@ use super::filter_builder_model::{
 use crate::{
     app::{
         components::{
-            build_options, input::Input, AppIcon, Card, ContentDialog, DropDownOption, DropDownSelection, FilterRuleTreeEditor,
-            FilterView, Select, TabItem, TabSet, TextArea, TextButton,
+            build_options, input::Input, AppIcon, Card, ContentDialog, DropDownOption, DropDownSelection,
+            FilterRuleTreeEditor, FilterView, Select, TabItem, TabSet, TextArea, TextButton,
         },
         ConfigContext,
     },
@@ -157,7 +157,9 @@ pub fn TargetFilterBuilder(props: &TargetFilterBuilderProps) -> Html {
                     return;
                 }
                 match state.compile() {
-                    Ok(filter) => on_result.emit(Some(TargetFilterBuilderResult { filter, rules: state.rules.clone() })),
+                    Ok(filter) => {
+                        on_result.emit(Some(TargetFilterBuilderResult { filter, rules: state.rules.clone() }));
+                    }
                     Err(_) => on_result.emit(None),
                 }
             } else {
@@ -264,6 +266,7 @@ fn exclusion_is_incomplete(node: &FilterNode) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_exclusion_rule(
     index: usize,
     total: usize,
@@ -301,7 +304,9 @@ fn render_exclusion_rule(
             event.prevent_default();
             if let Some(from) = *dragging {
                 if event.data_transfer().and_then(|transfer| transfer.get_data("text/plain").ok())
-                    == Some(format!("target-filter-rule:{from}")) && from != index {
+                    == Some(format!("target-filter-rule:{from}"))
+                    && from != index
+                {
                     dispatch.emit(FilterBuilderAction::MoveExclusion(vec![from], vec![index]));
                 }
             }
@@ -366,24 +371,50 @@ fn render_exclusion_fields(
     let (field, operator, value) = match rule {
         FilterNode::String { field, operator, value } => (*field, string_operator_id(*operator), value.clone()),
         FilterNode::Regex { field, pattern } => (*field, "regex", pattern.clone()),
-        FilterNode::Type { value } => (ItemField::Type, "eq", match value {
-            FilterTypeValue::Live => "live", FilterTypeValue::Movie => "movie", FilterTypeValue::Series => "series",
-        }.to_string()),
-        FilterNode::Number { field, operator, value } => (*field, match operator {
-            NumericOperator::Eq => "eq", NumericOperator::NotEq => "not_eq", NumericOperator::Greater => "gt",
-            NumericOperator::GreaterOrEqual => "gte", NumericOperator::Less => "lt",
-            NumericOperator::LessOrEqual => "lte",
-        }, value.to_string()),
-        _ => return html! {
-            <div class="tp__filter-builder__secondary">
-                <span>{ translate.t("FILTER_BUILDER.OPTIONAL_ADVANCED") }</span>
-                <code>{ compile_filter_draft_with_templates(Some(rule), rules, Some(templates)).ok().flatten().unwrap_or_default() }</code>
-            </div>
-        },
+        FilterNode::Type { value } => (
+            ItemField::Type,
+            "eq",
+            match value {
+                FilterTypeValue::Live => "live",
+                FilterTypeValue::Movie => "movie",
+                FilterTypeValue::Series => "series",
+            }
+            .to_string(),
+        ),
+        FilterNode::Number { field, operator, value } => (
+            *field,
+            match operator {
+                NumericOperator::Eq => "eq",
+                NumericOperator::NotEq => "not_eq",
+                NumericOperator::Greater => "gt",
+                NumericOperator::GreaterOrEqual => "gte",
+                NumericOperator::Less => "lt",
+                NumericOperator::LessOrEqual => "lte",
+            },
+            value.to_string(),
+        ),
+        _ => {
+            return html! {
+                <div class="tp__filter-builder__secondary">
+                    <span>{ translate.t("FILTER_BUILDER.OPTIONAL_ADVANCED") }</span>
+                    <code>{ compile_filter_draft_with_templates(Some(rule), rules, Some(templates)).ok().flatten().unwrap_or_default() }</code>
+                </div>
+            }
+        }
     };
-    let fields = [ItemField::Group, ItemField::Name, ItemField::Title, ItemField::Caption,
-        ItemField::Genre, ItemField::Input, ItemField::EpgId, ItemField::Url, ItemField::Type,
-        ItemField::Chno, ItemField::Quality];
+    let fields = [
+        ItemField::Group,
+        ItemField::Name,
+        ItemField::Title,
+        ItemField::Caption,
+        ItemField::Genre,
+        ItemField::Input,
+        ItemField::EpgId,
+        ItemField::Url,
+        ItemField::Type,
+        ItemField::Chno,
+        ItemField::Quality,
+    ];
     let on_field = {
         let dispatch = dispatch.clone();
         Callback::from(move |event: Event| {
@@ -404,15 +435,22 @@ fn render_exclusion_fields(
                     return;
                 } else if matches!(field, ItemField::Chno | ItemField::Quality) {
                     let op = match selected.as_str() {
-                        "not_eq" => NumericOperator::NotEq, "gt" => NumericOperator::Greater,
-                        "gte" => NumericOperator::GreaterOrEqual, "lt" => NumericOperator::Less,
-                        "lte" => NumericOperator::LessOrEqual, _ => NumericOperator::Eq,
+                        "not_eq" => NumericOperator::NotEq,
+                        "gt" => NumericOperator::Greater,
+                        "gte" => NumericOperator::GreaterOrEqual,
+                        "lt" => NumericOperator::Less,
+                        "lte" => NumericOperator::LessOrEqual,
+                        _ => NumericOperator::Eq,
                     };
                     FilterNode::Number { field, operator: op, value: value.parse().unwrap_or_default() }
                 } else if selected == "regex" {
                     FilterNode::Regex { field, pattern: value.clone() }
                 } else {
-                    FilterNode::String { field, operator: parse_string_operator(&selected).unwrap_or(StringOperator::Eq), value: value.clone() }
+                    FilterNode::String {
+                        field,
+                        operator: parse_string_operator(&selected).unwrap_or(StringOperator::Eq),
+                        value: value.clone(),
+                    }
                 };
                 dispatch.emit(FilterBuilderAction::ReplaceExclusion(vec![index], next));
             }
@@ -425,22 +463,34 @@ fn render_exclusion_fields(
             if let Some(input) = event.target_dyn_into::<web_sys::HtmlInputElement>() {
                 let value = input.value();
                 let next = if field == ItemField::Type {
-                    FilterNode::Type { value: match value.as_str() {
-                        "movie" => FilterTypeValue::Movie, "series" => FilterTypeValue::Series,
-                        _ => FilterTypeValue::Live,
-                    }}
+                    FilterNode::Type {
+                        value: match value.as_str() {
+                            "movie" => FilterTypeValue::Movie,
+                            "series" => FilterTypeValue::Series,
+                            _ => FilterTypeValue::Live,
+                        },
+                    }
                 } else if matches!(field, ItemField::Chno | ItemField::Quality) {
-                    let Ok(number) = value.parse::<u32>() else { return; };
+                    let Ok(number) = value.parse::<u32>() else {
+                        return;
+                    };
                     let op = match operator.as_str() {
-                        "not_eq" => NumericOperator::NotEq, "gt" => NumericOperator::Greater,
-                        "gte" => NumericOperator::GreaterOrEqual, "lt" => NumericOperator::Less,
-                        "lte" => NumericOperator::LessOrEqual, _ => NumericOperator::Eq,
+                        "not_eq" => NumericOperator::NotEq,
+                        "gt" => NumericOperator::Greater,
+                        "gte" => NumericOperator::GreaterOrEqual,
+                        "lt" => NumericOperator::Less,
+                        "lte" => NumericOperator::LessOrEqual,
+                        _ => NumericOperator::Eq,
                     };
                     FilterNode::Number { field, operator: op, value: number }
                 } else if operator == "regex" {
                     FilterNode::Regex { field, pattern: value }
                 } else {
-                    FilterNode::String { field, operator: parse_string_operator(&operator).unwrap_or(StringOperator::Eq), value }
+                    FilterNode::String {
+                        field,
+                        operator: parse_string_operator(&operator).unwrap_or(StringOperator::Eq),
+                        value,
+                    }
                 };
                 dispatch.emit(FilterBuilderAction::ReplaceExclusion(vec![index], next));
             }
@@ -453,7 +503,8 @@ fn render_exclusion_fields(
         Callback::from(move |event: Event| {
             if let Some(select) = event.target_dyn_into::<web_sys::HtmlSelectElement>() {
                 let value = match select.value().as_str() {
-                    "movie" => FilterTypeValue::Movie, "series" => FilterTypeValue::Series,
+                    "movie" => FilterTypeValue::Movie,
+                    "series" => FilterTypeValue::Series,
                     _ => FilterTypeValue::Live,
                 };
                 dispatch.emit(FilterBuilderAction::ReplaceExclusion(vec![index], FilterNode::Type { value }));
@@ -580,6 +631,7 @@ fn render_preview(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_node(
     stage: FilterStage,
     node: &FilterNode,
@@ -1245,7 +1297,11 @@ pub fn TargetFilterSummary(props: &TargetFilterSummaryProps) -> Html {
     });
     let rules = props.rules.clone().unwrap_or_else(|| shared::foundation::managed_filter_rules(Some(&templates)));
     let processing = import_preview(props.filter.processing.as_deref(), &rules, &templates, &translate);
-    let persist_root = shared::foundation::import_filter_draft_with_templates(props.filter.persist.as_deref(), &rules, Some(&templates));
+    let persist_root = shared::foundation::import_filter_draft_with_templates(
+        props.filter.persist.as_deref(),
+        &rules,
+        Some(&templates),
+    );
     let exclusions = super::filter_builder_model::extract_persist_exclusions(persist_root.as_ref());
     let has_advanced = exclusions.keep.is_some();
     let count = exclusions.rules.len();

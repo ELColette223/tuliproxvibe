@@ -217,12 +217,7 @@ impl ActiveProviderManager {
         allow_grace: bool,
         params: &AcquireProviderParams<'_>,
     ) -> Option<ProviderHandle> {
-        self.acquire_connection_inner_no_preempt_excluding(
-            provider_or_input_name,
-            allow_grace,
-            params,
-            &HashSet::new(),
-        )
+        self.acquire_connection_inner_no_preempt_excluding(provider_or_input_name, allow_grace, params, &HashSet::new())
     }
 
     /// Same as [`Self::acquire_connection_inner_no_preempt`], but skips accounts that

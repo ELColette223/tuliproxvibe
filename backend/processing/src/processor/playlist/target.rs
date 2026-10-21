@@ -253,6 +253,7 @@ pub(crate) struct PreparedTarget {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 pub(crate) async fn prepare_playlist_for_target<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
     ctx: &PlaylistProcessingContext<E, M>,
     playlists: &mut [FetchedPlaylist<'_>],
@@ -558,10 +559,13 @@ pub(super) async fn finalize_prepared_target_with_tmdb<E: EventSink + Clone + 's
     let eligible_catalog = prepare_eligible_catalog(target, new_playlist, &mut step);
     if ctx.offline_target_reprocess && target.get_xtream_output().is_some_and(|xtream| xtream.trakt.is_some()) {
         step.stop("Offline target rebuild cannot fetch Trakt curation; preserving finalized artifacts");
-        return (Err(vec![TuliproxError::RepositoryPlaylist(format!(
-            "Target '{}' requires online Trakt curation and cannot be reprocessed offline",
-            target.name
-        ))]), errors);
+        return (
+            Err(vec![TuliproxError::RepositoryPlaylist(format!(
+                "Target '{}' requires online Trakt curation and cannot be reprocessed offline",
+                target.name
+            ))]),
+            errors,
+        );
     }
     let views = prepare_target_playlist_views(&ctx.client, tmdb_client, target, eligible_catalog).await;
     if views.base.is_empty()

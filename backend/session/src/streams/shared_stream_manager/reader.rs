@@ -158,9 +158,7 @@ where
                 // Inner queue closed. A subscriber-local error (lag) takes precedence, then
                 // the origin's terminal outcome. Either way the client sees the cause before
                 // the reserved cleanup is classified.
-                if !self.terminal_observed
-                    && !self.cancel_token.is_cancelled()
-                    && !self.preempted_token.is_cancelled()
+                if !self.terminal_observed && !self.cancel_token.is_cancelled() && !self.preempted_token.is_cancelled()
                 {
                     if let Some(local_err) = self.peek_subscriber_terminal_error() {
                         self.terminal_observed = true;

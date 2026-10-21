@@ -179,11 +179,8 @@ impl InputWorker {
         let manual_redirects = tuliprox_core::model::should_use_manual_redirects_for_proxy(
             input_to_use.proxy.as_ref().or(global_proxy.as_ref()),
         );
-        let global_client = if manual_redirects {
-            ctx.http_clients.no_redirect.load()
-        } else {
-            ctx.http_clients.default.load()
-        };
+        let global_client =
+            if manual_redirects { ctx.http_clients.no_redirect.load() } else { ctx.http_clients.default.load() };
         // A per-input proxy needs its own client; the shared one only carries the global proxy.
         let client = if manual_redirects {
             tuliprox_core::utils::request::create_input_http_client_no_redirect(

@@ -37,7 +37,9 @@ pub fn PlaylistExplorerView() -> Html {
             let revision_for_events = request_revision.clone();
             let sub_id = services.event.subscribe(move |message| {
                 let EventMessage::PlaylistUpdate(update) = message else { return };
-                if !should_refresh_explorer(selected_request.as_ref(), update.state) { return; }
+                if !should_refresh_explorer(selected_request.as_ref(), update.state) {
+                    return;
+                }
                 let Some(request) = selected_request.clone() else { return };
                 let playlist = playlist.clone();
                 let services = services_for_events.clone();
@@ -50,7 +52,9 @@ pub fn PlaylistExplorerView() -> Html {
                 spawn_local(async move {
                     let refreshed = services.playlist.get_playlist_categories(&request).await;
                     if *request_revision.borrow() == revision {
-                        if let Some(refreshed) = refreshed { playlist.set(Some(refreshed)); }
+                        if let Some(refreshed) = refreshed {
+                            playlist.set(Some(refreshed));
+                        }
                     }
                 });
             });

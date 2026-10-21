@@ -1,6 +1,4 @@
-use crate::{
-    ActiveProviderManager, CleanupEvent, PROVIDER_END_CLOSED, PROVIDER_END_ERROR,
-};
+use crate::{ActiveProviderManager, CleanupEvent, PROVIDER_END_CLOSED, PROVIDER_END_ERROR};
 use bytes::Bytes;
 use std::{
     collections::{HashMap, VecDeque},

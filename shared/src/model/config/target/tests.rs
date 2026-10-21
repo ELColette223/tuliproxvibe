@@ -495,15 +495,15 @@ fn every_bad_watch_entry_is_reported_at_once() {
 #[test]
 fn target_options_preserve_stream_ids_roundtrips() {
     let yaml = "preserve_stream_ids: true\n";
-    let options = serde_saphyr::from_str::<ConfigTargetOptions>(yaml)
-        .expect("configured preserve_stream_ids should deserialize");
+    let options =
+        serde_saphyr::from_str::<ConfigTargetOptions>(yaml).expect("configured preserve_stream_ids should deserialize");
 
     assert!(options.preserve_stream_ids());
     assert!(!options.is_empty());
 
     let serialized = serde_saphyr::to_string(&options).expect("configured preserve_stream_ids should serialize");
     assert!(serialized.contains("preserve_stream_ids: true"));
-    let roundtripped =
-        serde_saphyr::from_str::<ConfigTargetOptions>(&serialized).expect("serialized preserve_stream_ids should deserialize");
+    let roundtripped = serde_saphyr::from_str::<ConfigTargetOptions>(&serialized)
+        .expect("serialized preserve_stream_ids should deserialize");
     assert_eq!(roundtripped, options);
 }

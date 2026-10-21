@@ -5,9 +5,8 @@ use super::{
     ProviderOpenGuard, ProviderStreamFactoryFlags, ProviderStreamFactoryOptions, ProviderStreamOpenLifecycle,
     SHARED_MPEGTS_BODY_IDLE,
 };
-use crate::api::model::BoxedProviderStream;
 use crate::api::model::{
-    create_channel_unavailable_stream, get_response_headers, streams::client_stream::ClientStream,
+    create_channel_unavailable_stream, get_response_headers, streams::client_stream::ClientStream, BoxedProviderStream,
     CustomVideoStreamType, ProviderStreamFactoryResponse,
 };
 use futures::{stream, StreamExt};
@@ -16,8 +15,8 @@ use reqwest::StatusCode;
 use shared::model::ConnectFailureReason;
 use std::{sync::Arc, time::Duration};
 use tokio::time::Instant as TokioInstant;
-use tuliprox_core::{model::StreamError, utils::debug_if_enabled};
 use tokio_util::sync::CancellationToken;
+use tuliprox_core::{model::StreamError, utils::debug_if_enabled};
 use tuliprox_session::{
     stream_ctx::ProviderStreamCtx,
     streams::{ProviderBodyOwner, ProviderBodyOwnerConfig},
@@ -97,8 +96,14 @@ fn enforce_shared_mpegts_body_continuity(
 pub enum ProviderStreamOpenOutcome {
     Opened(ProviderStreamFactoryResponse),
     /// A finite HLS resource keeps the upstream error status and its range and retry headers.
-    UpstreamStatus { status: StatusCode, headers: Vec<(String, String)> },
-    AccountFull { status: StatusCode, provider_error_class: &'static str },
+    UpstreamStatus {
+        status: StatusCode,
+        headers: Vec<(String, String)>,
+    },
+    AccountFull {
+        status: StatusCode,
+        provider_error_class: &'static str,
+    },
     Failed,
 }
 

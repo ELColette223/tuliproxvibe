@@ -157,9 +157,7 @@ pub async fn update_live_stream_metadata(
     let probe_result = if is_remote_probe {
         FfmpegExecutor::new().probe_remote_url(client, &probe_params).await
     } else {
-        FfmpegExecutor::new()
-            .probe_url(&probe_params, input.proxy.as_ref().or(config.proxy.as_ref()))
-            .await
+        FfmpegExecutor::new().probe_url(&probe_params, input.proxy.as_ref().or(config.proxy.as_ref())).await
     };
     match probe_result {
         ProbeUrlOutcome::Success(_quality, raw_video, raw_audio, stats) => {

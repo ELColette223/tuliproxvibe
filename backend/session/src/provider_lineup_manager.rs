@@ -1391,7 +1391,6 @@ mod tests {
         assert_eq!(lineup.pending_account_observations().len(), 1);
         lineup.forget_account_health(&input.name);
         assert!(lineup.get_next_provider(&input.name).is_some());
-
     }
 
     // Test acquiring with an alias

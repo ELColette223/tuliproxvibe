@@ -3,13 +3,12 @@ use super::{
     complete_catalog_evaluation, execute_pipe, execute_pipeline_on_groups, filter_skipped_clusters_from_source,
     retain_playlist_items, target, test_group, InputDownloadResult, InputJobState, PlaylistRunSignals, RenameOutcome,
 };
-use crate::fetched_playlist::FetchedPlaylist;
+use crate::{fetched_playlist::FetchedPlaylist, processor::playlist::BouquetSnapshot};
 use shared::{
     foundation::{get_filter, ValueProvider},
     model::{
-        ClusterFlags, ConfigRenameDto, ConfigTargetDto, ConfigTargetOptions, InputType, ItemField, PlaylistClusterBouquetDto,
-        PlaylistGroup, PlaylistItem, PlaylistItemHeader, PlaylistItemType, PlaylistUpdateState,
-        TargetBouquetCategorySelectionDto, TargetBouquetDto, TargetBouquetSelectionDto, TargetOutputDto, UUIDType,
+        ClusterFlags, ConfigRenameDto, ConfigTargetDto, ConfigTargetOptions, InputType, ItemField, PlaylistGroup,
+        PlaylistItem, PlaylistItemHeader, PlaylistItemType, PlaylistUpdateState, TargetOutputDto, UUIDType,
         XtreamCluster, XtreamTargetOutputDto,
     },
     utils::Internable,
@@ -18,7 +17,6 @@ use std::collections::HashSet;
 use tuliprox_core::model::{
     ClusterUpdateRejection, ConfigInput, ConfigRename, ConfigTarget, FilterOutcome, TransformStage,
 };
-use crate::processor::playlist::BouquetSnapshot;
 use tuliprox_curation::{CurationMediaKind, CurationRunOutcome};
 use tuliprox_repository::{MemoryPlaylistSource, PlaylistPublicationPlan};
 
@@ -56,8 +54,9 @@ fn execute_pipe_applies_target_bouquet_prefilter() {
         tuliprox_core::model::TargetBouquetFilter::from_dto(shared::model::TargetBouquetDto::whitelist(bouquet_dto))
             .unwrap();
 
-    let (mut processed, _outcome) = execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, Some(&filter), None)
-        .expect("target processing should succeed");
+    let (mut processed, _outcome) =
+        execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, Some(&filter), None)
+            .expect("target processing should succeed");
     let groups = processed.source.take_groups();
 
     assert_eq!(groups.len(), 1);
@@ -116,8 +115,9 @@ fn execute_pipe_prefilter_does_not_suppress_allowed_duplicate() {
         tuliprox_core::model::TargetBouquetFilter::from_dto(shared::model::TargetBouquetDto::whitelist(bouquet_dto))
             .unwrap();
 
-    let (mut processed, _outcome) = execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, Some(&filter), None)
-        .expect("target processing should succeed");
+    let (mut processed, _outcome) =
+        execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, Some(&filter), None)
+            .expect("target processing should succeed");
     let groups = processed.source.take_groups();
 
     // The allowed item must be retained because the rejected item did not consume the duplicate UUID slot.
@@ -531,7 +531,9 @@ fn tmdb_complete_target_selection_preserves_live_and_keeps_xtream_aliases_out_of
 
 #[test]
 fn execute_pipe_snapshots_raw_ids_across_inputs_before_channel_selection() {
-    use shared::model::{PlaylistClusterBouquetDto, TargetBouquetCategorySelectionDto, TargetBouquetDto, TargetBouquetSelectionDto};
+    use shared::model::{
+        PlaylistClusterBouquetDto, TargetBouquetCategorySelectionDto, TargetBouquetDto, TargetBouquetSelectionDto,
+    };
 
     let ids = [
         UUIDType::from_valid_uuid("00000000-0000-4000-8000-000000000081"),
@@ -589,19 +591,17 @@ fn execute_pipe_snapshots_raw_ids_across_inputs_before_channel_selection() {
             },
         ],
     ] {
-        let mut fetched = FetchedPlaylist { input: &input, source: MemoryPlaylistSource::new(groups).into_source(), epg: None };
-        let (mut processed, _) = execute_pipe(
-            &target,
-            &vec![],
-            &mut fetched,
-            &mut duplicates,
-            false,
-            Some(&filter),
-            Some(&mut snapshot),
-        )
-        .expect("pipeline succeeds");
+        let mut fetched =
+            FetchedPlaylist { input: &input, source: MemoryPlaylistSource::new(groups).into_source(), epg: None };
+        let (mut processed, _) =
+            execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, Some(&filter), Some(&mut snapshot))
+                .expect("pipeline succeeds");
         let kept = processed.source.take_groups();
-        assert!(kept.iter().flat_map(|group| &group.channels).all(|channel| shared::model::PlaylistEntry::get_uuid(channel) != raw_ids[1] && shared::model::PlaylistEntry::get_uuid(channel) != raw_ids[2]));
+        assert!(kept
+            .iter()
+            .flat_map(|group| &group.channels)
+            .all(|channel| shared::model::PlaylistEntry::get_uuid(channel) != raw_ids[1]
+                && shared::model::PlaylistEntry::get_uuid(channel) != raw_ids[2]));
     }
 
     let news = snapshot.get(&(XtreamCluster::Live, "News".to_string())).expect("News is observed");
@@ -612,7 +612,9 @@ fn execute_pipe_snapshots_raw_ids_across_inputs_before_channel_selection() {
 
 #[test]
 fn execute_pipe_preserves_channel_when_provider_id_changes_and_preserve_stream_ids_is_enabled() {
-    use shared::model::{PlaylistClusterBouquetDto, TargetBouquetCategorySelectionDto, TargetBouquetDto, TargetBouquetSelectionDto};
+    use shared::model::{
+        PlaylistClusterBouquetDto, TargetBouquetCategorySelectionDto, TargetBouquetDto, TargetBouquetSelectionDto,
+    };
 
     let input = ConfigInput::default();
     let target_name = "test-target";
@@ -620,12 +622,8 @@ fn execute_pipe_preserves_channel_when_provider_id_changes_and_preserve_stream_i
     let channel_name = "BBC News";
 
     // Compute the stable UUID for this channel
-    let stable_uuid = shared::utils::generate_stable_channel_uuid(
-        target_name,
-        group_name,
-        channel_name,
-        PlaylistItemType::Live,
-    );
+    let stable_uuid =
+        shared::utils::generate_stable_channel_uuid(target_name, group_name, channel_name, PlaylistItemType::Live);
 
     // Selected bouquet contains the stable UUID
     let selected = TargetBouquetSelectionDto {
@@ -643,10 +641,7 @@ fn execute_pipe_preserves_channel_when_provider_id_changes_and_preserve_stream_i
 
     let target = ConfigTarget::from(&ConfigTargetDto {
         name: target_name.to_string(),
-        options: Some(ConfigTargetOptions {
-            preserve_stream_ids: true,
-            ..Default::default()
-        }),
+        options: Some(ConfigTargetOptions { preserve_stream_ids: true, ..Default::default() }),
         output: vec![TargetOutputDto::Xtream(XtreamTargetOutputDto::default())],
         ..ConfigTargetDto::default()
     });
@@ -669,22 +664,11 @@ fn execute_pipe_preserves_channel_when_provider_id_changes_and_preserve_stream_i
         channels: vec![item],
         xtream_cluster: XtreamCluster::Live,
     }];
-    let mut fetched = FetchedPlaylist {
-        input: &input,
-        source: MemoryPlaylistSource::new(groups).into_source(),
-        epg: None,
-    };
+    let mut fetched =
+        FetchedPlaylist { input: &input, source: MemoryPlaylistSource::new(groups).into_source(), epg: None };
     let mut duplicates = HashSet::new();
-    let (mut processed, _) = execute_pipe(
-        &target,
-        &vec![],
-        &mut fetched,
-        &mut duplicates,
-        false,
-        Some(&filter),
-        None,
-    )
-    .expect("execute_pipe");
+    let (mut processed, _) = execute_pipe(&target, &vec![], &mut fetched, &mut duplicates, false, Some(&filter), None)
+        .expect("execute_pipe");
 
     let kept_groups = processed.source.take_groups();
     assert_eq!(kept_groups.len(), 1);

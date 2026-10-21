@@ -1458,8 +1458,8 @@ async fn shared_stream_key_is_stored_on_the_session() {
         .get_and_update_user_session(&user.username, "shared-key-session")
         .await
         .is_some_and(|session| session.shared_stream_key.as_deref() == Some("mpegts:input:origin-42")));
-    assert!(!manager
+    assert!(manager
         .get_and_update_user_session(&user.username, "other-session")
         .await
-        .is_some_and(|session| session.shared_stream_key.is_some()));
+        .is_none_or(|session| session.shared_stream_key.is_none()));
 }

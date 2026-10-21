@@ -1307,7 +1307,8 @@ async fn manifest_request_built_after_a_handoff_uses_the_snapshot_entry_and_repr
                 rewrite_secret: task_app.get_encrypt_secret().to_vec(),
                 now_ms: current_time_millis(),
             },
-        ).await;
+        )
+        .await;
         tuliprox_hls::api::trigger_origin_refresh_sync(request).await
     });
     input.account_disabled = true;
@@ -1409,7 +1410,8 @@ async fn runtime_prepare_result_superseded_before_refresh_start_cannot_authorize
             rewrite_secret: app.get_encrypt_secret().to_vec(),
             now_ms: current_time_millis(),
         },
-    ).await;
+    )
+    .await;
     // Force a new prepare and pause its actual app-adapter result before the start CAS.
     let mut request = request;
     request.origin_io.as_mut().unwrap().prepared_account = None;

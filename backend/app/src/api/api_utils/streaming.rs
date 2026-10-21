@@ -16,10 +16,10 @@ use crate::{
             create_active_client_stream, create_channel_unavailable_stream, get_custom_stream_response_error_status,
             get_stream_response_with_headers, is_custom_video_stream_enabled,
             open_provider_stream_outcome_with_lifecycle, open_provider_stream_with_lifecycle, AppState,
-            BoxedProviderStream, CustomVideoStreamType, ProviderStreamCustomReason, ProviderStreamFactoryOptions,
-            ProviderStreamInfo, ProviderStreamOpenLifecycle, ProviderStreamOpenOutcome, ProviderStreamState,
-            SharedStreamCtx, SharedStreamManager, StreamDetails, StreamError, StreamingStrategy, ThrottledStream,
-            PlaybackLeaseRef, UserSession,
+            BoxedProviderStream, CustomVideoStreamType, PlaybackLeaseRef, ProviderStreamCustomReason,
+            ProviderStreamFactoryOptions, ProviderStreamInfo, ProviderStreamOpenLifecycle, ProviderStreamOpenOutcome,
+            ProviderStreamState, SharedStreamCtx, SharedStreamManager, StreamDetails, StreamError, StreamingStrategy,
+            ThrottledStream, UserSession,
         },
         panel_api::{can_provision_on_exhausted, create_panel_api_provisioning_stream_details},
     },
@@ -53,7 +53,7 @@ use std::{
     time::Duration,
 };
 use tokio_util::sync::CancellationToken;
-use tuliprox_session::{ManagedProviderHandle, ProviderSessionHeaders, SessionProviderHeaders};
+use tuliprox_session::{ProviderSessionHeaders, SessionProviderHeaders};
 use url::Url;
 
 pub(crate) fn resolve_request_url_for_logging<'a>(input: &ConfigInput, stream_url: &'a str) -> Cow<'a, str> {
@@ -146,6 +146,7 @@ pub(crate) async fn resolve_stream_user_agent_index(
     }
 }
 
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn open_provider_stream_with_optional_rotation(
     app_state: &Arc<AppState>,
     input: &Arc<ConfigInput>,
@@ -273,7 +274,7 @@ async fn open_provider_stream_with_optional_rotation(
                 let Some((_provider_name, rewritten_url)) = select_provider_stream_url(
                     stream_url,
                     input,
-                    &provider_cfg,
+                    provider_cfg,
                     accept_requested_stream_url,
                     &app_state.app_config,
                 )
@@ -290,7 +291,6 @@ async fn open_provider_stream_with_optional_rotation(
                     provider_error_class,
                     status
                 );
-                continue;
             }
             ProviderStreamOpenOutcome::UpstreamStatus { status, headers } => {
                 // HLS resources never rotate: the upstream status and its retry headers are the
@@ -1130,6 +1130,7 @@ pub(super) async fn force_stream_response(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) async fn stream_response(
     fingerprint: &Fingerprint,
     app_state: &Arc<AppState>,

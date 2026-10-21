@@ -52,9 +52,7 @@ pub enum ConnectionLimitPolicy {
     RotateOnFull,
 }
 
-pub fn is_default_connection_limit_policy(v: &ConnectionLimitPolicy) -> bool {
-    *v == ConnectionLimitPolicy::default()
-}
+pub fn is_default_connection_limit_policy(v: &ConnectionLimitPolicy) -> bool { *v == ConnectionLimitPolicy::default() }
 
 pub const fn default_flussonic_hls_catchup_max_duration_secs() -> u32 { 4 * 60 * 60 }
 

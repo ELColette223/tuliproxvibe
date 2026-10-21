@@ -47,7 +47,9 @@ impl TargetBouquetFilter {
     /// Use the origin UUID before transformations, formatted via
     /// `item.header.uuid.to_string()` (64 lowercase hexadecimal characters).
     pub fn allows_channel(&self, cluster: XtreamCluster, group: &str, channel_id: &str) -> bool {
-        self.selection.as_ref().map_or_else(|| self.allows(cluster, group), |selection| selection.allows(cluster, group, channel_id))
+        self.selection
+            .as_ref()
+            .map_or_else(|| self.allows(cluster, group), |selection| selection.allows(cluster, group, channel_id))
     }
 
     pub fn cluster_counts(&self) -> (Option<usize>, Option<usize>, Option<usize>) {
@@ -127,10 +129,17 @@ mod tests {
 
     #[test]
     fn visual_selection_known_empty_and_unknown_default() {
-        let selection = TargetBouquetSelectionDto { categories: vec![shared::model::TargetBouquetCategorySelectionDto {
-            cluster: XtreamCluster::Live, name: "News".to_string(), included_channel_ids: vec![],
-        }], base_filter: None };
-        let filter = TargetBouquetFilter::from_dto(whitelist(PlaylistClusterBouquetDto::default()).with_selection(selection)).unwrap();
+        let selection = TargetBouquetSelectionDto {
+            categories: vec![shared::model::TargetBouquetCategorySelectionDto {
+                cluster: XtreamCluster::Live,
+                name: "News".to_string(),
+                included_channel_ids: vec![],
+            }],
+            base_filter: None,
+        };
+        let filter =
+            TargetBouquetFilter::from_dto(whitelist(PlaylistClusterBouquetDto::default()).with_selection(selection))
+                .unwrap();
         assert!(!filter.allows_channel(XtreamCluster::Live, "News", &"a".repeat(64)));
         assert!(filter.allows_channel(XtreamCluster::Live, "New", &"a".repeat(64)));
         assert!(filter.allows_channel(XtreamCluster::Video, "News", &"a".repeat(64)));

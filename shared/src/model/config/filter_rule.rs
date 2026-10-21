@@ -6,15 +6,12 @@ use crate::{
 pub const FILTER_RULE_SCHEMA_VERSION: u16 = 1;
 pub const MANAGED_FILTER_RULE_TEMPLATE_PREFIX: &str = "TP_FILTER_RULE_";
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FilterGroupOperator {
+    #[default]
     All,
     Any,
-}
-
-impl Default for FilterGroupOperator {
-    fn default() -> Self { Self::All }
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

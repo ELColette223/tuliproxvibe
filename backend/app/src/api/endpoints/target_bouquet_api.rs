@@ -9,14 +9,14 @@ use axum::{
     routing::{delete, get, put},
     Json, Router,
 };
+use futures::StreamExt;
 use shared::{
     error::TuliproxError,
     model::{
-        permission::Permission, PlaylistItem, TargetBouquetDto, TargetBouquetStatusDto,
-        TargetBouquetStreamEventDto, XtreamCluster,
+        permission::Permission, PlaylistItem, TargetBouquetDto, TargetBouquetStatusDto, TargetBouquetStreamEventDto,
+        XtreamCluster,
     },
 };
-use futures::StreamExt;
 use std::sync::Arc;
 use tuliprox_core::model::{ConfigInput, ConfigInputFlags, ConfigTarget, SourcesConfig};
 
@@ -88,6 +88,7 @@ fn inventory_item(item: &PlaylistItem) -> TargetChannelInventoryItemDto {
 }
 
 /// Cursor counts matching raw items (not B+Tree keys); no target-transformed playlist is consulted.
+#[allow(clippy::too_many_lines)]
 async fn get_target_bouquet_channels(
     State(app_state): State<Arc<AppState>>,
     Query(query): Query<TargetChannelQuery>,
@@ -107,9 +108,8 @@ async fn get_target_bouquet_channels(
     if !(1..=500).contains(&limit) {
         return respond(StatusCode::BAD_REQUEST, serde_json::json!({"error": "Limit must be between 1 and 500"}));
     }
-    let offset = match query.cursor.as_deref().unwrap_or("0").parse::<usize>() {
-        Ok(offset) => offset,
-        Err(_) => return respond(StatusCode::BAD_REQUEST, serde_json::json!({"error": "Invalid cursor"})),
+    let Ok(offset) = query.cursor.as_deref().unwrap_or("0").parse::<usize>() else {
+        return respond(StatusCode::BAD_REQUEST, serde_json::json!({"error": "Invalid cursor"}));
     };
     let sources = app_state.app_config.sources.load();
     let Some((_, inputs)) = resolve_target_with_inputs(&sources, &query.target) else {
@@ -130,7 +130,9 @@ async fn get_target_bouquet_channels(
             continue;
         }
         if input.input_type.is_xtream() {
-            let Some(mut stream) = tuliprox_repository::iter_raw_xtream_input_playlist(&app_state.app_config, &input, cluster).await else {
+            let Some(mut stream) =
+                tuliprox_repository::iter_raw_xtream_input_playlist(&app_state.app_config, &input, cluster).await
+            else {
                 unavailable_inputs.push(input.name.to_string());
                 continue;
             };
@@ -138,16 +140,27 @@ async fn get_target_bouquet_channels(
             while let Some(result) = stream.next().await {
                 let item = match result {
                     Ok(item) => item,
-                    Err(err) => return respond(StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({"error": format!("Failed to read raw input '{}': {err}", input.name)})),
+                    Err(err) => {
+                        return respond(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            serde_json::json!({"error": format!("Failed to read raw input '{}': {err}", input.name)}),
+                        )
+                    }
                 };
-                if item.group.as_ref() != query.group { continue; }
+                if item.group.as_ref() != query.group {
+                    continue;
+                }
                 if matched >= offset && channels.len() < limit {
                     channels.push(inventory_item(&PlaylistItem::from(&item)));
-                } else if matched >= offset { has_more = true; }
+                } else if matched >= offset {
+                    has_more = true;
+                }
                 matched += 1;
             }
         } else if input.input_type.is_m3u() {
-            let Some(mut stream) = tuliprox_repository::iter_raw_m3u_input_playlist(&app_state.app_config, &input, Some(cluster)).await else {
+            let Some(mut stream) =
+                tuliprox_repository::iter_raw_m3u_input_playlist(&app_state.app_config, &input, Some(cluster)).await
+            else {
                 unavailable_inputs.push(input.name.to_string());
                 continue;
             };
@@ -155,12 +168,21 @@ async fn get_target_bouquet_channels(
             while let Some(result) = stream.next().await {
                 let item = match result {
                     Ok(item) => item,
-                    Err(err) => return respond(StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({"error": format!("Failed to read raw input '{}': {err}", input.name)})),
+                    Err(err) => {
+                        return respond(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            serde_json::json!({"error": format!("Failed to read raw input '{}': {err}", input.name)}),
+                        )
+                    }
                 };
-                if item.group.as_ref() != query.group { continue; }
+                if item.group.as_ref() != query.group {
+                    continue;
+                }
                 if matched >= offset && channels.len() < limit {
                     channels.push(inventory_item(&PlaylistItem::from(&item)));
-                } else if matched >= offset { has_more = true; }
+                } else if matched >= offset {
+                    has_more = true;
+                }
                 matched += 1;
             }
         } else {
@@ -168,10 +190,17 @@ async fn get_target_bouquet_channels(
             unavailable_inputs.push(input.name.to_string());
         }
     }
-    let status = if available == 0 { "unavailable" } else if channels.is_empty() { "empty" } else { "ready" };
+    let status = if available == 0 {
+        "unavailable"
+    } else if channels.is_empty() {
+        "empty"
+    } else {
+        "ready"
+    };
     let next_cursor = has_more.then(|| (offset + channels.len()).to_string());
     let page = TargetChannelInventoryPageDto { channels, next_cursor, unavailable_inputs, status };
-    respond(StatusCode::OK, serde_json::to_value(page).expect("inventory serializes"))
+    let body = serde_json::to_value(page).unwrap_or_else(|_| serde_json::json!({"error": "serialization failed"}));
+    respond(StatusCode::OK, body)
 }
 
 async fn send_stream_event(
@@ -209,12 +238,16 @@ async fn target_summary(state: &AppState, target_name: &str) -> Result<Option<Ta
         mode: active_bouquet.map(|value| value.bouquet.mode),
         group_count: active_bouquet.map_or(0, |value| {
             value.bouquet.selection.as_ref().map_or_else(
-                || [&value.bouquet.groups.live, &value.bouquet.groups.vod, &value.bouquet.groups.series]
-                    .into_iter()
-                    .flatten()
-                    .map(Vec::len)
-                    .sum(),
-                |selection| selection.categories.iter().filter(|category| !category.included_channel_ids.is_empty()).count(),
+                || {
+                    [&value.bouquet.groups.live, &value.bouquet.groups.vod, &value.bouquet.groups.series]
+                        .into_iter()
+                        .flatten()
+                        .map(Vec::len)
+                        .sum()
+                },
+                |selection| {
+                    selection.categories.iter().filter(|category| !category.included_channel_ids.is_empty()).count()
+                },
             )
         }),
     }))
@@ -402,6 +435,18 @@ async fn get_target_bouquet_groups(
 /// Streams the complete channel inventory (every cluster/group of every input
 /// connected to the target) in ONE pass over the raw persisted playlists, so
 /// the visual filter can save without scanning the inputs once per category.
+struct InventoryEntry {
+    group: String,
+    id: String,
+    name: String,
+}
+
+type InventoryStream =
+    std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<InventoryEntry, TuliproxError>> + Send>>;
+
+const INVENTORY_CHUNK_SIZE: usize = 500;
+
+#[allow(clippy::too_many_lines)]
 async fn stream_input_inventory(
     tx: &tokio::sync::mpsc::Sender<TargetBouquetStreamEventDto>,
     app_config: &tuliprox_core::model::AppConfig,
@@ -420,82 +465,63 @@ async fn stream_input_inventory(
         if !enabled {
             continue;
         }
-        struct InventoryEntry {
-            group: String,
-            id: String,
-            name: String,
-        }
         let target_name_clone = target_name.clone();
-        let entries: Option<std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<InventoryEntry, TuliproxError>> + Send>>> =
-            if input.input_type.is_xtream() {
-                tuliprox_repository::iter_raw_xtream_input_playlist(app_config, input, cluster)
-                    .await
-                    .map(|stream| {
-                        let target_name = target_name_clone;
-                        Box::pin(stream.map(move |item| {
-                            let target_name = target_name.as_deref();
-                            item.map(|item| {
-                                let item = PlaylistItem::from(&item);
-                                let id = match target_name {
-                                    Some(target) => shared::utils::generate_stable_channel_uuid(
-                                        target,
-                                        &item.header.group,
-                                        &item.header.name,
-                                        item.header.item_type,
-                                    )
-                                    .to_string(),
-                                    None => item.header.uuid.to_string(),
-                                };
-                                InventoryEntry {
-                                    group: item.header.group.to_string(),
-                                    id,
-                                    name: item.header.name.to_string(),
-                                }
-                            })
-                        })) as _
+        let entries: Option<InventoryStream> = if input.input_type.is_xtream() {
+            tuliprox_repository::iter_raw_xtream_input_playlist(app_config, input, cluster).await.map(|stream| {
+                let target_name = target_name_clone;
+                Box::pin(stream.map(move |item| {
+                    let target_name = target_name.as_deref();
+                    item.map(|item| {
+                        let item = PlaylistItem::from(&item);
+                        let id = match target_name {
+                            Some(target) => shared::utils::generate_stable_channel_uuid(
+                                target,
+                                &item.header.group,
+                                &item.header.name,
+                                item.header.item_type,
+                            )
+                            .to_string(),
+                            None => item.header.uuid.to_string(),
+                        };
+                        InventoryEntry { group: item.header.group.to_string(), id, name: item.header.name.to_string() }
                     })
-            } else if input.input_type.is_m3u() {
-                tuliprox_repository::iter_raw_m3u_input_playlist(app_config, input, Some(cluster))
-                    .await
-                    .map(|stream| {
-                        let target_name = target_name_clone;
-                        Box::pin(stream.map(move |item| {
-                            let target_name = target_name.as_deref();
-                            item.map(|item| {
-                                let item = PlaylistItem::from(&item);
-                                let id = match target_name {
-                                    Some(target) => shared::utils::generate_stable_channel_uuid(
-                                        target,
-                                        &item.header.group,
-                                        &item.header.name,
-                                        item.header.item_type,
-                                    )
-                                    .to_string(),
-                                    None => item.header.uuid.to_string(),
-                                };
-                                InventoryEntry {
-                                    group: item.header.group.to_string(),
-                                    id,
-                                    name: item.header.name.to_string(),
-                                }
-                            })
-                        })) as _
+                })) as _
+            })
+        } else if input.input_type.is_m3u() {
+            tuliprox_repository::iter_raw_m3u_input_playlist(app_config, input, Some(cluster)).await.map(|stream| {
+                let target_name = target_name_clone;
+                Box::pin(stream.map(move |item| {
+                    let target_name = target_name.as_deref();
+                    item.map(|item| {
+                        let item = PlaylistItem::from(&item);
+                        let id = match target_name {
+                            Some(target) => shared::utils::generate_stable_channel_uuid(
+                                target,
+                                &item.header.group,
+                                &item.header.name,
+                                item.header.item_type,
+                            )
+                            .to_string(),
+                            None => item.header.uuid.to_string(),
+                        };
+                        InventoryEntry { group: item.header.group.to_string(), id, name: item.header.name.to_string() }
                     })
-            } else {
-                // Stalker and remote-only inputs have no persisted raw playlist here.
-                let warning = TargetBouquetStreamEventDto::InputWarning {
-                    input: input.name.to_string(),
-                    message: format!(
-                        "Input '{}' ({}) has no persisted raw inventory for {cluster}; trigger a playlist update.",
-                        input.name,
-                        input.input_type,
-                    ),
-                };
-                if !send_stream_event(tx, warning).await {
-                    return false;
-                }
-                None
+                })) as _
+            })
+        } else {
+            // Stalker and remote-only inputs have no persisted raw playlist here.
+            let warning = TargetBouquetStreamEventDto::InputWarning {
+                input: input.name.to_string(),
+                message: format!(
+                    "Input '{}' ({}) has no persisted raw inventory for {cluster}; trigger a playlist update.",
+                    input.name, input.input_type,
+                ),
             };
+            if !send_stream_event(tx, warning).await {
+                return false;
+            }
+            None
+        };
         let Some(mut entries) = entries else {
             let warning = TargetBouquetStreamEventDto::InputWarning {
                 input: input.name.to_string(),
@@ -510,7 +536,6 @@ async fn stream_input_inventory(
             continue;
         };
 
-        const CHUNK_SIZE: usize = 500;
         let mut buffers: std::collections::HashMap<String, Vec<shared::model::TargetInventoryChannelDto>> =
             std::collections::HashMap::new();
         while let Some(item) = entries.next().await {
@@ -518,7 +543,7 @@ async fn stream_input_inventory(
             let group_name = item.group.clone();
             let entry = buffers.entry(group_name.clone()).or_default();
             entry.push(shared::model::TargetInventoryChannelDto { id: item.id, name: item.name });
-            if entry.len() >= CHUNK_SIZE {
+            if entry.len() >= INVENTORY_CHUNK_SIZE {
                 let channels = std::mem::take(entry);
                 let event = TargetBouquetStreamEventDto::InventoryChunk {
                     input: input.name.to_string(),
@@ -535,12 +560,8 @@ async fn stream_input_inventory(
             if channels.is_empty() {
                 continue;
             }
-            let event = TargetBouquetStreamEventDto::InventoryChunk {
-                input: input.name.to_string(),
-                cluster,
-                group,
-                channels,
-            };
+            let event =
+                TargetBouquetStreamEventDto::InventoryChunk { input: input.name.to_string(), cluster, group, channels };
             if !send_stream_event(tx, event).await {
                 return false;
             }
@@ -567,7 +588,8 @@ async fn get_target_bouquet_inventory(
 
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     let state = Arc::clone(&app_state);
-    let preserve_stream_ids = target.options.as_ref().is_some_and(shared::model::ConfigTargetOptions::preserve_stream_ids);
+    let preserve_stream_ids =
+        target.options.as_ref().is_some_and(shared::model::ConfigTargetOptions::preserve_stream_ids);
     let target_name_opt = preserve_stream_ids.then(|| Arc::from(target.name.as_str()));
     tokio::spawn(async move {
         let storage_dir = state.app_config.config.load().storage_dir.clone();
@@ -705,10 +727,14 @@ mod tests {
             ("/target-bouquets/channels?target=living_room&cluster=live&group=News", StatusCode::OK),
             ("/target-bouquets/channels?target=missing&cluster=live&group=News", StatusCode::NOT_FOUND),
             ("/target-bouquets/channels?target=living_room&cluster=bogus&group=News", StatusCode::BAD_REQUEST),
-            ("/target-bouquets/channels?target=living_room&cluster=live&group=News&cursor=abc", StatusCode::BAD_REQUEST),
+            (
+                "/target-bouquets/channels?target=living_room&cluster=live&group=News&cursor=abc",
+                StatusCode::BAD_REQUEST,
+            ),
             ("/target-bouquets/channels?target=living_room&cluster=live&group=News&limit=501", StatusCode::BAD_REQUEST),
         ] {
-            let response = router.clone().oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+            let response =
+                router.clone().oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
             assert_eq!(response.status(), expected, "{uri}");
             assert_eq!(response.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
             if expected == StatusCode::OK {
@@ -725,42 +751,51 @@ mod tests {
         use shared::model::{PlaylistGroup, PlaylistItemHeader, PlaylistItemType};
         let temp_dir = TempDir::new().unwrap();
         let app_state = setup_test_app_state(&temp_dir);
-        let input_storage = tuliprox_repository::build_input_storage_path("provider1", temp_dir.path().to_str().unwrap());
+        let input_storage =
+            tuliprox_repository::build_input_storage_path("provider1", temp_dir.path().to_str().unwrap());
         tokio::fs::create_dir_all(&input_storage).await.unwrap();
         let path = tuliprox_repository::get_input_m3u_playlist_file_path(&input_storage, &"provider1".into());
         let playlist = vec![PlaylistGroup {
             id: 1,
             title: "News".into(),
             xtream_cluster: XtreamCluster::Live,
-            channels: (0..3).map(|index| PlaylistItem {
-                header: PlaylistItemHeader {
-                    id: format!("provider-{index}").into(),
-                    input_stream_id: format!("provider-{index}").into(),
-                    name: format!("Channel {index}").into(),
-                    group: "News".into(),
-                    input_name: "provider1".into(),
-                    url: format!("http://localhost/{index}").into(),
-                    item_type: PlaylistItemType::Live,
-                    xtream_cluster: XtreamCluster::Live,
-                    ..PlaylistItemHeader::default()
-                },
-            }).collect(),
+            channels: (0..3)
+                .map(|index| PlaylistItem {
+                    header: PlaylistItemHeader {
+                        id: format!("provider-{index}").into(),
+                        input_stream_id: format!("provider-{index}").into(),
+                        name: format!("Channel {index}").into(),
+                        group: "News".into(),
+                        input_name: "provider1".into(),
+                        url: format!("http://localhost/{index}").into(),
+                        item_type: PlaylistItemType::Live,
+                        xtream_cluster: XtreamCluster::Live,
+                        ..PlaylistItemHeader::default()
+                    },
+                })
+                .collect(),
         }];
         tuliprox_repository::persist_input_m3u_playlist(&app_state.app_config, &path, &playlist).await.unwrap();
         let router = target_bouquet_api_register_unprotected().with_state(app_state);
         let read = |uri: &'static str, router: Router| async move {
             let response = router.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
             assert_eq!(response.status(), StatusCode::OK);
-            serde_json::from_slice::<serde_json::Value>(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+            serde_json::from_slice::<serde_json::Value>(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap()
         };
-        let first = read("/target-bouquets/channels?target=living_room&cluster=live&group=News&limit=2", router.clone()).await;
+        let first =
+            read("/target-bouquets/channels?target=living_room&cluster=live&group=News&limit=2", router.clone()).await;
         assert_eq!(first["status"], "ready");
         assert_eq!(first["channels"].as_array().unwrap().len(), 2);
         assert_eq!(first["next_cursor"], "2");
         let id = first["channels"][0]["id"].as_str().unwrap();
         assert_eq!(id.len(), 64);
         assert!(id.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
-        let second = read("/target-bouquets/channels?target=living_room&cluster=live&group=News&limit=2&cursor=2", router.clone()).await;
+        let second = read(
+            "/target-bouquets/channels?target=living_room&cluster=live&group=News&limit=2&cursor=2",
+            router.clone(),
+        )
+        .await;
         assert_eq!(second["channels"].as_array().unwrap().len(), 1);
         assert!(second["next_cursor"].is_null());
         let empty = read("/target-bouquets/channels?target=living_room&cluster=live&group=Sports", router).await;

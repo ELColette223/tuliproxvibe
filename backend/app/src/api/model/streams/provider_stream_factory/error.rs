@@ -61,7 +61,6 @@ pub(super) fn is_account_full_status(status: StatusCode) -> bool {
 /// Some panels answer a full account with an HTTP 200 and a human-readable
 /// "max connections" page. The body text is the only signal in that case.
 pub(super) fn looks_like_connection_limit_message(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
     const MARKERS: [&str; 8] = [
         "max connections",
         "maximum connections",
@@ -72,6 +71,7 @@ pub(super) fn looks_like_connection_limit_message(text: &str) -> bool {
         "no connections available",
         "device limit",
     ];
+    let lower = text.to_ascii_lowercase();
     MARKERS.iter().any(|marker| lower.contains(marker))
 }
 
@@ -81,9 +81,7 @@ pub(super) fn looks_like_connection_limit_message(text: &str) -> bool {
 /// instead of a generic channel-unavailable failure.
 pub(super) fn account_full_status_from_io_error(err: &std::io::Error) -> Option<StatusCode> {
     let message = err.to_string();
-    let Some(rest) = message.strip_prefix("Request failed (") else {
-        return None;
-    };
+    let rest = message.strip_prefix("Request failed (")?;
     let code_token = rest.split([' ', ')']).next()?;
     let code = code_token.parse::<u16>().ok()?;
     let status = StatusCode::from_u16(code).ok()?;
@@ -103,12 +101,22 @@ pub(super) fn should_reject_success_response_content_type(item_type: PlaylistIte
 
 #[derive(Debug)]
 pub(super) enum ProviderStreamRequestFailure {
-    HlsStatus { status: StatusCode, headers: Vec<(String, String)> },
-    Status { status: StatusCode, provider_error_class: &'static str, serve_channel_unavailable: bool },
+    HlsStatus {
+        status: StatusCode,
+        headers: Vec<(String, String)>,
+    },
+    Status {
+        status: StatusCode,
+        provider_error_class: &'static str,
+        serve_channel_unavailable: bool,
+    },
     /// The provider rejected the open because the account is at its connection limit.
     /// Kept distinct so `rotate_on_full` can retry on another account instead of
     /// serving a channel-unavailable response.
-    AccountFull { status: StatusCode, provider_error_class: &'static str },
+    AccountFull {
+        status: StatusCode,
+        provider_error_class: &'static str,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]

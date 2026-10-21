@@ -1,7 +1,9 @@
 use super::{PROVIDER_END_CLOSED, PROVIDER_END_ERROR, PROVIDER_END_PREEMPTED, PROVIDER_END_SUBSCRIBER_LAGGED};
 use arc_swap::ArcSwapOption;
-use shared::model::{CustomVideoStreamType, DisconnectReason, FailureStage, StreamInfo};
-use shared::utils::sanitize_sensitive_info;
+use shared::{
+    model::{CustomVideoStreamType, DisconnectReason, FailureStage, StreamInfo},
+    utils::sanitize_sensitive_info,
+};
 use std::{str::FromStr, sync::Arc};
 use tuliprox_core::model::{DisconnectQos, PlaybackRequestOutcome, StreamHistoryConfig, StreamHistoryRecord};
 use tuliprox_repository::{recover_pending_files, StreamHistoryWriter};

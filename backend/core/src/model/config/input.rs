@@ -11,8 +11,8 @@ use shared::{
     model::{
         ClusterFlags, ConfigInputAliasDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto,
         ConnectionLimitPolicy, FlussonicHlsCatchup, InputFetchMethod, InputType, MediaServerCatalogConfigDto,
-        MediaServerInputConfigDto, MediaServerLibrarySelector, ProviderAccountIdentity, StagedInputType, StalkerAuthMode,
-        StalkerDeviceProfileDto, StalkerEndpointPreference, StalkerInputConfigDto, StalkerMagPreset,
+        MediaServerInputConfigDto, MediaServerLibrarySelector, ProviderAccountIdentity, StagedInputType,
+        StalkerAuthMode, StalkerDeviceProfileDto, StalkerEndpointPreference, StalkerInputConfigDto, StalkerMagPreset,
     },
     utils::{
         get_credentials_from_url, get_credentials_from_url_str, is_non_blank_optional_string,
@@ -616,7 +616,8 @@ impl ConfigInput {
         if is_input_expired(self.exp_date) {
             warn!("Account {} expired for provider: {}", self.username.as_ref().map_or("?", |s| s.as_str()), self.name);
             // An expired root must not take its still-valid alias pool down with it.
-            let has_usable_alias = self.aliases.iter().flatten().any(|alias| alias.enabled && !is_input_expired(alias.exp_date));
+            let has_usable_alias =
+                self.aliases.iter().flatten().any(|alias| alias.enabled && !is_input_expired(alias.exp_date));
             if !has_usable_alias {
                 self.enabled = false;
             }

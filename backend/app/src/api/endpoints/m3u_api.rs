@@ -8,8 +8,7 @@ use crate::{
             maintenance_rejection_response, redirect_response, reentry_suppressed_response,
             resolve_initial_stalker_playback_url, resource_proxy_response, resource_redirect_or_proxy,
             separate_number_and_remainder, shared_live_mpeg_ts_key, should_allow_exhausted_shared_reconnect,
-            stream_response_with_provider_handle, stream_response_with_shared_key, try_option_bad_request,
-            try_result_bad_request, try_result_not_found,
+            stream_response_with_shared_key, try_option_bad_request, try_result_bad_request, try_result_not_found,
             try_unwrap_body, RedirectParams,
         },
         endpoints::{
@@ -384,9 +383,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
             .await
             .into_response();
         }
-        if pli.item_type == PlaylistItemType::Catchup {
-            pli.url.clone()
-        } else if session_matches_shared_key {
+        if pli.item_type == PlaylistItemType::Catchup || session_matches_shared_key {
             pli.url.clone()
         } else {
             session.stream_url.clone()

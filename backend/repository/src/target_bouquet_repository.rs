@@ -146,7 +146,12 @@ pub async fn merge_target_bouquet_selection_snapshot(
     let content = match tokio::fs::read_to_string(&file_path).await {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(TuliproxError::TargetBouquet(format!("Failed to read bouquet file {}: {err}", file_path.display()))),
+        Err(err) => {
+            return Err(TuliproxError::TargetBouquet(format!(
+                "Failed to read bouquet file {}: {err}",
+                file_path.display()
+            )))
+        }
     };
     let mut dto: TargetBouquetFileDto = serde_saphyr::from_str(&content).map_err(|err| {
         TuliproxError::TargetBouquet(format!("Failed to parse target bouquet YAML in {}: {err}", file_path.display()))
@@ -590,22 +595,37 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let config = test_app_config(dir.path().to_str().unwrap());
         let known = TargetBouquetCategorySelectionDto {
-            cluster: shared::model::XtreamCluster::Live, name: "News".into(), included_channel_ids: vec![],
+            cluster: shared::model::XtreamCluster::Live,
+            name: "News".into(),
+            included_channel_ids: vec![],
         };
-        let bouquet = TargetBouquetDto::whitelist(PlaylistClusterBouquetDto::default())
-            .with_selection(shared::model::TargetBouquetSelectionDto { categories: vec![known.clone()], base_filter: None });
+        let bouquet = TargetBouquetDto::whitelist(PlaylistClusterBouquetDto::default()).with_selection(
+            shared::model::TargetBouquetSelectionDto { categories: vec![known.clone()], base_filter: None },
+        );
         save_target_bouquet(&config, "visual", bouquet).await.unwrap();
-        merge_target_bouquet_selection_snapshot(&config, "visual", vec![
-            TargetBouquetCategorySelectionDto { included_channel_ids: vec!["a".repeat(64)], ..known.clone() },
-            TargetBouquetCategorySelectionDto { cluster: shared::model::XtreamCluster::Video, name: "News".into(), included_channel_ids: vec!["b".repeat(64)] },
-        ]).await.unwrap();
+        merge_target_bouquet_selection_snapshot(
+            &config,
+            "visual",
+            vec![
+                TargetBouquetCategorySelectionDto { included_channel_ids: vec!["a".repeat(64)], ..known.clone() },
+                TargetBouquetCategorySelectionDto {
+                    cluster: shared::model::XtreamCluster::Video,
+                    name: "News".into(),
+                    included_channel_ids: vec!["b".repeat(64)],
+                },
+            ],
+        )
+        .await
+        .unwrap();
         let saved = load_target_bouquet(&config, "visual").await.unwrap().unwrap();
         assert_eq!(saved.version, shared::model::TARGET_BOUQUET_SELECTION_VERSION);
         let selection = saved.bouquet.selection.unwrap();
         assert!(!selection.allows(shared::model::XtreamCluster::Live, "News", &"a".repeat(64)));
         assert!(selection.allows(shared::model::XtreamCluster::Video, "News", &"b".repeat(64)));
 
-        save_target_bouquet(&config, "legacy", TargetBouquetDto::whitelist(PlaylistClusterBouquetDto::default())).await.unwrap();
+        save_target_bouquet(&config, "legacy", TargetBouquetDto::whitelist(PlaylistClusterBouquetDto::default()))
+            .await
+            .unwrap();
         merge_target_bouquet_selection_snapshot(&config, "legacy", vec![known]).await.unwrap();
         let legacy = load_target_bouquet(&config, "legacy").await.unwrap().unwrap();
         assert_eq!(legacy.version, shared::model::TARGET_BOUQUET_VERSION);

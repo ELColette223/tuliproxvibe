@@ -693,7 +693,6 @@ async fn verify_xtream_playlist_account<E: EventSink>(
         return Err(TuliproxError::ConfigInput(format!("Provider account {} is blocked or expired", source.name)));
     }
     Ok(())
-
 }
 
 /// Downloads xtream clusters from a single source (either main input or staged input).
@@ -974,16 +973,17 @@ pub fn create_vod_info_from_item(pli: &XtreamPlaylistItem) -> String {
 mod tests {
     use super::{
         apply_cluster_update_quality, apply_disk_cluster_publish_result, apply_in_memory_cluster_download,
-        create_vod_info_from_item, disk_cluster_quality_policy, input_btree_provider_id,
-        requested_clusters, XtreamDownloadScope,
+        create_vod_info_from_item, disk_cluster_quality_policy, input_btree_provider_id, requested_clusters,
+        XtreamDownloadScope,
     };
     use crate::provider::PlaylistFetch;
     use serde_json::Value;
     use shared::{
         error::TuliproxError,
         model::{
-            ConfigInputAliasDto, ConfigInputOptionsDto, ConfigInputUpdateQualityDto, InputType, PlaylistGroup, PlaylistItem,
-            PlaylistItemHeader, PlaylistItemType, ProxyType, UpdateQualityPolicy, XtreamCluster, XtreamPlaylistItem,
+            ConfigInputAliasDto, ConfigInputOptionsDto, ConfigInputUpdateQualityDto, InputType, PlaylistGroup,
+            PlaylistItem, PlaylistItemHeader, PlaylistItemType, ProxyType, UpdateQualityPolicy, XtreamCluster,
+            XtreamPlaylistItem,
         },
         utils::Internable,
     };

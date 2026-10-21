@@ -102,17 +102,21 @@ fn collect_conjunctive_exclusions(node: &FilterNode, rules: &mut Vec<FilterNode>
         for child in children {
             let (remaining, found) = collect_conjunctive_exclusions(child, rules);
             extracted |= found;
-            if let Some(remaining) = remaining { keep.push(remaining); }
+            if let Some(remaining) = remaining {
+                keep.push(remaining);
+            }
         }
-        if !extracted { return (Some(node.clone()), false); }
+        if !extracted {
+            return (Some(node.clone()), false);
+        }
         let remaining = match keep.len() {
             0 => None,
-                1 => Some(match keep.remove(0) {
-                    FilterNode::Group { operator: FilterGroupOperator::All, mut children } if children.len() == 1 => {
-                        children.remove(0)
-                    }
-                    node => node,
-                }),
+            1 => Some(match keep.remove(0) {
+                FilterNode::Group { operator: FilterGroupOperator::All, mut children } if children.len() == 1 => {
+                    children.remove(0)
+                }
+                node => node,
+            }),
             _ => Some(FilterNode::Group { operator: FilterGroupOperator::All, children: keep }),
         };
         (remaining, true)
@@ -125,7 +129,9 @@ fn collect_conjunctive_exclusions(node: &FilterNode, rules: &mut Vec<FilterNode>
 
 fn unwrap_singleton_group(mut node: &FilterNode) -> &FilterNode {
     while let FilterNode::Group { children, .. } = node {
-        if children.len() != 1 { break; }
+        if children.len() != 1 {
+            break;
+        }
         node = &children[0];
     }
     node
@@ -135,7 +141,9 @@ fn append_exclusion_rules(node: &FilterNode, rules: &mut Vec<FilterNode>) -> boo
     let FilterNode::Not { node } = node else { return false };
     let excluded = unwrap_singleton_group(node);
     if let FilterNode::Group { operator: FilterGroupOperator::Any, children } = excluded {
-        if children.is_empty() { return false; }
+        if children.is_empty() {
+            return false;
+        }
         rules.extend(children.iter().map(|child| unwrap_singleton_group(child).clone()));
     } else {
         rules.push(excluded.clone());
@@ -218,7 +226,7 @@ pub fn reduce_filter_builder(
         }
         FilterBuilderAction::RemoveNode(stage, path) => remove_node(stage_root_mut(&mut next, stage), &path)?,
         FilterBuilderAction::MoveNode(stage, path, direction) => {
-            move_node(stage_root_mut(&mut next, stage), &path, direction)?
+            move_node(stage_root_mut(&mut next, stage), &path, direction)?;
         }
         FilterBuilderAction::DuplicateNode(stage, path) => duplicate_node(stage_root_mut(&mut next, stage), &path)?,
         FilterBuilderAction::WrapNode(stage, path, operator) => {
@@ -504,11 +512,16 @@ mod tests {
         };
         assert_eq!(children.len(), 3);
         assert!(matches!(&children[0], FilterNode::LegacyReference { template } if template == "NO_24H"));
-        assert_eq!(state.compile().unwrap().processing.as_deref(), Some(r#"(!NO_24H! AND !NO_ADULT! AND !NO_H265!)"#));
+        assert_eq!(state.compile().unwrap().processing.as_deref(), Some(r"(!NO_24H! AND !NO_ADULT! AND !NO_H265!)"));
     }
 
     fn state_with_persist(persist: Option<FilterNode>) -> TargetFilterBuilderState {
-        TargetFilterBuilderState { processing: Some(default_node_for_field(ItemField::Chno)), persist, rules: Vec::new(), templates: Vec::new() }
+        TargetFilterBuilderState {
+            processing: Some(default_node_for_field(ItemField::Chno)),
+            persist,
+            rules: Vec::new(),
+            templates: Vec::new(),
+        }
     }
 
     fn named_rule(value: &str) -> FilterNode {
@@ -525,13 +538,16 @@ mod tests {
         assert_eq!(one.persist, Some(FilterNode::Not { node: Box::new(first.clone()) }));
         let two = reduce_filter_builder(&one, FilterBuilderAction::AddExclusion(second.clone())).unwrap();
         assert_eq!(two.exclusion_rules(), vec![first.clone(), second.clone()]);
-        assert!(matches!(two.persist.as_ref(), Some(FilterNode::Not { node }) if matches!(node.as_ref(), FilterNode::Group { operator: FilterGroupOperator::Any, .. })));
+        assert!(
+            matches!(two.persist.as_ref(), Some(FilterNode::Not { node }) if matches!(node.as_ref(), FilterNode::Group { operator: FilterGroupOperator::Any, .. }))
+        );
         let three = reduce_filter_builder(&two, FilterBuilderAction::AddExclusion(third.clone())).unwrap();
         let moved = reduce_filter_builder(&three, FilterBuilderAction::MoveExclusion(vec![0], vec![2])).unwrap();
         assert_eq!(moved.exclusion_rules(), vec![second.clone(), third.clone(), first.clone()]);
         let duplicate = reduce_filter_builder(&moved, FilterBuilderAction::DuplicateExclusion(vec![1])).unwrap();
         assert_eq!(duplicate.exclusion_rules(), vec![second.clone(), third.clone(), third, first.clone()]);
-        let replaced = reduce_filter_builder(&duplicate, FilterBuilderAction::ReplaceExclusion(vec![0], first.clone())).unwrap();
+        let replaced =
+            reduce_filter_builder(&duplicate, FilterBuilderAction::ReplaceExclusion(vec![0], first.clone())).unwrap();
         let removed = reduce_filter_builder(&replaced, FilterBuilderAction::RemoveExclusion(vec![3])).unwrap();
         assert_eq!(removed.exclusion_rules(), vec![first, named_rule("third"), named_rule("third")]);
         assert_eq!(removed.processing, initial.processing);
@@ -577,23 +593,31 @@ mod tests {
         let state = reduce_filter_builder(&state, FilterBuilderAction::AddExclusion(named_rule("extra"))).unwrap();
         assert_eq!(state.exclusion_base(), Some(nested));
         assert_eq!(state.exclusion_rules(), vec![named_rule("blocked"), named_rule("extra")]);
-        let opaque = FilterNode::Not { node: Box::new(FilterNode::Group {
-            operator: FilterGroupOperator::All,
-            children: vec![named_rule("a"), named_rule("b")],
-        }) };
+        let opaque = FilterNode::Not {
+            node: Box::new(FilterNode::Group {
+                operator: FilterGroupOperator::All,
+                children: vec![named_rule("a"), named_rule("b")],
+            }),
+        };
         // NOT(AND ...) denotes one exclusion rule, not two independent exclusions.
-        assert_eq!(extract_persist_exclusions(Some(&opaque)).rules, vec![FilterNode::Group {
-            operator: FilterGroupOperator::All,
-            children: vec![named_rule("a"), named_rule("b")],
-        }]);
+        assert_eq!(
+            extract_persist_exclusions(Some(&opaque)).rules,
+            vec![FilterNode::Group {
+                operator: FilterGroupOperator::All,
+                children: vec![named_rule("a"), named_rule("b")],
+            }]
+        );
     }
 
     #[test]
     fn exclusion_paths_validate_indices_and_nested_nodes() {
-        let initial = state_with_persist(compose_persist_exclusions(None, vec![FilterNode::Group {
-            operator: FilterGroupOperator::All,
-            children: vec![named_rule("original"), named_rule("other")],
-        }]));
+        let initial = state_with_persist(compose_persist_exclusions(
+            None,
+            vec![FilterNode::Group {
+                operator: FilterGroupOperator::All,
+                children: vec![named_rule("original"), named_rule("other")],
+            }],
+        ));
         for action in [
             FilterBuilderAction::RemoveExclusion(vec![]),
             FilterBuilderAction::ReplaceExclusion(vec![1], named_rule("x")),
@@ -605,11 +629,16 @@ mod tests {
         ] {
             assert!(reduce_filter_builder(&initial, action).is_err());
         }
-        let replaced = reduce_filter_builder(&initial, FilterBuilderAction::ReplaceExclusion(vec![0, 0], named_rule("x"))).unwrap();
-        assert_eq!(replaced.exclusion_rules(), vec![FilterNode::Group {
-            operator: FilterGroupOperator::All,
-            children: vec![named_rule("x"), named_rule("other")],
-        }]);
+        let replaced =
+            reduce_filter_builder(&initial, FilterBuilderAction::ReplaceExclusion(vec![0, 0], named_rule("x")))
+                .unwrap();
+        assert_eq!(
+            replaced.exclusion_rules(),
+            vec![FilterNode::Group {
+                operator: FilterGroupOperator::All,
+                children: vec![named_rule("x"), named_rule("other")],
+            }]
+        );
     }
 
     #[test]
@@ -625,7 +654,11 @@ mod tests {
         let mut state = state_with_persist(Some(keep.clone()));
         state.rules = vec![rule.clone()];
         state.templates = vec![template.clone()];
-        let added = reduce_filter_builder(&state, FilterBuilderAction::AddExclusion(FilterNode::Reference { rule_id: rule.id.clone() })).unwrap();
+        let added = reduce_filter_builder(
+            &state,
+            FilterBuilderAction::AddExclusion(FilterNode::Reference { rule_id: rule.id.clone() }),
+        )
+        .unwrap();
         assert_eq!(added.exclusion_base(), Some(keep));
         assert_eq!(added.rule_usage_count("one"), 1);
         let compiled = added.compile().unwrap();

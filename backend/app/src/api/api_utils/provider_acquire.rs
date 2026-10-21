@@ -292,7 +292,7 @@ pub(crate) async fn stream_response_with_provider_handle(
     app_state: &Arc<AppState>,
     session_token: &str,
     request_class: Option<PlaybackRequestClass>,
-    mut stream_channel: StreamChannel,
+    stream_channel: StreamChannel,
     stream_url: &str,
     pinned_provider: Option<&Arc<str>>,
     req_headers: &HeaderMap,

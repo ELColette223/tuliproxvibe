@@ -5,7 +5,7 @@ use crate::{
     hooks::use_service_context,
     i18n::use_translation,
 };
-use shared::model::{ConfigProviderDto, ProxyConfigDto, XtreamLoginRequest};
+use shared::model::{ConfigProviderDto, XtreamLoginRequest};
 use web_sys::MouseEvent;
 use yew::{
     component, html, platform::spawn_local, use_mut_ref, use_state, Callback, Html, Properties, UseReducerHandle,

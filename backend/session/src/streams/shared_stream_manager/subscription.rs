@@ -366,8 +366,7 @@ impl SharedStreamState {
 
             // A failing origin is classified by the response wrapper after it drains the
             // final burst; an unclassified release here would preempt that classification.
-            if !origin_state.terminal_is_failure() || cancel_token.is_cancelled() || preempted_token.is_cancelled()
-            {
+            if !origin_state.terminal_is_failure() || cancel_token.is_cancelled() || preempted_token.is_cancelled() {
                 cleanup_manager.send_cleanup(CleanupEvent::ReleaseSharedSubscriber {
                     addr: address,
                     subscriber_id,

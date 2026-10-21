@@ -301,7 +301,10 @@ pub(crate) async fn download_input<E: EventSink + Clone + 'static, M: MetadataUp
                 .into_iter()
                 .filter(|cluster| cluster_is_configured(input, *cluster))
                 .collect();
-            if !clusters.iter().any(|cluster| tuliprox_repository::xtream_get_file_path(&storage_path, *cluster).is_file()) {
+            if clusters
+                .iter()
+                .all(|cluster| !tuliprox_repository::xtream_get_file_path(&storage_path, *cluster).is_file())
+            {
                 Err(TuliproxError::RepositoryPlaylist(format!(
                     "No persisted Xtream playlist cache for input '{}'",
                     input.name

@@ -148,7 +148,8 @@ pub(crate) async fn process_input_job_inner<E: EventSink + Clone + 'static, M: M
         error!("Failed to persist input playlist {}", input.name);
         download.errors.push(err);
     }
-    let epg = if ctx.offline_target_reprocess || input_type == InputType::Library || download.partial || storage_failed {
+    let epg = if ctx.offline_target_reprocess || input_type == InputType::Library || download.partial || storage_failed
+    {
         None
     } else {
         download_input_epg(ctx, input, &mut download.errors).await

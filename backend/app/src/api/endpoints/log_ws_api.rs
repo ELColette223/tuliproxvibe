@@ -90,6 +90,8 @@ async fn wait_for_socket_auth(socket: &mut WebSocket, verifier: Option<&TokenVer
 }
 
 async fn handle_socket(mut socket: WebSocket, app_state: Arc<AppState>, auth_required: bool, query: LogWsQuery) {
+    const LAG_NOTICE_INTERVAL: Duration = Duration::from_secs(30);
+
     let verifier = get_token_verifier(&app_state, auth_required);
     let mut is_authorized = !auth_required;
     let mut min_level: Option<LogLevel> = query.min_level.as_deref().and_then(|s| s.parse().ok());
@@ -122,7 +124,6 @@ async fn handle_socket(mut socket: WebSocket, app_state: Arc<AppState>, auth_req
     // pushes every record into this same broadcast bus, which turns a slow
     // websocket client into a self-amplifying memory/log flood.
     let mut last_lag_notice: Option<Instant> = None;
-    const LAG_NOTICE_INTERVAL: Duration = Duration::from_secs(30);
 
     loop {
         tokio::select! {

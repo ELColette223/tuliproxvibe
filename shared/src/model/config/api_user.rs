@@ -172,7 +172,8 @@ mod tests {
     fn prepare_with_templates_preserves_filter_references() {
         let mut template = crate::model::PatternTemplate {
             name: "groups".to_owned(),
-            value: crate::model::TemplateValue::Single("Sports".to_owned()),            filter_rule: None,
+            value: crate::model::TemplateValue::Single("Sports".to_owned()),
+            filter_rule: None,
 
             placeholder: String::new(),
         };

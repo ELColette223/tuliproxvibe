@@ -222,7 +222,7 @@ impl TargetBouquetService {
     pub async fn fetch_target_bouquet_stream<F>(
         target_name: &str,
         abort_signal: Option<web_sys::AbortSignal>,
-        mut on_event: F,
+        on_event: F,
     ) -> Result<(), Error>
     where
         F: FnMut(TargetBouquetStreamEventDto),
@@ -231,7 +231,11 @@ impl TargetBouquetService {
         Self::stream_events(url, abort_signal, on_event).await
     }
 
-    async fn stream_events<F>(url: String, abort_signal: Option<web_sys::AbortSignal>, mut on_event: F) -> Result<(), Error>
+    async fn stream_events<F>(
+        url: String,
+        abort_signal: Option<web_sys::AbortSignal>,
+        mut on_event: F,
+    ) -> Result<(), Error>
     where
         F: FnMut(TargetBouquetStreamEventDto),
     {

@@ -9,8 +9,7 @@ use super::{
     LABEL_PROBE_VOD, LABEL_RESOLVE, LABEL_RESOLVE_BACKGROUND, LABEL_RESOLVE_DELAY_SEC, LABEL_RESOLVE_FILTER,
     LABEL_RESOLVE_SERIES, LABEL_RESOLVE_TMDB, LABEL_RESOLVE_VOD, LABEL_SEQUENTIAL_GROUP, LABEL_SERIES, LABEL_SKIP,
     LABEL_UPDATE_QUALITY, LABEL_URL, LABEL_USERNAME, LABEL_USER_AGENT_STREAM_INDEX, LABEL_VOD,
-    LABEL_XTREAM_LIVE_STREAM_USE_PREFIX,
-    LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION,
+    LABEL_XTREAM_LIVE_STREAM_USE_PREFIX, LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION,
 };
 use crate::{
     app::components::{
@@ -378,20 +377,12 @@ pub(super) fn InputOptionsForm(props: &InputOptionsFormProps) -> Html {
     let rotate_enabled = matches!(state.form.connection_limit_policy, ConnectionLimitPolicy::RotateOnFull);
     let bypass_state = state.clone();
     let handle_bypass_toggle = Callback::from(move |enabled: bool| {
-        let policy = if enabled {
-            ConnectionLimitPolicy::BypassLocalCap
-        } else {
-            ConnectionLimitPolicy::Strict
-        };
+        let policy = if enabled { ConnectionLimitPolicy::BypassLocalCap } else { ConnectionLimitPolicy::Strict };
         bypass_state.dispatch(ConfigInputOptionsFormAction::ConnectionLimitPolicy(policy));
     });
     let rotate_state = state.clone();
     let handle_rotate_toggle = Callback::from(move |enabled: bool| {
-        let policy = if enabled {
-            ConnectionLimitPolicy::RotateOnFull
-        } else {
-            ConnectionLimitPolicy::Strict
-        };
+        let policy = if enabled { ConnectionLimitPolicy::RotateOnFull } else { ConnectionLimitPolicy::Strict };
         rotate_state.dispatch(ConfigInputOptionsFormAction::ConnectionLimitPolicy(policy));
     });
 

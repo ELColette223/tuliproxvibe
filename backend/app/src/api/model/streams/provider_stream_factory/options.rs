@@ -4,7 +4,7 @@ use super::{
     ProviderStreamFactoryOptions,
 };
 use crate::{
-    api::model::{get_header_filter_for_item_type, ProviderContentRepresentationMode},
+    api::model::{get_header_filter_for_item_type, ProviderContentRepresentationMode, ProviderStreamInfo},
     model::{ConfigProvider, ReverseProxyDisabledHeaderConfig},
     utils::request::{get_request_headers, preview_request_target_for_logging},
 };
@@ -45,6 +45,7 @@ pub(crate) struct ProviderStreamFactoryParams<'a> {
 }
 
 impl ProviderStreamFactoryOptions {
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn new(request: &ProviderStreamFactoryParams<'_>) -> Self {
         let ProviderStreamFactoryParams {
             addr,
@@ -250,17 +251,11 @@ impl ProviderStreamFactoryOptions {
     /// Shared live MPEG-TS bodies get continuity enforcement only when the response is an
     /// unencoded, complete 200 with `video/mp2t`: only then can a mid-body reopen not be
     /// mistaken for a continuation of the same transport stream.
-    pub(super) fn shared_mpegts_recovery_enabled(
-        &self,
-        info: &Option<(Vec<(String, String)>, reqwest::StatusCode, Option<url::Url>, Option<crate::api::model::CustomVideoStreamType>)>,
-    ) -> bool {
+    pub(super) fn shared_mpegts_recovery_enabled(&self, info: &ProviderStreamInfo) -> bool {
         self.should_retry_provider_request() && self.shared_mpegts_compatible_response(info)
     }
 
-    fn shared_mpegts_compatible_response(
-        &self,
-        info: &Option<(Vec<(String, String)>, reqwest::StatusCode, Option<url::Url>, Option<crate::api::model::CustomVideoStreamType>)>,
-    ) -> bool {
+    fn shared_mpegts_compatible_response(&self, info: &ProviderStreamInfo) -> bool {
         self.flags.contains(ProviderStreamFactoryFlags::ShareStream)
             && self.item_type == shared::model::PlaylistItemType::Live
             && !self.was_range_requested()

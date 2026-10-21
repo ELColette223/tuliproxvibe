@@ -7,9 +7,8 @@ use crate::{
 use shared::{
     foundation::{compile_visual_rules_to_filter_dsl, VisualCategoryRule},
     model::{
-        permission::Permission, ConfigTargetFilterDto, PlaylistClusterBouquetDto,
-        TargetBouquetCategorySelectionDto, TargetBouquetDto, TargetBouquetMode, TargetBouquetSelectionDto,
-        TargetBouquetStreamEventDto, XtreamCluster,
+        permission::Permission, ConfigTargetFilterDto, PlaylistClusterBouquetDto, TargetBouquetCategorySelectionDto,
+        TargetBouquetDto, TargetBouquetMode, TargetBouquetSelectionDto, TargetBouquetStreamEventDto, XtreamCluster,
     },
 };
 use std::collections::{HashMap, HashSet};
@@ -81,7 +80,11 @@ impl Inventory {
 }
 
 fn save_apply_feedback(applied: bool) -> (&'static str, bool) {
-    if applied { ("FILTER_BUILDER.SAVED_APPLIED_SUCCESS", false) } else { ("FILTER_BUILDER.SAVED_NEXT_UPDATE", true) }
+    if applied {
+        ("FILTER_BUILDER.SAVED_APPLIED_SUCCESS", false)
+    } else {
+        ("FILTER_BUILDER.SAVED_NEXT_UPDATE", true)
+    }
 }
 
 fn legacy_rule(bouquet: Option<&TargetBouquetDto>, key: &CategoryKey) -> Rule {
@@ -100,17 +103,28 @@ fn legacy_rule(bouquet: Option<&TargetBouquetDto>, key: &CategoryKey) -> Rule {
 }
 
 fn initial_rules(categories: &[CategoryKey], bouquet: Option<&TargetBouquetDto>) -> HashMap<CategoryKey, Rule> {
-    categories.iter().map(|key| {
-        let rule = bouquet.and_then(|value| value.selection.as_ref()).map_or_else(
-            || legacy_rule(bouquet, key),
-            |selection| selection.categories.iter().find(|category| category.cluster == key.cluster && category.name == key.name)
-                .map_or(Rule::All, |category| {
-                    if category.included_channel_ids.is_empty() { Rule::None }
-                    else { Rule::Partial(category.included_channel_ids.iter().cloned().collect()) }
-                }),
-        );
-        (key.clone(), rule)
-    }).collect()
+    categories
+        .iter()
+        .map(|key| {
+            let rule = bouquet.and_then(|value| value.selection.as_ref()).map_or_else(
+                || legacy_rule(bouquet, key),
+                |selection| {
+                    selection
+                        .categories
+                        .iter()
+                        .find(|category| category.cluster == key.cluster && category.name == key.name)
+                        .map_or(Rule::All, |category| {
+                            if category.included_channel_ids.is_empty() {
+                                Rule::None
+                            } else {
+                                Rule::Partial(category.included_channel_ids.iter().cloned().collect())
+                            }
+                        })
+                },
+            );
+            (key.clone(), rule)
+        })
+        .collect()
 }
 
 /// Only serialize known categories after their complete inventory has been fetched. An absent
@@ -125,10 +139,15 @@ fn snapshot(
     let mut result = Vec::with_capacity(categories.len());
     for key in categories {
         if missing.contains(key) {
-            let saved = previous.and_then(|bouquet| bouquet.selection.as_ref())
-                .and_then(|selection| selection.categories.iter().find(|category| {
-                    category.cluster == key.cluster && category.name == key.name
-                })).ok_or_else(|| format!("Missing saved category {} · {}", key.cluster, key.name))?;
+            let saved = previous
+                .and_then(|bouquet| bouquet.selection.as_ref())
+                .and_then(|selection| {
+                    selection
+                        .categories
+                        .iter()
+                        .find(|category| category.cluster == key.cluster && category.name == key.name)
+                })
+                .ok_or_else(|| format!("Missing saved category {} · {}", key.cluster, key.name))?;
             let mut retained = saved.clone();
             retained.included_channel_ids = match rules.get(key) {
                 Some(Rule::None) => Vec::new(),
@@ -138,12 +157,17 @@ fn snapshot(
             result.push(retained);
             continue;
         }
-        let inventory = inventories.get(key).filter(|inventory| inventory.complete && inventory.error.is_none())
+        let inventory = inventories
+            .get(key)
+            .filter(|inventory| inventory.complete && inventory.error.is_none())
             .ok_or_else(|| format!("Load every channel in {} · {} before saving", key.cluster, key.name))?;
-        let mut ids: Vec<String> = inventory.channels.iter()
+        let mut ids: Vec<String> = inventory
+            .channels
+            .iter()
             .filter(|channel| rules.get(key).unwrap_or(&Rule::All).contains(&channel.id))
-            .map(|channel| channel.id.clone()).collect();
-    // Selected IDs absent from the current complete inventory remain in the saved selection.
+            .map(|channel| channel.id.clone())
+            .collect();
+        // Selected IDs absent from the current complete inventory remain in the saved selection.
 
         if let Some(Rule::Partial(selected)) = rules.get(key) {
             ids.extend(selected.iter().cloned());
@@ -151,7 +175,9 @@ fn snapshot(
         ids.sort_unstable();
         ids.dedup();
         result.push(TargetBouquetCategorySelectionDto {
-            cluster: key.cluster, name: key.name.clone(), included_channel_ids: ids,
+            cluster: key.cluster,
+            name: key.name.clone(),
+            included_channel_ids: ids,
         });
     }
     Ok(TargetBouquetSelectionDto { categories: result, base_filter: None })
@@ -203,7 +229,11 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
         let dirty = dirty.clone();
         let generation = generation.clone();
         use_effect_with((target, revision_value), move |(target, _)| {
-            let current = { let mut generation = generation.borrow_mut(); *generation += 1; *generation };
+            let current = {
+                let mut generation = generation.borrow_mut();
+                *generation += 1;
+                *generation
+            };
             let controller = web_sys::AbortController::new().ok();
             let signal = controller.as_ref().map(web_sys::AbortController::signal);
             let target = target.clone();
@@ -230,18 +260,25 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
                     }
                     TargetBouquetStreamEventDto::InputWarning { message, .. } => issues.push(message),
                     _ => {}
-                }).await;
-                if *generation.borrow() != current { return; }
+                })
+                .await;
+                if *generation.borrow() != current {
+                    return;
+                }
                 if let Err(error) = result {
                     issues.push(format!("Failed to load bouquet: {error}"));
                     load_failed.set(true);
                 }
                 // Saved categories absent from the stream retain their exact stored IDs.
                 let mut absent = HashSet::new();
-                if let Some(selection) = selected.as_ref().and_then(|bouquet: &TargetBouquetDto| bouquet.selection.as_ref()) {
+                if let Some(selection) =
+                    selected.as_ref().and_then(|bouquet: &TargetBouquetDto| bouquet.selection.as_ref())
+                {
                     for item in &selection.categories {
                         let key = CategoryKey { cluster: item.cluster, name: item.name.clone() };
-                        if found.insert(key.clone()) { absent.insert(key); }
+                        if found.insert(key.clone()) {
+                            absent.insert(key);
+                        }
                     }
                 }
                 missing_categories.set(absent);
@@ -253,7 +290,11 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
                 warnings.set(issues);
                 loading.set(false);
             });
-            move || { if let Some(controller) = controller { controller.abort(); } }
+            move || {
+                if let Some(controller) = controller {
+                    controller.abort();
+                }
+            }
         });
     }
 
@@ -265,7 +306,12 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
         let generation = generation.clone();
         let target = props.target_name.clone();
         Callback::from(move |key: CategoryKey| {
-            if missing_categories.contains(&key) || inventory.get(&key).is_some_and(|entry| entry.complete) || fetching.contains(&key) { return; }
+            if missing_categories.contains(&key)
+                || inventory.get(&key).is_some_and(|entry| entry.complete)
+                || fetching.contains(&key)
+            {
+                return;
+            }
             let mut busy = (*fetching).clone();
             busy.insert(key.clone());
             fetching.set(busy);
@@ -282,18 +328,27 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
                 let mut cursor: Option<String> = None;
                 let outcome = loop {
                     let page = TargetBouquetService::fetch_target_channel_inventory(
-                        &target, key.cluster, &key.name, cursor.clone(),
-                    ).await;
-                    if *generation.borrow() != current { return; }
+                        &target,
+                        key.cluster,
+                        &key.name,
+                        cursor.clone(),
+                    )
+                    .await;
+                    if *generation.borrow() != current {
+                        return;
+                    }
                     match page {
                         Err(error) => break Err(format!("Could not load channels: {error}")),
                         Ok(page) => {
                             if !page.unavailable_inputs.is_empty() || page.status == "unavailable" {
-                                break Err(format!("Inventory unavailable{}", if page.unavailable_inputs.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(": {}", page.unavailable_inputs.join(", "))
-                                }));
+                                break Err(format!(
+                                    "Inventory unavailable{}",
+                                    if page.unavailable_inputs.is_empty() {
+                                        String::new()
+                                    } else {
+                                        format!(": {}", page.unavailable_inputs.join(", "))
+                                    }
+                                ));
                             }
                             for channel in page.channels {
                                 if seen.insert(channel.id.clone()) {
@@ -308,7 +363,8 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
                         }
                     }
                 };
-                channels.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
+                channels
+                    .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
                 let entry = Inventory { channels, complete: outcome.is_ok(), error: outcome.err() };
                 inventory_cache.borrow_mut().insert(key.clone(), entry);
                 inventory.set(inventory_cache.borrow().clone());
@@ -335,12 +391,18 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
         let generation = generation.clone();
         let translate = translate.clone();
         Callback::from(move |_| {
-            if *saving || !can_write { return; }
+            if *saving || !can_write {
+                return;
+            }
             let old = (*bouquet).clone();
             let is_legacy = old.as_ref().is_some_and(|value| value.selection.is_none());
-            if is_legacy && !web_sys::window().is_some_and(|window| window.confirm_with_message(
-                &translate.t("FILTER_BUILDER.LEGACY_CONFIRM")
-            ).unwrap_or(false)) { return; }
+            if is_legacy
+                && !web_sys::window().is_some_and(|window| {
+                    window.confirm_with_message(&translate.t("FILTER_BUILDER.LEGACY_CONFIRM")).unwrap_or(false)
+                })
+            {
+                return;
+            }
             let current = *generation.borrow();
             let target = target.clone();
             let categories = (*categories).clone();
@@ -358,11 +420,12 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
             let translate = translate.clone();
             saving.set(true);
             spawn_local(async move {
-                let fail = |save_progress: &UseStateHandle<Option<String>>, saving: &UseStateHandle<bool>, msg: String| {
-                    save_progress.set(None);
-                    saving.set(false);
-                    msg
-                };
+                let fail =
+                    |save_progress: &UseStateHandle<Option<String>>, saving: &UseStateHandle<bool>, msg: String| {
+                        save_progress.set(None);
+                        saving.set(false);
+                        msg
+                    };
                 // Finish the entire inventory before building a snapshot. Never treat an
                 // unloaded category or an unavailable input as an empty selection.
                 // ONE pass over the raw inputs via the streaming inventory endpoint
@@ -386,14 +449,17 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
                                 }
                             }
                         }
-                        TargetBouquetStreamEventDto::InputWarning { message, .. } => {
-                            if stream_fail.is_none() { stream_fail = Some(message); }
+                        TargetBouquetStreamEventDto::InputWarning { message, .. } if stream_fail.is_none() => {
+                            stream_fail = Some(message);
                         }
                         _ => {}
                     }
                 })
                 .await;
-                if *generation.borrow() != current { save_progress.set(None); return; }
+                if *generation.borrow() != current {
+                    save_progress.set(None);
+                    return;
+                }
                 let inventory_pass = match stream_result {
                     Ok(()) if stream_fail.is_none() => Ok(()),
                     Ok(()) => Err(stream_fail.expect("checked above")),
@@ -410,10 +476,17 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
                     inventory.entry(key.clone()).or_default().complete = true;
                 }
                 inventory_cache.borrow_mut().extend(inventory.clone());
-                if *generation.borrow() != current { save_progress.set(None); return; }
+                if *generation.borrow() != current {
+                    save_progress.set(None);
+                    return;
+                }
                 inventory.extend(inventory_cache.borrow().clone());
                 let selection = match snapshot(&categories, &rules, &inventory, &missing_categories, old.as_ref()) {
-                    Ok(selection) if selection.categories.iter().any(|category| !category.included_channel_ids.is_empty()) => selection,
+                    Ok(selection)
+                        if selection.categories.iter().any(|category| !category.included_channel_ids.is_empty()) =>
+                    {
+                        selection
+                    }
                     Ok(_) => {
                         let msg = fail(&save_progress, &saving, translate.t("FILTER_BUILDER.SELECTION_REQUIRED"));
                         warnings.set(vec![msg.clone()]);
@@ -439,29 +512,37 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
                     let kept_channel_names: Vec<String> = inventory.get(key).map_or_else(Vec::new, |inv| {
                         inv.channels.iter().filter(|ch| rule.contains(&ch.id)).map(|ch| ch.name.clone()).collect()
                     });
-                    category_rules.push(VisualCategoryRule {
-                        name: key.name.clone(),
-                        is_enabled,
-                        kept_channel_names,
-                    });
+                    category_rules.push(VisualCategoryRule { name: key.name.clone(), is_enabled, kept_channel_names });
                 }
                 // The base filter is the NON-visual filter the user had (kept in the
                 // bouquet since the first visual save). Using the live target filter
                 // here would nest the previous visual compilation on every save.
                 let (server_config, _) = services.config.get_server_config().await;
                 let Some(cfg) = server_config else {
-                    let msg = fail(&save_progress, &saving, "Could not load current configuration to persist the filter".to_string());
+                    let msg = fail(
+                        &save_progress,
+                        &saving,
+                        "Could not load current configuration to persist the filter".to_string(),
+                    );
                     services.toastr.error(msg);
                     return;
                 };
-                let saved_base = old.as_ref().and_then(|bouquet| bouquet.selection.as_ref()).and_then(|selection| selection.base_filter.clone());
+                let saved_base = old
+                    .as_ref()
+                    .and_then(|bouquet| bouquet.selection.as_ref())
+                    .and_then(|selection| selection.base_filter.clone());
                 let mut sources = cfg.sources.clone();
                 let base_filter = saved_base.or_else(|| {
                     // First visual save: capture the current (hand-written) filter as
                     // the base so future rebuilds replace, not nest, the visual part.
-                    sources.sources.iter().flat_map(|source| &source.targets)
+                    sources
+                        .sources
+                        .iter()
+                        .flat_map(|source| &source.targets)
                         .find(|candidate| candidate.name == target)
-                        .and_then(|candidate| candidate.filter.processing.as_deref().or(candidate.filter.persist.as_deref()))
+                        .and_then(|candidate| {
+                            candidate.filter.processing.as_deref().or(candidate.filter.persist.as_deref())
+                        })
                         .map(str::to_string)
                 });
                 let mut compiled_dsl: Option<String> = None;
@@ -485,7 +566,8 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
                 }
                 if compiled_dsl.is_some() {
                     if let Err(e) = services.config.save_sources(sources).await {
-                        let msg = fail(&save_progress, &saving, format!("Failed to persist filter into source.yml: {e}"));
+                        let msg =
+                            fail(&save_progress, &saving, format!("Failed to persist filter into source.yml: {e}"));
                         warnings.set(vec![msg.clone()]);
                         services.toastr.error(msg);
                         return;
@@ -497,9 +579,9 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
                 save_progress.set(Some("selection".to_string()));
                 let mut selection = selection;
                 selection.base_filter = base_filter;
-                let base = old.unwrap_or_else(|| TargetBouquetDto::new(
-                    TargetBouquetMode::Whitelist, PlaylistClusterBouquetDto::default(),
-                ));
+                let base = old.unwrap_or_else(|| {
+                    TargetBouquetDto::new(TargetBouquetMode::Whitelist, PlaylistClusterBouquetDto::default())
+                });
                 let updated = TargetBouquetDto::new(base.mode, base.groups).with_selection(selection);
                 if let Err(error) = TargetBouquetService::save_target_bouquet(&target, &updated).await {
                     let msg = fail(&save_progress, &saving, format!("Failed to save visual target filter: {error}"));
@@ -545,7 +627,11 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
         let translate = translate.clone();
         move |key: &str, default_text: &'static str| {
             let s = translate.t(key);
-            if s.starts_with("Key '") { default_text.to_string() } else { s }
+            if s.starts_with("Key '") {
+                default_text.to_string()
+            } else {
+                s
+            }
         }
     };
     html! {
@@ -702,7 +788,14 @@ mod tests {
         assert_eq!(save_apply_feedback(true), ("FILTER_BUILDER.SAVED_APPLIED_SUCCESS", false));
     }
     fn loaded(ids: &[&str]) -> Inventory {
-        Inventory { channels: ids.iter().map(|id| Channel { id: (*id).into(), name: (*id).into(), input: "source".into() }).collect(), complete: true, error: None }
+        Inventory {
+            channels: ids
+                .iter()
+                .map(|id| Channel { id: (*id).into(), name: (*id).into(), input: "source".into() })
+                .collect(),
+            complete: true,
+            error: None,
+        }
     }
 
     #[test]
@@ -714,12 +807,13 @@ mod tests {
             (keys[2].clone(), loaded(&["d", "e"])),
         ]);
         let rules = HashMap::from([
-            (keys[0].clone(), Rule::All), (keys[1].clone(), Rule::None),
+            (keys[0].clone(), Rule::All),
+            (keys[1].clone(), Rule::None),
             (keys[2].clone(), Rule::Partial(HashSet::from(["e".into()]))),
         ]);
         let selection = snapshot(&keys, &rules, &inventory, &HashSet::new(), None).unwrap();
         assert_eq!(selection.categories[0].included_channel_ids, vec!["a", "b"]);
-        assert!(selection.categories[1].included_channel_ids.is_empty());
+        assert!(selection.categories[1].included_channel_ids.is_empty(), "second category keeps no channels");
         assert_eq!(selection.categories[2].included_channel_ids, vec!["e"]);
         assert!(!selection.allows(XtreamCluster::Live, "News", "future"));
         assert!(selection.allows(XtreamCluster::Live, "Brand new", "future"));
@@ -735,7 +829,8 @@ mod tests {
         let old = TargetBouquetDto::new(TargetBouquetMode::Whitelist, PlaylistClusterBouquetDto::default())
             .with_selection(TargetBouquetSelectionDto {
                 categories: vec![TargetBouquetCategorySelectionDto {
-                    cluster: XtreamCluster::Live, name: "Removed".into(),
+                    cluster: XtreamCluster::Live,
+                    name: "Removed".into(),
                     included_channel_ids: vec!["saved-id".into()],
                 }],
                 base_filter: None,
@@ -747,7 +842,7 @@ mod tests {
         assert_eq!(saved.categories[0].included_channel_ids, vec!["saved-id"]);
         let disabled = HashMap::from([(key("Removed"), Rule::None)]);
         let saved = snapshot(&categories, &disabled, &HashMap::new(), &missing, Some(&old)).unwrap();
-        assert!(saved.categories[0].included_channel_ids.is_empty());
+        assert!(saved.categories[0].included_channel_ids.is_empty(), "saved category keeps no channels");
     }
 
     #[test]
@@ -761,9 +856,10 @@ mod tests {
 
     #[test]
     fn legacy_blacklist_remains_visible_until_explicit_save() {
-        let old = TargetBouquetDto::new(TargetBouquetMode::Blacklist, PlaylistClusterBouquetDto {
-            live: Some(vec!["News".into()]), vod: None, series: None,
-        });
+        let old = TargetBouquetDto::new(
+            TargetBouquetMode::Blacklist,
+            PlaylistClusterBouquetDto { live: Some(vec!["News".into()]), vod: None, series: None },
+        );
         assert_eq!(legacy_rule(Some(&old), &key("News")), Rule::None);
         assert_eq!(legacy_rule(Some(&old), &key("Sports")), Rule::All);
         assert!(old.selection.is_none());

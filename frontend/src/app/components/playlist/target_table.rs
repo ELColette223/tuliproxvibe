@@ -1,10 +1,10 @@
 use crate::{
     app::{
         components::{
-            convert_bool_to_chip_style, make_translated_header_callback, menu_item::MenuItem, popup_menu::PopupMenu,
-            AppIcon, Chip, FilterView, PlaylistMappings, PlaylistProcessing, RevealContent, Table, TableDefinition,
-            TargetOptions, TargetOutput, TargetRename, TargetSort, TargetWatch, ToggleSwitch,
-            bouquet_editor::VisualTargetFilter,
+            bouquet_editor::VisualTargetFilter, convert_bool_to_chip_style, make_translated_header_callback,
+            menu_item::MenuItem, popup_menu::PopupMenu, AppIcon, Chip, FilterView, PlaylistMappings,
+            PlaylistProcessing, RevealContent, Table, TableDefinition, TargetOptions, TargetOutput, TargetRename,
+            TargetSort, TargetWatch, ToggleSwitch,
         },
         ConfigContext,
     },
@@ -55,7 +55,6 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
     let popup_is_open = use_state(|| false);
     let selected_dto = use_state(|| None::<Rc<ConfigTargetDto>>);
     let visual_filter_target = use_state(|| None::<String>);
-    let visual_filter_target = use_state(|| None::<String>);
 
     let handle_popup_close = {
         let set_is_open = popup_is_open.clone();
@@ -84,8 +83,6 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
     let render_data_cell = {
         let translator = translate.clone();
         let popup_onclick = handle_popup_onclick.clone();
-        let visual_filter_target = visual_filter_target.clone();
-        let can_read_visual_filter = services.auth.has_permission(Permission::PlaylistRead);
         let visual_filter_target = visual_filter_target.clone();
         let can_read_visual_filter = services.auth.has_permission(Permission::PlaylistRead);
         Callback::<(usize, usize, Rc<ConfigTargetDto>), Html>::from(
@@ -252,7 +249,7 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
                 <div class="tp__target-table__visual-filter">
                     <VisualTargetFilter target_name={target_name.clone()} on_back={{
                         let visual_filter_target = visual_filter_target.clone();
-                        Callback::from(move |_| visual_filter_target.set(None))
+                        Callback::from(move |()| visual_filter_target.set(None))
                     }} />
                 </div>
             } else {

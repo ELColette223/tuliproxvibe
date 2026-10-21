@@ -689,6 +689,7 @@ impl ActiveProviderManager {
 
     /// Same as [`Self::acquire_connection_with_lease_for_session_await`], but skips already-tried accounts.
     /// Source-level rotate-on-full uses this so a provider that just rejected the open is not retried.
+    #[allow(clippy::too_many_arguments)]
     pub async fn acquire_connection_with_lease_for_session_await_excluding(
         &self,
         input_name: &Arc<str>,
@@ -708,12 +709,9 @@ impl ActiveProviderManager {
             if self.is_shutting_down.load(Ordering::Acquire) {
                 return None;
             }
-            if let Some(handle) = self.acquire_connection_inner_no_preempt_excluding(
-                input_name,
-                allow_grace,
-                &params,
-                excluded_providers,
-            ) {
+            if let Some(handle) =
+                self.acquire_connection_inner_no_preempt_excluding(input_name, allow_grace, &params, excluded_providers)
+            {
                 return Some(handle);
             }
             // Rotation retries must not cascade into preemption; only the first attempt may preempt.
@@ -751,12 +749,7 @@ impl ActiveProviderManager {
                         Some(victim_gen),
                     );
                 }
-                self.acquire_connection_inner_no_preempt_excluding(
-                    input_name,
-                    allow_grace,
-                    &params,
-                    excluded_providers,
-                )
+                self.acquire_connection_inner_no_preempt_excluding(input_name, allow_grace, &params, excluded_providers)
             }
             PreemptionOutcome::Exhausted => None,
         }

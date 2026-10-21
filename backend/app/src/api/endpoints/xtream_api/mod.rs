@@ -13,9 +13,9 @@ use crate::{
             is_session_based_playback, is_stream_share_enabled, local_stream_response, maintenance_rejection_response,
             redirect, redirect_response, reentry_suppressed_response, resolve_initial_stalker_playback_url,
             resource_proxy_response, resource_redirect_or_proxy, separate_number_and_remainder,
-            shared_live_mpeg_ts_key, should_allow_exhausted_shared_reconnect, stream_response,
-            stream_response_with_provider_handle, stream_response_with_shared_key,
-            try_option_bad_request, try_result_bad_request, try_unwrap_body, RedirectParams,
+            shared_live_mpeg_ts_key, should_allow_exhausted_shared_reconnect, stream_response_with_provider_handle,
+            stream_response_with_shared_key, try_option_bad_request, try_result_bad_request, try_unwrap_body,
+            RedirectParams,
         },
         endpoints::{
             hls_api::{
@@ -1437,7 +1437,7 @@ pub async fn xtream_get_stream_info_response(
                     }
                 };
                 if let Ok(content) = xtream::get_xtream_stream_info(
-                    &app_state.http_clients.default.load(),
+                    &client,
                     &app_state.app_config,
                     &app_state.playlists,
                     user,
@@ -1556,7 +1556,7 @@ async fn xtream_get_short_epg(
                         };
                         return match request::download_text_content(
                             &app_state.app_config,
-                            &app_state.http_clients.default.load(),
+                            &client,
                             &input_source,
                             None,
                             None,
@@ -1698,13 +1698,7 @@ async fn xtream_get_catchup_response(
         input.proxy.as_ref(),
     ));
     let content = try_result_bad_request!(
-        xtream::get_xtream_stream_info_content(
-            &app_state.app_config,
-            &app_state.http_clients.default.load(),
-            &input_source,
-            false,
-        )
-        .await
+        xtream::get_xtream_stream_info_content(&app_state.app_config, &client, &input_source, false).await
     );
 
     let mut doc: Map<String, Value> = try_result_bad_request!(serde_json::from_str(&content));

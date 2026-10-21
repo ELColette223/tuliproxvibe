@@ -50,8 +50,8 @@ fn apply_proxy_config(
     client: reqwest::ClientBuilder,
     proxy_cfg: &ProxyConfig,
 ) -> Result<reqwest::ClientBuilder, TuliproxError> {
-    let mut url = Url::parse(&proxy_cfg.url)
-        .map_err(|err| TuliproxError::ConfigProxy(format!("Invalid proxy URL: {err}")))?;
+    let mut url =
+        Url::parse(&proxy_cfg.url).map_err(|err| TuliproxError::ConfigProxy(format!("Invalid proxy URL: {err}")))?;
     let scheme = url.scheme().to_ascii_lowercase();
 
     let proxy = match scheme.as_str() {

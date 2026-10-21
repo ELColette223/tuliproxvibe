@@ -149,12 +149,7 @@ impl SharedStreamManager {
         }
     }
 
-    pub(super) async fn unregister(
-        &self,
-        stream_url: &str,
-        expected: &Arc<SharedStreamState>,
-        terminal_failure: bool,
-    ) {
+    pub(super) async fn unregister(&self, stream_url: &str, expected: &Arc<SharedStreamState>, terminal_failure: bool) {
         let mut register = self.shared_streams.write().await;
         let state = {
             if !register.by_key.get(stream_url).is_some_and(|state| Arc::ptr_eq(state, expected)) {

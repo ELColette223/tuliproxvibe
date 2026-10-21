@@ -260,17 +260,14 @@ async fn process_immediate_series_info<E: EventSink + Clone + 'static, M: Metada
 ) -> Vec<PlaylistGroup> {
     let input = fpl.input;
     let storage_dir = &ctx.config.config.load().storage_dir;
-    let input_client = match tuliprox_core::utils::request::create_input_http_client(
-        &ctx.config,
-        &ctx.client,
-        input.proxy.as_ref(),
-    ) {
-        Ok(client) => client,
-        Err(err) => {
-            error!("Failed to create Xtream client for input '{}': {err}", input.name);
-            return Vec::new();
-        }
-    };
+    let input_client =
+        match tuliprox_core::utils::request::create_input_http_client(&ctx.config, &ctx.client, input.proxy.as_ref()) {
+            Ok(client) => client,
+            Err(err) => {
+                error!("Failed to create Xtream client for input '{}': {err}", input.name);
+                return Vec::new();
+            }
+        };
     let storage_path = match get_input_storage_path(&input.name, storage_dir).await {
         Ok(path) => path,
         Err(err) => {

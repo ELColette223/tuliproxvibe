@@ -36,7 +36,11 @@ use shared::{
         HEADER_CONFIG_SOURCES_REVISION, HEADER_IF_MATCH, PROVIDER_SCHEME_PREFIX,
     },
 };
-use std::{collections::HashMap, path::Path, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 fn file_revision_from_bytes(bytes: &[u8]) -> String { blake3::hash(bytes).to_hex().to_string() }
 
@@ -429,6 +433,7 @@ async fn save_config_main(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn save_config_sources(
     axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
     headers: HeaderMap,
@@ -452,21 +457,20 @@ async fn save_config_sources(
     {
         return response;
     }
-    let templates_to_persist =
-        match crate::config_loader::validate_source_config_with_filter_rules_for_persist(
-            &app_state.app_config,
-            &sources,
-            filter_rules.as_deref(),
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(err) => {
-                error!("Failed to validate source.yml {err}");
-                return (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()})))
-                    .into_response();
-            }
-        };
+    let templates_to_persist = match crate::config_loader::validate_source_config_with_filter_rules_for_persist(
+        &app_state.app_config,
+        &sources,
+        filter_rules.as_deref(),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(err) => {
+            error!("Failed to validate source.yml {err}");
+            return (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()})))
+                .into_response();
+        }
+    };
 
     let managed_template_update = if let Some(rules) = filter_rules.as_ref() {
         let additional_templates = templates_to_persist.as_ref().map(|definition| definition.templates.as_slice());
@@ -474,9 +478,7 @@ async fn save_config_sources(
             &app_state.app_config,
             rules,
             additional_templates,
-        )
-        .await
-        {
+        ) {
             Ok(update) => Some(update),
             Err(err) => {
                 error!("Failed to validate managed filter rules: {err}");
@@ -511,10 +513,7 @@ async fn save_config_sources(
     // template paths). Managed visual rules land in their own deterministic file, or in the
     // same file when the configured template path resolves to a single file.
     if templates_to_persist.is_some() {
-        template_updates.push((
-            template_persist_path.clone(),
-            templates_to_persist.clone().unwrap_or_default(),
-        ));
+        template_updates.push((template_persist_path.clone(), templates_to_persist.clone().unwrap_or_default()));
     }
     if let Some((path, definition)) = managed_update_ref {
         if *path != template_persist_path {
@@ -536,18 +535,18 @@ async fn save_config_sources(
         }
     }
 
-    let mut applied_updates = 0usize;
-    for (path, definition) in &template_updates {
-        if let Err(err) = crate::config_loader::persist_templates_config_to_path(&app_state.app_config, path, definition).await {
+    for (applied_updates, (path, definition)) in template_updates.iter().enumerate() {
+        if let Err(err) =
+            crate::config_loader::persist_templates_config_to_path(&app_state.app_config, path, definition).await
+        {
             error!("Failed to save template config '{path}': {err}");
             for (snapshot_path, content) in snapshots.iter().take(applied_updates) {
                 if let Err(rollback_err) = restore_sources_file(snapshot_path, content.as_deref()).await {
-                    error!("Failed to roll back template config '{snapshot_path:?}': {rollback_err}");
+                    error!("Failed to roll back template config '{}': {rollback_err}", snapshot_path.display());
                 }
             }
             return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(json!({"error": err.to_string()}))).into_response();
         }
-        applied_updates += 1;
     }
 
     // Derive lifecycle changes from the currently loaded configuration before it is replaced.
@@ -559,7 +558,7 @@ async fn save_config_sources(
             error!("Failed to persist source.yml {err}");
             for (snapshot_path, content) in &snapshots {
                 if let Err(rollback_err) = restore_sources_file(snapshot_path, content.as_deref()).await {
-                    error!("Failed to roll back template config '{snapshot_path:?}': {rollback_err}");
+                    error!("Failed to roll back template config '{}': {rollback_err}", snapshot_path.display());
                 }
             }
             return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(json!({"error": err.to_string()})))
@@ -1536,10 +1535,7 @@ mod tests {
         let save_future = super::save_config_sources(
             axum::extract::State(Arc::clone(&app_state)),
             headers,
-            axum::Json(shared::model::SourcesEditorSaveDto {
-                sources: updated_sources,
-                filter_rules: None,
-            }),
+            axum::Json(shared::model::SourcesEditorSaveDto { sources: updated_sources, filter_rules: None }),
         );
         let response = tokio::time::timeout(Duration::from_secs(5), save_future)
             .await

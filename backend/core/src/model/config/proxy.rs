@@ -11,13 +11,13 @@ pub struct ProxyConfig {
 impl ProxyConfig {
     /// Returns a safe display string: `scheme://host[:port]` — never includes the password.
     pub fn display_host(&self) -> String {
-        url::Url::parse(&self.url)
-            .ok()
-            .map(|u| {
+        url::Url::parse(&self.url).map_or_else(
+            |_| self.url.clone(),
+            |u| {
                 let port = u.port().map(|p| format!(":{p}")).unwrap_or_default();
                 format!("{}://{}{}", u.scheme(), u.host_str().unwrap_or("?"), port)
-            })
-            .unwrap_or_else(|| self.url.clone())
+            },
+        )
     }
 
     /// Returns a safe log line: `scheme://host[:port] (user: <username>)` or without user part.

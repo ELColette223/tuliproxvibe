@@ -144,17 +144,14 @@ async fn process_immediate_vod_info<E: EventSink + Clone + 'static, M: MetadataU
     if let Some(proxy) = input.proxy.as_ref() {
         log::info!("Resolving VOD info for input '{}' via proxy: {}", input.name, proxy.display_for_log());
     }
-    let input_client = match tuliprox_core::utils::request::create_input_http_client(
-        &ctx.config,
-        &ctx.client,
-        input.proxy.as_ref(),
-    ) {
-        Ok(client) => client,
-        Err(err) => {
-            error!("Failed to create Xtream client for input '{}': {err}", input.name);
-            return;
-        }
-    };
+    let input_client =
+        match tuliprox_core::utils::request::create_input_http_client(&ctx.config, &ctx.client, input.proxy.as_ref()) {
+            Ok(client) => client,
+            Err(err) => {
+                error!("Failed to create Xtream client for input '{}': {err}", input.name);
+                return;
+            }
+        };
 
     let storage_path = resolve_input_storage_path(storage_dir, &input.name).await;
 
@@ -529,6 +526,7 @@ fn queue_background_vod_info<E: EventSink + Clone + 'static, M: MetadataUpdateSi
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn update_vod_info_immediate<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
     ctx: &PlaylistProcessingContext<E, M>,
     client: &reqwest::Client,

@@ -2,9 +2,9 @@ use super::WatchEntriesEditor;
 use crate::{
     app::components::{
         build_options, config::HasFormData, dto_field_id, select::Select, selection_parse_first, AppIcon, BlockId,
-        BlockInstance, Card, ClusterFlagsInput, ClusterFlagsInputMode, DropDownSelection, EditMode, FilterInput,
-        IconButton, Panel, SourceEditorContext, TargetFilterBuilder, TargetFilterBuilderResult, TargetFilterSummary,
-        TextButton, ToggleSwitch,
+        BlockInstance, Card, ClusterFlagsInput, ClusterFlagsInputMode, DropDownSelection, EditMode, IconButton, Panel,
+        SourceEditorContext, TargetFilterBuilder, TargetFilterBuilderResult, TargetFilterSummary, TextButton,
+        ToggleSwitch,
     },
     config_field, config_field_bool, config_field_child, config_field_custom, edit_field_bool, edit_field_list_option,
     edit_field_text, generate_form_reducer,
@@ -16,8 +16,7 @@ use shared::{
     error::TuliproxError,
     model::{
         permission::Permission, ClusterFlags, ConfigTargetDto, ConfigTargetFilterDto, ConfigTargetOptions,
-        ConfigWatchDto, CurationCatalogSelection, CurationConfigDto, ProcessingOrder, TargetBouquetMode,
-        TargetBouquetStatusDto,
+        ConfigWatchDto, CurationCatalogSelection, CurationConfigDto, ProcessingOrder, TargetBouquetStatusDto,
     },
     utils::Internable,
 };
@@ -48,7 +47,6 @@ const LABEL_LOWERCASE_EPG_IDS: &str = "LABEL.LOWERCASE_EPG_IDS";
 const LABEL_LOWERCASE_XMLTV_DISPLAY_NAMES: &str = "LABEL.LOWERCASE_XMLTV_DISPLAY_NAMES";
 const LABEL_MAIN: &str = "LABEL.MAIN_CONFIG";
 const LABEL_OPTIONS: &str = "LABEL.OPTIONS";
-const LABEL_BOUQUETS: &str = "LABEL.BOUQUETS";
 const LABEL_CURATION_CATALOG_SELECTION_FULL: &str = "LABEL.TRAKT_CATALOG_SELECTION_FULL";
 const LABEL_CURATION_CATALOG_SELECTION_CURATED: &str = "LABEL.TRAKT_CATALOG_SELECTION_CURATED";
 

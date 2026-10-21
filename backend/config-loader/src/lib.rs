@@ -13,8 +13,7 @@ use shared::{
     model::{
         ApiProxyConfigDto, AppConfigDto, ConfigDto, ConfigInputAliasDto, ConfigPaths, HdHomeRunDeviceOverview,
         InputType, ManagedFilterRule, PatternTemplate, PlansConfigDto, Prepare, SourcesConfigDto, TargetUserDto,
-        TemplateDefinitionDto,
-        UserPlanDto,
+        TemplateDefinitionDto, UserPlanDto,
     },
     utils::PROVIDER_SCHEME_PREFIX,
 };
@@ -1052,10 +1051,7 @@ async fn build_templates_to_persist(
     let template_bundle =
         read_templates(template_file_path, true, source_inline_templates, mapping_inline_templates.as_deref())?;
     let prepared_templates = if let Some(rules) = filter_rules {
-        let existing_templates = template_bundle
-            .definition
-            .map(|definition| definition.templates)
-            .unwrap_or_default();
+        let existing_templates = template_bundle.definition.map(|definition| definition.templates).unwrap_or_default();
         let merged = merge_managed_filter_rule_templates(existing_templates, rules)?;
         let mut templates = merged.templates;
         Some(prepare_templates(&mut templates)?)
@@ -1097,13 +1093,9 @@ pub fn merge_managed_filter_rule_templates(
     existing: impl IntoIterator<Item = PatternTemplate>,
     rules: &[ManagedFilterRule],
 ) -> Result<TemplateDefinitionDto, TuliproxError> {
-    let mut templates = existing
-        .into_iter()
-        .filter(|template| !template.is_managed_filter_rule())
-        .collect::<Vec<_>>();
-    templates.extend(
-        managed_filter_rule_templates(rules).map_err(|error| TuliproxError::FilterParse(error.to_string()))?,
-    );
+    let mut templates = existing.into_iter().filter(|template| !template.is_managed_filter_rule()).collect::<Vec<_>>();
+    templates
+        .extend(managed_filter_rule_templates(rules).map_err(|error| TuliproxError::FilterParse(error.to_string()))?);
     let mut prepared = templates.clone();
     prepare_templates(&mut prepared)?;
     Ok(TemplateDefinitionDto { templates })
@@ -1116,7 +1108,8 @@ pub fn managed_filter_rule_template_file(app_config: &Arc<AppConfig>) -> String 
     let resolved = utils::resolve_template_file_path(&paths.config_path, configured);
     let resolved_path = PathBuf::from(&resolved);
     if resolved_path.is_dir()
-        || configured.is_some_and(|path| path.ends_with('/') || path.ends_with('\\') || Path::new(path).extension().is_none())
+        || configured
+            .is_some_and(|path| path.ends_with('/') || path.ends_with('\\') || Path::new(path).extension().is_none())
     {
         resolved_path.join("tuliprox-filter-rules.yml").to_string_lossy().to_string()
     } else {
@@ -1124,7 +1117,7 @@ pub fn managed_filter_rule_template_file(app_config: &Arc<AppConfig>) -> String 
     }
 }
 
-pub async fn build_managed_filter_rule_definition(
+pub fn build_managed_filter_rule_definition(
     app_config: &Arc<AppConfig>,
     rules: &[ManagedFilterRule],
     additional_templates: Option<&[PatternTemplate]>,

@@ -18,11 +18,10 @@ mod publication;
 mod target;
 #[cfg(test)]
 use episode::{
-    prepare_target_playlist_for_persistence,
     assign_local_series_info_episode_key, assign_media_server_series_info_episode,
     materialize_media_server_series_info_episodes, normalize_target_playlist_epg_ids,
-    rewrite_local_series_info_episode_virtual_id, rewrite_series_episode_parent_virtual_ids,
-    rewrite_series_info_episode_virtual_id,
+    prepare_target_playlist_for_persistence, rewrite_local_series_info_episode_virtual_id,
+    rewrite_series_episode_parent_virtual_ids, rewrite_series_info_episode_virtual_id,
 };
 pub use episode::{rewrite_provider_series_info_episode_virtual_id, ProviderEpisodeKey};
 #[cfg(test)]

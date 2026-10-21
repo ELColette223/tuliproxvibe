@@ -227,7 +227,8 @@ impl TargetIdMapping {
 
         // 2. Migration reconciliation: check if an existing record has this provider_id (legacy uuid migration)
         if provider_id > 0 {
-            let candidate = self.mem_by_virtual_id
+            let candidate = self
+                .mem_by_virtual_id
                 .values()
                 .find(|record| record.provider_id == provider_id && record.item_type == item_type)
                 .map(|record| (record.virtual_id, record.uuid));
@@ -249,8 +250,7 @@ impl TargetIdMapping {
         // 3. New entry: allocate new virtual_id
         self.virtual_id_counter += 1;
         let virtual_id = self.virtual_id_counter;
-        let record =
-            VirtualIdRecord::new(provider_id, VirtualId::new(virtual_id), item_type, parent_virtual_id, *uuid);
+        let record = VirtualIdRecord::new(provider_id, VirtualId::new(virtual_id), item_type, parent_virtual_id, *uuid);
 
         self.pending_virtual_id_upserts.insert(VirtualId::new(virtual_id), record.clone());
         self.pending_uuid_upserts.insert(*uuid, virtual_id);
@@ -475,7 +475,8 @@ mod tests {
 
         // 3. Test legacy UUID migration to stable UUID
         // Suppose channel "Record SP SD" had provider_id 20000 and legacy UUID
-        let legacy_uuid_record = shared::utils::generate_provider_playlist_uuid("erizadez79", "20000", PlaylistItemType::Live);
+        let legacy_uuid_record =
+            shared::utils::generate_provider_playlist_uuid("erizadez79", "20000", PlaylistItemType::Live);
         let stable_uuid_record = shared::utils::generate_stable_channel_uuid(
             "erizadez79",
             "Canais ⫸ Rede Record",
