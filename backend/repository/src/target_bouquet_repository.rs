@@ -1,7 +1,7 @@
 use log::debug;
 use shared::{
     error::TuliproxError,
-    model::{TargetBouquetDto, TargetBouquetFileDto, TARGET_BOUQUET_VERSION},
+    model::{TargetBouquetCategorySelectionDto, TargetBouquetDto, TargetBouquetFileDto},
 };
 use std::{
     collections::HashSet,
@@ -81,7 +81,7 @@ pub async fn load_target_bouquet(
         TuliproxError::TargetBouquet(format!("Failed to parse target bouquet YAML in {}: {err}", file_path.display()))
     })?;
 
-    if dto.version != TARGET_BOUQUET_VERSION {
+    if !dto.is_supported_version() {
         return Err(TuliproxError::TargetBouquet(format!(
             "Unsupported target bouquet version {} in {}",
             dto.version,
@@ -127,6 +127,48 @@ pub async fn save_target_bouquet(
 
     debug!("Saved target bouquet for '{}' to {}", target_name, file_path.display());
     Ok(())
+}
+
+/// Re-read the current saved visual selection under the same mutation/file locks
+/// used by saves. Newly observed categories are selected; known categories keep
+/// their explicitly included IDs, including an empty selection. No-op for absent
+/// or legacy v2 bouquets, preserving the user's most recent edit.
+pub async fn merge_target_bouquet_selection_snapshot(
+    app_config: &AppConfig,
+    target_name: &str,
+    categories: Vec<TargetBouquetCategorySelectionDto>,
+) -> Result<(), TuliproxError> {
+    let paths = app_config.paths.load();
+    let file_path = target_bouquet_path(Path::new(&paths.config_path), target_name);
+    let _mutation_lock = app_config.file_locks.write_lock_str(TARGET_BOUQUET_MUTATION_LOCK).await;
+    let _file_lock = app_config.file_locks.write_lock(&file_path).await;
+
+    let content = match tokio::fs::read_to_string(&file_path).await {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(TuliproxError::TargetBouquet(format!(
+                "Failed to read bouquet file {}: {err}",
+                file_path.display()
+            )))
+        }
+    };
+    let mut dto: TargetBouquetFileDto = serde_saphyr::from_str(&content).map_err(|err| {
+        TuliproxError::TargetBouquet(format!("Failed to parse target bouquet YAML in {}: {err}", file_path.display()))
+    })?;
+    if !dto.is_supported_version() || dto.target != target_name {
+        return Err(TuliproxError::TargetBouquet(format!("Invalid target bouquet in {}", file_path.display())));
+    }
+    let Some(selection) = dto.bouquet.selection.as_mut() else {
+        return Ok(());
+    };
+    selection.merge_snapshot(categories);
+    dto.canonicalize();
+    let yaml = serde_saphyr::to_string(&dto)
+        .map_err(|err| TuliproxError::TargetBouquet(format!("Failed to serialize target bouquet to YAML: {err}")))?;
+    write_text_file_atomic(&file_path, &yaml).await.map_err(|err| {
+        TuliproxError::TargetBouquet(format!("Failed to write target bouquet {}: {err}", file_path.display()))
+    })
 }
 
 /// Deletes a target bouquet file idempotently.
@@ -407,9 +449,9 @@ pub async fn apply_target_bouquet_mutations_locked(
         let mut dto: TargetBouquetFileDto = serde_saphyr::from_str(content).map_err(|err| {
             TuliproxError::TargetBouquet(format!("Failed to parse source bouquet file {}: {err}", old_path.display()))
         })?;
-        if dto.version != TARGET_BOUQUET_VERSION || dto.target != *old_name {
+        if !dto.is_supported_version() || dto.target != *old_name {
             return Err(TuliproxError::TargetBouquet(format!(
-                "Source bouquet {} does not match target '{old_name}' or version {TARGET_BOUQUET_VERSION}",
+                "Source bouquet {} does not match target '{old_name}' or a supported bouquet version",
                 old_path.display()
             )));
         }
@@ -547,6 +589,48 @@ mod tests {
         model::{Config, MediaToolCapabilities, SourcesConfig},
         utils::FileLockManager,
     };
+
+    #[tokio::test]
+    async fn visual_snapshot_merge_preserves_known_exclusions_and_legacy() {
+        let dir = TempDir::new().unwrap();
+        let config = test_app_config(dir.path().to_str().unwrap());
+        let known = TargetBouquetCategorySelectionDto {
+            cluster: shared::model::XtreamCluster::Live,
+            name: "News".into(),
+            included_channel_ids: vec![],
+        };
+        let bouquet = TargetBouquetDto::whitelist(PlaylistClusterBouquetDto::default()).with_selection(
+            shared::model::TargetBouquetSelectionDto { categories: vec![known.clone()], base_filter: None },
+        );
+        save_target_bouquet(&config, "visual", bouquet).await.unwrap();
+        merge_target_bouquet_selection_snapshot(
+            &config,
+            "visual",
+            vec![
+                TargetBouquetCategorySelectionDto { included_channel_ids: vec!["a".repeat(64)], ..known.clone() },
+                TargetBouquetCategorySelectionDto {
+                    cluster: shared::model::XtreamCluster::Video,
+                    name: "News".into(),
+                    included_channel_ids: vec!["b".repeat(64)],
+                },
+            ],
+        )
+        .await
+        .unwrap();
+        let saved = load_target_bouquet(&config, "visual").await.unwrap().unwrap();
+        assert_eq!(saved.version, shared::model::TARGET_BOUQUET_SELECTION_VERSION);
+        let selection = saved.bouquet.selection.unwrap();
+        assert!(!selection.allows(shared::model::XtreamCluster::Live, "News", &"a".repeat(64)));
+        assert!(selection.allows(shared::model::XtreamCluster::Video, "News", &"b".repeat(64)));
+
+        save_target_bouquet(&config, "legacy", TargetBouquetDto::whitelist(PlaylistClusterBouquetDto::default()))
+            .await
+            .unwrap();
+        merge_target_bouquet_selection_snapshot(&config, "legacy", vec![known]).await.unwrap();
+        let legacy = load_target_bouquet(&config, "legacy").await.unwrap().unwrap();
+        assert_eq!(legacy.version, shared::model::TARGET_BOUQUET_VERSION);
+        assert!(legacy.bouquet.selection.is_none());
+    }
 
     fn test_app_config(config_path: &str) -> AppConfig {
         AppConfig {

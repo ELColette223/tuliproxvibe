@@ -98,6 +98,7 @@ fn processing_context() -> PlaylistProcessingContext<shared::model::NoopSink> {
         partial_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         had_quality_rejections: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         maintenance: None,
+        offline_target_reprocess: false,
     }
 }
 
@@ -554,7 +555,7 @@ fn after_epg_hook_runs_on_source_already_deduplicated_by_processing_pipe() {
         FetchedPlaylist { input: &input, source: memory_source(vec![channel.clone(), channel]), epg: None };
     let mut duplicates = HashSet::new();
     let (mut processed, _outcome) =
-        execute_pipe(&target, &get_processing_pipe(&target), &mut fetched, &mut duplicates, false, None)
+        execute_pipe(&target, &get_processing_pipe(&target), &mut fetched, &mut duplicates, false, None, None)
             .expect("processing pipe must run");
     assert_eq!(processed.get_channel_count(), 1, "processing pipe must remove the duplicate");
 

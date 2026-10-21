@@ -170,7 +170,10 @@ use self::{
 };
 pub use self::{
     body::{get_remote_content_as_stream, text_response_error_log_label},
-    client::{create_client, create_client_with_redirect, create_tmdb_client, get_client_request},
+    client::{
+        create_client, create_client_with_redirect, create_input_http_client, create_input_http_client_no_redirect,
+        create_input_http_client_with_redirect, create_tmdb_client, get_client_request,
+    },
     destination::{classify_ip, is_public_ip, resolve_public_socket_addrs, resolve_resource_socket_addrs},
     download::{
         classify_resource_destination, download_text_content, download_text_content_as_stream,

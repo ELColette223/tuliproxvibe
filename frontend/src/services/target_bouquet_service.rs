@@ -5,13 +5,31 @@ use crate::{
 use gloo_net::http::Request;
 use js_sys::{encode_uri_component, Reflect, Uint8Array};
 use shared::{
-    model::{TargetBouquetDto, TargetBouquetStatusDto, TargetBouquetStreamEventDto},
+    model::{TargetBouquetDto, TargetBouquetStatusDto, TargetBouquetStreamEventDto, XtreamCluster},
     utils::concat_path_leading_slash,
 };
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
 const MAX_STREAM_EVENT_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct TargetChannelInventoryItemDto {
+    pub id: String,
+    pub input: String,
+    pub name: String,
+    pub group: String,
+    pub logo: String,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct TargetChannelInventoryPageDto {
+    pub channels: Vec<TargetChannelInventoryItemDto>,
+    pub next_cursor: Option<String>,
+    pub unavailable_inputs: Vec<String>,
+    /// `unavailable` when no raw input cache exists, `empty` when available but no results.
+    pub status: String,
+}
 
 #[derive(Default)]
 struct JsonArrayEventDecoder {
@@ -156,22 +174,71 @@ impl TargetBouquetService {
         format!("{endpoint_url}?target={encoded_name}")
     }
 
+    pub async fn fetch_target_channel_inventory(
+        target_name: &str,
+        cluster: XtreamCluster,
+        category: &str,
+        cursor: Option<String>,
+    ) -> Result<TargetChannelInventoryPageDto, Error> {
+        let cluster_name = match cluster {
+            XtreamCluster::Live => "live",
+            XtreamCluster::Video => "video",
+            XtreamCluster::Series => "series",
+        };
+        let mut url = format!(
+            "{}&cluster={cluster_name}&group={}&limit=500",
+            Self::target_url(target_name, "channels"),
+            encode_uri_component(category)
+        );
+        if let Some(cursor) = cursor {
+            url.push_str("&cursor=");
+            let encoded_cursor: String = encode_uri_component(&cursor).into();
+            url.push_str(&encoded_cursor);
+        }
+        request_get::<TargetChannelInventoryPageDto>(&url, None, Some(Encoding::Json)).await?.ok_or(Error::NotFound)
+    }
+
     pub async fn fetch_target_status(target_name: &str) -> Result<TargetBouquetStatusDto, Error> {
         request_get::<TargetBouquetStatusDto>(&Self::target_url(target_name, "status"), None, Some(Encoding::Json))
             .await?
             .ok_or(Error::NotFound)
     }
 
+    /// Streams the complete channel inventory of every input connected to the
+    /// target in one bounded event stream, so a save needs a single pass over
+    /// the raw inputs instead of one scan per category.
+    pub async fn fetch_target_inventory_stream<F>(
+        target_name: &str,
+        abort_signal: Option<web_sys::AbortSignal>,
+        on_event: F,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(TargetBouquetStreamEventDto),
+    {
+        Self::stream_events(Self::target_url(target_name, "inventory"), abort_signal, on_event).await
+    }
+
     /// Loads the selected target's bounded event stream and dispatches decoded events in wire order.
     pub async fn fetch_target_bouquet_stream<F>(
         target_name: &str,
+        abort_signal: Option<web_sys::AbortSignal>,
+        on_event: F,
+    ) -> Result<(), Error>
+    where
+        F: FnMut(TargetBouquetStreamEventDto),
+    {
+        let url = Self::target_url(target_name, "groups");
+        Self::stream_events(url, abort_signal, on_event).await
+    }
+
+    async fn stream_events<F>(
+        url: String,
         abort_signal: Option<web_sys::AbortSignal>,
         mut on_event: F,
     ) -> Result<(), Error>
     where
         F: FnMut(TargetBouquetStreamEventDto),
     {
-        let url = Self::target_url(target_name, "groups");
         let mut request = Request::get(&url).header("Accept", "application/json").abort_signal(abort_signal.as_ref());
         if let Some(token) = get_token() {
             request = request.header("Authorization", format!("Bearer {token}").as_str());

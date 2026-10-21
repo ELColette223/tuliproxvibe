@@ -34,9 +34,9 @@ use shared::{
     error::TuliproxError,
     model::{
         ConfigInputAliasDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto, ConfigInputUpdateQualityDto,
-        ConfigProviderDto, EpgSmartMatchConfigDto, EpgSourceDto, FlussonicHlsCatchup, InputFetchMethod, InputType,
-        MediaServerInputConfigDto, MediaServerLibrarySelector, OnConnectErrorPolicy, ProviderUrlSelectionPolicy,
-        StagedInputType, StalkerDeviceProfileDto, StalkerInputConfigDto,
+        ConfigProviderDto, ConnectionLimitPolicy, EpgSmartMatchConfigDto, EpgSourceDto, FlussonicHlsCatchup,
+        InputFetchMethod, InputType, MediaServerInputConfigDto, MediaServerLibrarySelector, OnConnectErrorPolicy,
+        ProviderUrlSelectionPolicy, ProxyConfigDto, StagedInputType, StalkerDeviceProfileDto, StalkerInputConfigDto,
     },
     utils::{Internable, BATCH_SCHEME_PREFIX},
 };
@@ -87,6 +87,11 @@ const LABEL_XTREAM_LIVE_STREAM_USE_PREFIX: &str = "LABEL.LIVE_STREAM_USE_PREFIX"
 const LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION: &str = "LABEL.LIVE_STREAM_WITHOUT_EXTENSION";
 const LABEL_DISABLE_HLS_STREAMING: &str = "LABEL.DISABLE_HLS_STREAMING";
 const LABEL_USER_AGENT_STREAM_INDEX: &str = "LABEL.USER_AGENT_STREAM_INDEX";
+pub(super) const LABEL_CONNECTION_LIMIT_POLICY: &str = "LABEL.CONNECTION_LIMIT_POLICY";
+pub(super) const LABEL_CONNECTION_LIMIT_POLICY_STRICT: &str = "LABEL.CONNECTION_LIMIT_POLICY_STRICT";
+pub(super) const LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP: &str =
+    "LABEL.CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP";
+pub(super) const LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL: &str = "LABEL.CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL";
 const LABEL_FLUSSONIC_HLS_AUDIO_TRACKS: &str = "LABEL.FLUSSONIC_HLS_AUDIO_TRACKS";
 const LABEL_RESOLVE_TMDB: &str = "LABEL.RESOLVE_TMDB";
 const LABEL_RESOLVE: &str = "LABEL.RESOLVE";
@@ -213,6 +218,14 @@ fn provider_url_selection_policy_label_key(policy: ProviderUrlSelectionPolicy) -
     match policy {
         ProviderUrlSelectionPolicy::ResumeLastWorking => LABEL_PROVIDER_URL_SELECTION_RESUME_LAST_WORKING,
         ProviderUrlSelectionPolicy::RestartFromFirst => LABEL_PROVIDER_URL_SELECTION_RESTART_FROM_FIRST,
+    }
+}
+
+pub(super) fn connection_limit_policy_label_key(policy: ConnectionLimitPolicy) -> &'static str {
+    match policy {
+        ConnectionLimitPolicy::Strict => LABEL_CONNECTION_LIMIT_POLICY_STRICT,
+        ConnectionLimitPolicy::BypassLocalCap => LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP,
+        ConnectionLimitPolicy::RotateOnFull => LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL,
     }
 }
 
@@ -364,6 +377,7 @@ generate_form_reducer!(
       SkipVod => skip_vod: bool,
       SkipSeries => skip_series: bool,
       UpdateQuality => update_quality: ConfigInputUpdateQualityDto,
+      ConnectionLimitPolicy => connection_limit_policy: ConnectionLimitPolicy,
       XtreamLiveStreamUsePrefix => xtream_live_stream_use_prefix: bool,
       XtreamLiveStreamWithoutExtension => xtream_live_stream_without_extension: bool,
       DisableHlsStreaming => disable_hls_streaming: bool,
@@ -395,6 +409,7 @@ generate_form_reducer!(
         Url => url: String,
         Username => username: Option<String>,
         Password => password: Option<String>,
+        Proxy => proxy: Option<ProxyConfigDto>,
         Persist => persist: Option<String>,
         Enabled => enabled: bool,
         Priority => priority: i16,
@@ -912,6 +927,7 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                         input_type={input_form_state.form.input_type}
                         stalker_auth_mode={stalker_config_state.auth_mode}
                         providers={(*providers_state).clone()}
+                        proxy={input_form_state.form.proxy.clone()}
                         initial={(*edit_alias).clone()}
                         on_submit={handle_add_alias_item}
                         on_cancel={handle_close_add_alias_item}

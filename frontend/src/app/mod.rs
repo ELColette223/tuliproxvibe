@@ -23,7 +23,9 @@ use yew::prelude::*;
 use yew_hooks::{use_async_with_options, UseAsyncOptions};
 use yew_router::prelude::*;
 
-const STATIC_ASSET_VERSION: &str = env!("CARGO_PKG_VERSION");
+// Version assets by crate version plus a build-time timestamp so updated
+// translations/icons are picked up even when the crate version is unchanged.
+const STATIC_ASSET_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-", env!("BUILD_TIMESTAMP"));
 
 /// App routes
 #[derive(Routable, Debug, Clone, PartialEq, Eq)]
@@ -267,7 +269,7 @@ mod tests {
     fn versioned_static_asset_url_appends_release_version() {
         assert_eq!(
             versioned_static_asset_url("assets/i18n/en.json"),
-            format!("assets/i18n/en.json?v={}", env!("CARGO_PKG_VERSION"))
+            format!("assets/i18n/en.json?v={STATIC_ASSET_VERSION}")
         );
     }
 
@@ -275,7 +277,7 @@ mod tests {
     fn versioned_static_asset_url_keeps_existing_query_params() {
         assert_eq!(
             versioned_static_asset_url("assets/i18n/en.json?lang=en"),
-            format!("assets/i18n/en.json?lang=en&v={}", env!("CARGO_PKG_VERSION"))
+            format!("assets/i18n/en.json?lang=en&v={STATIC_ASSET_VERSION}")
         );
     }
 
@@ -293,7 +295,7 @@ mod tests {
 
     #[test]
     fn versioned_config_url_uses_release_version() {
-        assert_eq!(versioned_config_url(), format!("config.json?v={}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(versioned_config_url(), format!("config.json?v={STATIC_ASSET_VERSION}"));
     }
 }
 

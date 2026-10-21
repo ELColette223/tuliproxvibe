@@ -29,14 +29,18 @@ use shared::{
     model::{
         permission::{Permission, PermissionSet},
         ApiProxyConfigDto, ApiProxyServerInfoDto, ConfigDto, ConfigTargetDto, InputFetchMethod, PlansConfigDto,
-        SourcesConfigDto, XtreamLoginRequest,
+        SourcesConfigDto, SourcesEditorSaveDto, TemplateDefinitionDto, XtreamLoginRequest,
     },
     utils::{
         parse_provider_scheme_url_parts, HEADER_CONFIG_API_PROXY_REVISION, HEADER_CONFIG_MAIN_REVISION,
         HEADER_CONFIG_SOURCES_REVISION, HEADER_IF_MATCH, PROVIDER_SCHEME_PREFIX,
     },
 };
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 fn file_revision_from_bytes(bytes: &[u8]) -> String { blake3::hash(bytes).to_hex().to_string() }
 
@@ -95,30 +99,11 @@ async fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>, std::io::Err
     }
 }
 
-async fn snapshot_template_file(
-    app_state: &Arc<AppState>,
-    should_persist: bool,
-) -> Result<Option<(String, Option<Vec<u8>>)>, std::io::Error> {
-    if !should_persist {
-        return Ok(None);
-    }
-    let path = {
-        let config = app_state.app_config.config.load();
-        let paths = app_state.app_config.paths.load();
-        tuliprox_core::utils::resolve_template_persist_file_path(
-            paths.template_file_path.as_deref().or(config.template_path.as_deref()),
-            &paths.config_path,
-        )
-    };
-    let content = read_optional_file(Path::new(&path)).await?;
-    Ok(Some((path, content)))
-}
-
 async fn roll_back_sources_after_update_failure(
     app_state: &Arc<AppState>,
     sources_file_path: &Path,
     original_sources_file: Option<&[u8]>,
-    template_snapshot: Option<(&Path, Option<&[u8]>)>,
+    template_snapshots: &[(PathBuf, Option<Vec<u8>>)],
     update_err: &TuliproxError,
 ) -> axum::response::Response {
     error!("Failed to complete sources configuration update: {update_err}");
@@ -134,8 +119,8 @@ async fn roll_back_sources_after_update_failure(
         )
             .into_response();
     }
-    if let Some((template_file_path, original_template_file)) = template_snapshot {
-        if let Err(rollback_err) = restore_sources_file(template_file_path, original_template_file).await {
+    for (template_file_path, original_template_file) in template_snapshots {
+        if let Err(rollback_err) = restore_sources_file(template_file_path, original_template_file.as_deref()).await {
             error!("Failed to roll back template config after target bouquet mutation failure: {rollback_err}");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -448,11 +433,13 @@ async fn save_config_main(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn save_config_sources(
     axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
     headers: HeaderMap,
-    axum::extract::Json(sources): axum::extract::Json<SourcesConfigDto>,
+    axum::extract::Json(request): axum::extract::Json<SourcesEditorSaveDto>,
 ) -> impl axum::response::IntoResponse + Send {
+    let SourcesEditorSaveDto { sources, filter_rules } = request;
     let sources_file_path = app_state.app_config.paths.load().sources_file_path.clone();
     let _source_lock = app_state.app_config.file_locks.write_lock(Path::new(&sources_file_path)).await;
     let _bouquet_mutation_lock =
@@ -470,6 +457,44 @@ async fn save_config_sources(
     {
         return response;
     }
+    let templates_to_persist = match crate::config_loader::validate_source_config_with_filter_rules_for_persist(
+        &app_state.app_config,
+        &sources,
+        filter_rules.as_deref(),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(err) => {
+            error!("Failed to validate source.yml {err}");
+            return (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()})))
+                .into_response();
+        }
+    };
+
+    let managed_template_update = if let Some(rules) = filter_rules.as_ref() {
+        let additional_templates = templates_to_persist.as_ref().map(|definition| definition.templates.as_slice());
+        match crate::config_loader::build_managed_filter_rule_definition(
+            &app_state.app_config,
+            rules,
+            additional_templates,
+        ) {
+            Ok(update) => Some(update),
+            Err(err) => {
+                error!("Failed to validate managed filter rules: {err}");
+                return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()}))).into_response();
+            }
+        }
+    } else {
+        None
+    };
+    let managed_template_path = managed_template_update.as_ref().map(|(path, _)| path.clone());
+    let _managed_template_lock = if let Some(path) = managed_template_path.as_ref() {
+        Some(app_state.app_config.file_locks.write_lock(Path::new(path)).await)
+    } else {
+        None
+    };
+
     let original_sources_file = match read_optional_file(Path::new(&sources_file_path)).await {
         Ok(content) => content,
         Err(err) => {
@@ -478,31 +503,49 @@ async fn save_config_sources(
         }
     };
 
-    let templates_to_persist =
-        match crate::config_loader::validate_source_config_for_persist(&app_state.app_config, &sources).await {
-            Ok(value) => value,
-            Err(err) => {
-                error!("Failed to validate source.yml {err}");
-                return (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()})))
-                    .into_response();
-            }
-        };
+    let mut template_updates = Vec::<(String, TemplateDefinitionDto)>::new();
+    let mut snapshots = Vec::<(PathBuf, Option<Vec<u8>>)>::new();
 
-    let template_snapshot = match snapshot_template_file(&app_state, templates_to_persist.is_some()).await {
-        Ok(snapshot) => snapshot,
-        Err(err) => {
-            error!("Failed to snapshot template config before save: {err}");
-            return internal_server_error!();
+    let template_persist_path = crate::config_loader::template_persist_file(&app_state.app_config);
+    let managed_update_ref = managed_template_update.as_ref();
+
+    // Inline templates are migrated into template.yml (or the default file for directory
+    // template paths). Managed visual rules land in their own deterministic file, or in the
+    // same file when the configured template path resolves to a single file.
+    if templates_to_persist.is_some() {
+        template_updates.push((template_persist_path.clone(), templates_to_persist.clone().unwrap_or_default()));
+    }
+    if let Some((path, definition)) = managed_update_ref {
+        if *path != template_persist_path {
+            template_updates.push((path.clone(), definition.clone()));
+        } else if let Some((_, target)) = template_updates.iter_mut().find(|(update_path, _)| *update_path == *path) {
+            *target = definition.clone();
+        } else {
+            template_updates.push((path.clone(), definition.clone()));
         }
-    };
+    }
 
-    if let Some(template_definition) = templates_to_persist.as_ref() {
+    for (path, _) in &template_updates {
+        match read_optional_file(Path::new(path)).await {
+            Ok(content) => snapshots.push((PathBuf::from(path), content)),
+            Err(err) => {
+                error!("Failed to snapshot template file '{path}' before save: {err}");
+                return internal_server_error!();
+            }
+        }
+    }
+
+    for (applied_updates, (path, definition)) in template_updates.iter().enumerate() {
         if let Err(err) =
-            crate::config_loader::persist_templates_config(&app_state.app_config, template_definition).await
+            crate::config_loader::persist_templates_config_to_path(&app_state.app_config, path, definition).await
         {
-            error!("Failed to save template config {err}");
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(json!({"error": err.to_string()})))
-                .into_response();
+            error!("Failed to save template config '{path}': {err}");
+            for (snapshot_path, content) in snapshots.iter().take(applied_updates) {
+                if let Err(rollback_err) = restore_sources_file(snapshot_path, content.as_deref()).await {
+                    error!("Failed to roll back template config '{}': {rollback_err}", snapshot_path.display());
+                }
+            }
+            return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(json!({"error": err.to_string()}))).into_response();
         }
     }
 
@@ -513,11 +556,9 @@ async fn save_config_sources(
         Ok(_) => {}
         Err(err) => {
             error!("Failed to persist source.yml {err}");
-            if let Some((template_file_path, original_template_file)) = template_snapshot.as_ref() {
-                if let Err(rollback_err) =
-                    restore_sources_file(Path::new(template_file_path), original_template_file.as_deref()).await
-                {
-                    error!("Failed to roll back template config after source.yml save failure: {rollback_err}");
+            for (snapshot_path, content) in &snapshots {
+                if let Err(rollback_err) = restore_sources_file(snapshot_path, content.as_deref()).await {
+                    error!("Failed to roll back template config '{}': {rollback_err}", snapshot_path.display());
                 }
             }
             return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(json!({"error": err.to_string()})))
@@ -532,7 +573,7 @@ async fn save_config_sources(
             &app_state,
             Path::new(&sources_file_path),
             original_sources_file.as_deref(),
-            template_snapshot.as_ref().map(|(path, content)| (Path::new(path), content.as_deref())),
+            snapshots.as_slice(),
             &reload_err,
         )
         .await;
@@ -544,7 +585,7 @@ async fn save_config_sources(
             &app_state,
             Path::new(&sources_file_path),
             original_sources_file.as_deref(),
-            template_snapshot.as_ref().map(|(path, content)| (Path::new(path), content.as_deref())),
+            snapshots.as_slice(),
             &mutation_err,
         )
         .await;
@@ -829,7 +870,7 @@ async fn config_batch_content(
 
 async fn get_xtream_login_info(
     axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
-    axum::extract::Json(request): axum::extract::Json<XtreamLoginRequest>,
+    axum::extract::Json(mut request): axum::extract::Json<XtreamLoginRequest>,
 ) -> impl IntoResponse + Send {
     if request.url.trim().is_empty() {
         return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": "URL is required"}))).into_response();
@@ -839,6 +880,11 @@ async fn get_xtream_login_info(
     }
     if request.password.trim().is_empty() {
         return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": "Password is required"}))).into_response();
+    }
+    if let Some(proxy) = request.proxy.as_mut() {
+        if let Err(err) = proxy.prepare_input_proxy() {
+            return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()}))).into_response();
+        }
     }
 
     let providers = {
@@ -897,6 +943,7 @@ fn build_xtream_login_input_source(
         provider,
         username: Some(request.username.clone()),
         password: Some(request.password.clone()),
+        proxy: request.proxy.as_ref().map(crate::model::ProxyConfig::from),
         method: InputFetchMethod::GET,
         headers: HashMap::new(),
     })
@@ -1312,6 +1359,7 @@ mod tests {
             url: "provider://b1g".to_string(),
             username: "demo".to_string(),
             password: "secret".to_string(),
+            proxy: None,
             providers: None,
         };
 
@@ -1320,6 +1368,28 @@ mod tests {
 
         assert_eq!(input_source.url, "provider://b1g/player_api.php?username=demo&password=secret");
         assert_eq!(input_source.provider.as_ref().map(|provider| provider.name.as_ref()), Some("b1g"));
+        assert!(input_source.proxy.is_none());
+    }
+
+    #[test]
+    fn build_xtream_login_input_source_preserves_input_proxy() {
+        let request = XtreamLoginRequest {
+            url: "https://provider.example".to_string(),
+            username: "demo".to_string(),
+            password: "secret".to_string(),
+            proxy: Some(shared::model::ProxyConfigDto {
+                url: "http://proxy.example:8080".to_string(),
+                username: Some("proxy-user".to_string()),
+                password: Some("proxy-pass".to_string()),
+            }),
+            providers: None,
+        };
+
+        let input_source = build_xtream_login_input_source(&request, &[]).expect("proxied request should build");
+        let proxy = input_source.proxy.expect("request proxy should reach runtime input source");
+        assert_eq!(proxy.url, "http://proxy.example:8080");
+        assert_eq!(proxy.username.as_deref(), Some("proxy-user"));
+        assert_eq!(proxy.password.as_deref(), Some("proxy-pass"));
     }
 
     #[test]
@@ -1328,6 +1398,7 @@ mod tests {
             url: "provider://strong".to_string(),
             username: "bubble".to_string(),
             password: "gum".to_string(),
+            proxy: None,
             providers: Some(vec![ConfigProviderDto {
                 name: "strong".into(),
                 urls: vec!["http://strong.example".into()],
@@ -1355,6 +1426,7 @@ mod tests {
             url: "provider://strong".to_string(),
             username: "bubble".to_string(),
             password: "gum".to_string(),
+            proxy: None,
             providers: Some(vec![ConfigProviderDto {
                 name: "strong".into(),
                 urls: vec!["http://request.example".into()],
@@ -1463,7 +1535,7 @@ mod tests {
         let save_future = super::save_config_sources(
             axum::extract::State(Arc::clone(&app_state)),
             headers,
-            axum::Json(updated_sources),
+            axum::Json(shared::model::SourcesEditorSaveDto { sources: updated_sources, filter_rules: None }),
         );
         let response = tokio::time::timeout(Duration::from_secs(5), save_future)
             .await

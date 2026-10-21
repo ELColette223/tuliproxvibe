@@ -2,6 +2,7 @@ use crate::{
     hooks::use_service_context,
     model::EventMessage,
     services::{get_base_href, get_token, ActiveSocket, EventService},
+    utils::set_timeout,
 };
 use gloo_timers::callback::Timeout;
 use log::{error, trace, warn};
@@ -11,6 +12,7 @@ use shared::{
 };
 use std::{
     cell::{Cell, RefCell},
+    collections::VecDeque,
     rc::Rc,
 };
 use wasm_bindgen::closure::Closure;
@@ -20,6 +22,8 @@ use yew::prelude::*;
 const WS_RECONNECT_BASE_MS: u32 = 300;
 const WS_RECONNECT_MAX_MS: u32 = 3000;
 const DEFAULT_MAX_LOG_LINES: usize = 2000;
+/// Coalesce high-frequency TRACE/DEBUG bursts into one React/Yew update.
+const LOG_FLUSH_INTERVAL_MS: i32 = 100;
 
 fn reconnect_delay(attempt: u16) -> u32 {
     if attempt < 6 {
@@ -233,29 +237,61 @@ pub fn use_log_stream(options: UseLogStreamOptions) -> UseLogStreamHandle {
     *max_lines.borrow_mut() = options.max_lines;
     // WebSocket events can arrive before Yew renders the previous state update.
     let log_buffer = use_mut_ref(|| Rc::new(Vec::<LogEntry>::new()));
+    // Entries queued between flushes. `History` replaces the buffer and flushes immediately.
+    let pending_entries = use_mut_ref(VecDeque::<LogEntry>::new);
+    let flush_scheduled = use_mut_ref(|| false);
     let stream = use_mut_ref({
         let connected = connected.setter();
         let logs = logs.setter();
         let buffer = Rc::clone(&log_buffer);
         let max_lines = Rc::clone(&max_lines);
+        let pending_entries = Rc::clone(&pending_entries);
+        let flush_scheduled = Rc::clone(&flush_scheduled);
         move || {
-            LogStream::new(
-                Callback::from(move |value| connected.set(value)),
-                Callback::from(move |message| {
+            let flush = {
+                let buffer = Rc::clone(&buffer);
+                let logs = logs.clone();
+                let max_lines = Rc::clone(&max_lines);
+                let pending_entries = Rc::clone(&pending_entries);
+                move |entries: Vec<LogEntry>| {
                     let updated = {
                         let mut buffer = buffer.borrow_mut();
-                        match message {
-                            LogWsMessage::History(entries) => *buffer = Rc::new(entries),
-                            LogWsMessage::Entry(entry) => Rc::make_mut(&mut buffer).push(entry),
-                            _ => return,
-                        }
-                        let max_lines = *max_lines.borrow();
                         let list = Rc::make_mut(&mut buffer);
+                        list.extend(entries);
+                        let max_lines = *max_lines.borrow();
                         let excess = list.len().saturating_sub(max_lines);
                         list.drain(..excess);
                         Rc::clone(&buffer)
                     };
+                    pending_entries.borrow_mut().clear();
                     logs.set(updated);
+                }
+            };
+            LogStream::new(
+                Callback::from(move |value| connected.set(value)),
+                Callback::from(move |message| match message {
+                    LogWsMessage::History(entries) => flush(entries),
+                    LogWsMessage::Entry(entry) => {
+                        pending_entries.borrow_mut().push_back(entry);
+                        if *flush_scheduled.borrow() {
+                            return;
+                        }
+                        *flush_scheduled.borrow_mut() = true;
+                        let flush = flush.clone();
+                        let pending_entries = Rc::clone(&pending_entries);
+                        let flush_scheduled = Rc::clone(&flush_scheduled);
+                        set_timeout(
+                            move || {
+                                *flush_scheduled.borrow_mut() = false;
+                                let batch: Vec<LogEntry> = pending_entries.borrow_mut().drain(..).collect();
+                                if !batch.is_empty() {
+                                    flush(batch);
+                                }
+                            },
+                            LOG_FLUSH_INTERVAL_MS,
+                        );
+                    }
+                    _ => {}
                 }),
                 Rc::clone(&services.event),
             )
@@ -265,7 +301,9 @@ pub fn use_log_stream(options: UseLogStreamOptions) -> UseLogStreamHandle {
 
     let clear = {
         let logs = logs.setter();
+        let pending_entries = Rc::clone(&pending_entries);
         Callback::from(move |()| {
+            pending_entries.borrow_mut().clear();
             let empty = Rc::new(Vec::new());
             *log_buffer.borrow_mut() = Rc::clone(&empty);
             logs.set(empty);

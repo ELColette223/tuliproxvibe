@@ -259,6 +259,7 @@ pub(in crate::utils::network::request::tests) fn test_input_source(
         provider,
         username: None,
         password: None,
+        proxy: None,
         method: InputFetchMethod::GET,
         headers: HashMap::new(),
     }

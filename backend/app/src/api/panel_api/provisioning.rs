@@ -770,7 +770,13 @@ pub(super) async fn probe_panel_api_test_url(
     input_source: &InputSource,
     method: PanelApiProvisioningMethod,
 ) -> Result<StatusCode, io::Error> {
-    let client = app_state.http_clients.default.load();
+    let global_client = app_state.http_clients.default.load();
+    let client = tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &global_client,
+        input_source.proxy.as_ref(),
+    )
+    .map_err(|err| string_to_io_error(format!("Failed to create input proxy client: {err}")))?;
     let request_method = provisioning_method_to_reqwest(method);
     let test_url = Url::parse(input_source.url.as_str()).map_err(|err| {
         string_to_io_error(format!(

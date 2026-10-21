@@ -33,6 +33,7 @@ pub const PROVIDER_END_ERROR: u8 = 2;
 pub const PROVIDER_END_PREEMPTED: u8 = 3;
 
 // Preempted by higher priority
+pub const PROVIDER_END_SUBSCRIBER_LAGGED: u8 = 4; // Subscriber fell behind burst buffer
 const PREEMPT_REENTRY_BLOCK_SECS: u64 = 3;
 
 // Bounded wait for a mandatory cleanup admission right before a request registration.

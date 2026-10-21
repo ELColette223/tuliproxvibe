@@ -1426,3 +1426,40 @@ async fn guarded_resource_registration_rechecks_user_capacity_at_commit() -> Res
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn shared_stream_key_is_stored_on_the_session() {
+    let config = Config::default();
+    let geoip = Arc::new(ArcSwapOption::<GeoIp>::default());
+    let event_manager = Arc::new(EventManager::new());
+    let manager = ActiveUserManager::new(&config, &geoip, &event_manager);
+    let addr = SocketAddr::from(([127, 0, 0, 1], 55_501));
+    let mut user = ProxyUserCredentials::default();
+    user.username = "shared-key-user".to_string();
+
+    manager
+        .create_user_session(CreateUserSessionParams {
+            user: &user,
+            session_token: "shared-key-session",
+            virtual_id: 42,
+            provider: "provider-a",
+            stream_url: "http://localhost/live/42.ts",
+            addr: &addr,
+            connection_permission: UserConnectionPermission::Allowed,
+            connection_kind: Some(ConnectionKind::Normal),
+            socket_bound: false,
+        })
+        .await;
+
+    assert!(
+        manager.set_session_shared_stream_key(&user.username, "shared-key-session", "mpegts:input:origin-42").await
+    );
+    assert!(manager
+        .get_and_update_user_session(&user.username, "shared-key-session")
+        .await
+        .is_some_and(|session| session.shared_stream_key.as_deref() == Some("mpegts:input:origin-42")));
+    assert!(manager
+        .get_and_update_user_session(&user.username, "other-session")
+        .await
+        .is_none_or(|session| session.shared_stream_key.is_none()));
+}

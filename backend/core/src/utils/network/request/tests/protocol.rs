@@ -610,6 +610,7 @@ async fn manual_redirect_provider_failover_restarts_from_provider_entry() {
         provider: Some(provider),
         username: None,
         password: None,
+        proxy: None,
         method: InputFetchMethod::GET,
         headers: HashMap::default(),
     };

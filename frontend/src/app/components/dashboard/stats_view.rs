@@ -50,7 +50,8 @@ pub fn StatsView(props: &StatsViewProps) -> Html {
         connections: Rc::from([SparklineSeries::new(MetricsHistory::as_vec(&history.connections))]),
     });
 
-    let logs_expanded = use_state(|| true);
+    // Collapsed by default so TRACE/DEBUG server config cannot open a live WS flood on Stats load.
+    let logs_expanded = use_state(|| false);
     let on_logs_toggle = {
         let logs_expanded = logs_expanded.clone();
         Callback::from(move |expanded: bool| {

@@ -396,12 +396,14 @@ mod tests {
             name: "groups".to_owned(),
             value: TemplateValue::Single("Sports".to_owned()),
             placeholder: String::new(),
+            filter_rule: None,
         };
         groups.prepare();
         let mut secret = PatternTemplate {
             name: "invalid_regex".to_owned(),
             value: TemplateValue::Single("private-template-value[".to_owned()),
             placeholder: String::new(),
+            filter_rule: None,
         };
         secret.prepare();
         app_state.app_config.api_proxy.store(Some(Arc::new(ApiProxyConfig {

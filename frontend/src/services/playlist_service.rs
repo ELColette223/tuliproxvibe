@@ -60,6 +60,14 @@ impl PlaylistService {
         self.submit_update_request(&request).await.is_ok()
     }
 
+    pub async fn reprocess_target(&self, target_name: &str) -> Result<(), Error> {
+        let base_href = get_base_href();
+        let encoded_name: String = js_sys::encode_uri_component(target_name).into();
+        let url = concat_path_leading_slash(&base_href, &format!("api/v1/playlist/target/{encoded_name}/reprocess"));
+        request_post::<&(), serde_json::Value>(&url, &(), None, None).await?;
+        Ok(())
+    }
+
     pub async fn update_all_inputs(&self) -> Result<OperationRunAccepted, Error> {
         self.submit_update_request(&build_playlist_update_bulk_request()).await
     }

@@ -675,6 +675,31 @@ impl ActiveProviderManager {
         kind: ConnectionKind,
         lease: Option<PlaybackLeaseRef<'_>>,
     ) -> Option<ProviderHandle> {
+        self.acquire_connection_with_lease_for_session_await_excluding(
+            input_name,
+            addr,
+            allow_grace,
+            priority,
+            kind,
+            lease,
+            &HashSet::new(),
+        )
+        .await
+    }
+
+    /// Same as [`Self::acquire_connection_with_lease_for_session_await`], but skips already-tried accounts.
+    /// Source-level rotate-on-full uses this so a provider that just rejected the open is not retried.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn acquire_connection_with_lease_for_session_await_excluding(
+        &self,
+        input_name: &Arc<str>,
+        addr: &SocketAddr,
+        allow_grace: bool,
+        priority: i8,
+        kind: ConnectionKind,
+        lease: Option<PlaybackLeaseRef<'_>>,
+        excluded_providers: &HashSet<Arc<str>>,
+    ) -> Option<ProviderHandle> {
         let params = AcquireProviderParams { addr, priority, kind, lease };
         let outcome = {
             if self.is_shutting_down.load(Ordering::Acquire) {
@@ -684,8 +709,14 @@ impl ActiveProviderManager {
             if self.is_shutting_down.load(Ordering::Acquire) {
                 return None;
             }
-            if let Some(handle) = self.acquire_connection_inner_no_preempt(input_name, allow_grace, &params) {
+            if let Some(handle) =
+                self.acquire_connection_inner_no_preempt_excluding(input_name, allow_grace, &params, excluded_providers)
+            {
                 return Some(handle);
+            }
+            // Rotation retries must not cascade into preemption; only the first attempt may preempt.
+            if !excluded_providers.is_empty() {
+                return None;
             }
             self.try_preempt_connection_outcome(
                 input_name,
@@ -718,7 +749,7 @@ impl ActiveProviderManager {
                         Some(victim_gen),
                     );
                 }
-                self.acquire_connection_inner_no_preempt(input_name, allow_grace, &params)
+                self.acquire_connection_inner_no_preempt_excluding(input_name, allow_grace, &params, excluded_providers)
             }
             PreemptionOutcome::Exhausted => None,
         }
@@ -920,6 +951,11 @@ impl ActiveProviderManager {
     pub fn active_connections(&self) -> Option<HashMap<Arc<str>, usize>> { self.providers.active_connections() }
 
     pub fn is_exhausted(&self, provider_name: &Arc<str>) -> bool { self.providers.is_exhausted(provider_name) }
+
+    /// Provider account names that belong to the same input pool.
+    pub fn provider_names_for_input(&self, input_name: &Arc<str>) -> Vec<Arc<str>> {
+        self.providers.provider_names_for_input(input_name)
+    }
 
     pub fn register_body_owner(&self, alloc_id: AllocationId) -> bool {
         let _transition = self.lock_capacity_transition();

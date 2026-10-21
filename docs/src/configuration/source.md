@@ -112,6 +112,10 @@ inputs:
     url: provider://my_failover_provider
     username: my_user
     password: my_password
+    proxy:
+      url: socks5h://proxy.example.com:1080
+      username: proxy_user
+      password: proxy_password
     enabled: true
     sequential_group: 1
     cache_duration: 1d
@@ -133,6 +137,7 @@ inputs:
 | `type`                  | Enum   |    No    | `m3u`   | Allowed: `m3u`, `xtream`, `stalker`, `library`, `staged`, `emby`, `jellyfin`, `plex` (see [Media server inputs](#27-media-server-inputs-plex-emby-jellyfin)), and `m3u_batch` / `xtream_batch` / `stalker_batch` (CSV offloading). Stalker inputs use the portal handshake/catalog flow instead of a plain playlist download.                                                                                                            |
 | `url`                   | String |   Yes    |         | The Provider URL. Tuliprox supports magic scheme prefixes: `http(s)://`, `file://`, `batch://`, and **`provider://my_failover_provider`** (for the Failover System above).                                                                                                                                                                                                                                                               |
 | `username` / `password` | String |  Often   |         | Mandatory for `xtream` and for Stalker inputs using `credentials_only` or `mac_plus_credentials`. Stalker inputs using `mac_only` do not need them. `emby` and `jellyfin` inputs may use them instead of a token (login bootstrap).                                                                                                                                                                                                      |
+| `proxy`                 | Object |    No    |         | Xtream-only outgoing proxy (`url`, optional `username` and `password`). When present, this input proxy replaces the global `config.yml` proxy for this input's playlist, EPG, account-expiry, metadata, probe, HLS, and playback requests. Aliases inherit it. Supported URL schemes: `http`, `https`, `socks5`, and `socks5h`. Without this block, the global proxy remains the fallback.                                               |
 | `enabled`               | Bool   |    No    | `true`  | If `false`, this input is completely ignored in all processing.                                                                                                                                                                                                                                                                                                                                                                          |
 | `sequential_group`      | Int    |    No    |         | Optional non-zero process-wide group ID. With `process_parallel: true`, complete refreshes of inputs sharing an ID run one after another, including all Stalker page slices. Different groups and ungrouped inputs may overlap. Not valid for `staged` inputs; a staged overlay inherits its provider job.                                                                                                                               |
 | `cache_duration`        | String |    No    | `0`     | **Crucial:** Determines how often Tuliprox actually downloads the raw list from the provider. At `1d` (1 day), Tuliprox serves from its local `.db` for 24 hours, even if you trigger hourly updates. This heavily protects against provider bans! Supported units are `s`, `m`, `h`, and `d`. If `cache_duration` is set, the cached provider playlist stored on disk is reused for subsequent updates instead of downloading it again. |
@@ -192,6 +197,32 @@ logic.
 | **`file://`**     | Local Storage   | Reads a playlist directly from the host filesystem. Useful for manual backups or pre-processed files.                                                                                                                                                                                                                         |
 | **`provider://`** | Failover System | Resolves the URL via internal `provider` definitions. **Pro-Tip:** Use this to implement automatic rotation or failover between multiple mirrors/gateways of the same provider. New requests honor `provider_url_selection_policy`, so they can either resume from the last healthy URL or always restart from the first URL. |
 | **`batch://`**    | CSV File        | Dedicated scheme for bulk alias management. Points to a local `;` separated CSV file (e.g., `batch://./aliases.csv`).                                                                                                                                                                                                         |
+
+### Per-input Xtream proxy
+
+An Xtream input can override the global outgoing proxy with its own `proxy` block:
+
+```yaml
+inputs:
+  - name: region-specific-provider
+    type: xtream
+    url: https://provider.example
+    username: account
+    password: secret
+    proxy:
+      url: socks5h://proxy.example:1080
+      username: proxy-user
+      password: proxy-secret
+```
+
+The override is all-or-nothing: once `inputs[].proxy` is defined, Tuliprox does not use the global `config.yml` proxy
+for that input. The same proxy is used for playlist import, automatic XMLTV, account login/expiration refresh,
+provider metadata, remote probes, reverse-proxy playback, and HLS manifests/resources. Input aliases inherit the parent
+proxy. Remove the input-level block to resume using the global proxy.
+
+Proxy credentials must be either both present or both omitted. Supported schemes are `http://`, `https://`, `socks5://`,
+and `socks5h://`; invalid URLs or unsupported schemes make the source configuration fail validation instead of falling
+back to the global proxy or a direct connection.
 
 ### Additional Notes
 
@@ -1621,27 +1652,43 @@ Parentheses make clear which questions belong together. Text values always use q
 the literal group name `EMPTY`, whereas `EpgId = EMPTY` without quotes is the short form of `EpgId IS EMPTY` and checks
 for a missing EPG ID. In practice, start with one simple question and add further conditions only when needed.
 
-#### Target bouquet filter in the Web UI
+#### Visual filter builder in the Web UI
 
-The Source Editor provides an additional **Bouquets** row below a target's regular filter settings. The row shows
-whether the target currently has no bouquet filter or summarizes the active mode and group count. Its action button
-opens the bouquet editor as a full-size stacked view; use the back button to return to the unchanged target form.
-The target shown in the title is informational because the editor always belongs to the target from which it was
-opened.
+The Source Editor target form and Playlists target table open a visual **keep selection** for actual categories and
+channels from the target's connected inputs. Each category can be expanded to choose individual channels. Selected
+categories have a green control; unselected categories and channels are excluded before rename, mapping, and target
+persistence. Selecting one channel automatically enables its category, but does not enable its siblings. Unselecting
+the last selected channel disables the category.
 
-The bouquet is an additional, target-specific group filter and supports two modes:
+Selecting a category marks its **currently known** channels. Newly discovered channels in an already known category
+remain unselected until explicitly chosen, even if all older channels were selected. A genuinely new category is
+selected by default with the channels found in its first complete, successfully published input snapshot; subsequent
+new channels in it are unselected. The selection is stored separately from `source.yml` in a version-3 target bouquet
+file, not compiled into the filter DSL. It uses stable input-scoped channel identities rather than channel names or
+output category numbers, and takes effect after the next playlist update. Missing input inventory never silently
+unselects saved channels. A wholly empty selection cannot be saved because an ordinary empty target publication
+retains the previous output.
 
-* **Whitelist** keeps only the selected groups.
-* **Blacklist** removes the selected groups and keeps the others.
+The existing `filter.processing` and `filter.persist` DSL expressions remain independent **advanced filters** for
+special cases. Existing shared rules and `!NAME!` templates continue to work as before; they are not needed to use
+the visual category/channel picker. Legacy version-2 group bouquets retain their original semantics until the user
+explicitly confirms conversion to the new visual selection.
 
-Live, VOD, and Series selections are independent. One cluster may intentionally have an empty selection while groups
-remain selected in another cluster. If no group is selected in any cluster, the bouquet is unrestricted and the target
-keeps all groups; a completely empty selection never means "publish an empty playlist". Saving or resetting the
-bouquet takes effect during the next playlist update.
+Shared rules are named, reusable filter trees. Linking a rule into a target keeps the link alive: editing the rule
+updates every target and stage that references it, and a rule that is still referenced somewhere cannot be deleted.
+Internally the catalog is stored as regular templates with metadata
+(see [Managed Filter Rules](./template.md#-managed-filter-rules-web-ui)); the `!TP_FILTER_RULE_*!` placeholders are
+generated by the UI and are not meant to be typed manually.
 
-The available groups are read from the raw catalogs produced by playlist processing. A new installation or deleted
-raw catalog therefore shows no available groups until a playlist update has completed. Missing catalogs and a missing
-saved bouquet are normal states, not configuration errors.
+#### Target bouquet compatibility
+
+The target's visual selection supersedes the old group-only bouquet editor. Previously saved version-2 bouquets
+continue to apply without change: whitelist includes named groups, blacklist excludes named groups, and an absent
+cluster is unrestricted. Converting an old bouquet to the visual category/channel selection requires an explicit
+confirmation in the editor. A version-3 selection records each known category and its chosen channel identities;
+unknown new categories are included with their first complete snapshot, while new channels in known categories are
+not included by default. The inventory comes from persisted raw inputs, so it may be unavailable until inputs have
+successfully updated. Saving a selection does not trigger a provider download.
 
 Bouquet files are associated with the unique target name rather than the transient numeric target ID used by the Web
 UI. Renaming a target through the Source Editor removes the bouquet stored under the old name; no bouquet is created or

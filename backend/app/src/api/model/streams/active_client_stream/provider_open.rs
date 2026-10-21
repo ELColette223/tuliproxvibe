@@ -220,6 +220,7 @@ pub(super) fn create_deferred_provider_open_future(
             stream_channel: Some(stream_channel),
             connect_failure_stage: Some(FailureStage::ProviderOpen),
             content_representation: stream_details.content_representation,
+            proxy: None,
         })
         .for_deferred_open();
     if stream_details.provider_handle.is_some() {
@@ -228,6 +229,7 @@ pub(super) fn create_deferred_provider_open_future(
         }
     }
     provider_stream_factory_options.set_provider(input.get_resolve_provider(stream_url.as_ref()));
+    provider_stream_factory_options.set_proxy(input.proxy.clone());
     provider_stream_factory_options.apply_input_options(&input);
 
     Some(DeferredProviderOpenState::Pending(Box::new(DeferredProviderOpenContext {

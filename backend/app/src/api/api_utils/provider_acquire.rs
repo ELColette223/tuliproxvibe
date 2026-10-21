@@ -292,6 +292,50 @@ pub(crate) async fn stream_response_with_provider_handle(
     app_state: &Arc<AppState>,
     session_token: &str,
     request_class: Option<PlaybackRequestClass>,
+    stream_channel: StreamChannel,
+    stream_url: &str,
+    pinned_provider: Option<&Arc<str>>,
+    req_headers: &HeaderMap,
+    input: &Arc<ConfigInput>,
+    target: &Arc<ConfigTarget>,
+    user: &ProxyUserCredentials,
+    connection_permission: UserConnectionPermission,
+    connection_kind: crate::api::model::ConnectionKind,
+    allow_exhausted_shared_reconnect: bool,
+    grace_mode: Option<crate::api::model::GraceMode>,
+    preacquired_provider_handle: Option<tuliprox_session::ManagedProviderHandle>,
+) -> impl IntoResponse + Send {
+    stream_response_with_shared_key(
+        fingerprint,
+        app_state,
+        session_token,
+        request_class,
+        stream_channel,
+        stream_url,
+        pinned_provider,
+        req_headers,
+        input,
+        target,
+        user,
+        connection_permission,
+        connection_kind,
+        allow_exhausted_shared_reconnect,
+        grace_mode,
+        preacquired_provider_handle,
+        None,
+    )
+    .await
+}
+
+/// Same as [`stream_response_with_provider_handle`], but keys a shared origin by a stable
+/// channel identity instead of the provider URL, so a reconnect lands on the same origin
+/// even when the provider rewrote the URL.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub(crate) async fn stream_response_with_shared_key(
+    fingerprint: &Fingerprint,
+    app_state: &Arc<AppState>,
+    session_token: &str,
+    request_class: Option<PlaybackRequestClass>,
     mut stream_channel: StreamChannel,
     stream_url: &str,
     pinned_provider: Option<&Arc<str>>,
@@ -304,6 +348,7 @@ pub(crate) async fn stream_response_with_provider_handle(
     allow_exhausted_shared_reconnect: bool,
     grace_mode: Option<crate::api::model::GraceMode>,
     preacquired_provider_handle: Option<tuliprox_session::ManagedProviderHandle>,
+    shared_stream_key: Option<&str>,
 ) -> impl IntoResponse + Send {
     if blocks_new_playback(app_state, input, user, preacquired_provider_handle.is_some()) {
         return admission_failure_response(
@@ -350,12 +395,23 @@ pub(crate) async fn stream_response_with_provider_handle(
     connection_permission = activation.admission.permission();
     connection_kind = activation.admission.kind().unwrap_or(connection_kind);
 
-    let allow_shared_reuse =
-        connection_permission != UserConnectionPermission::Exhausted || allow_exhausted_shared_reconnect;
-
     let share_stream = is_stream_share_enabled(item_type, target);
+    let shared_stream_key = shared_stream_key.filter(|_| share_stream);
+    let shared_key = shared_stream_key.unwrap_or(stream_url);
+    // An exhausted permission may only rejoin the very same shared origin it already holds.
+    let has_matching_shared_session =
+        app_state.active_users.get_and_update_user_session(&user.username, session_token).await.is_some_and(
+            |session| {
+                session.virtual_id == virtual_id
+                    && shared_stream_key.is_some()
+                    && session.shared_stream_key.as_deref() == Some(shared_key)
+            },
+        );
+    let allow_shared_reuse = connection_permission != UserConnectionPermission::Exhausted
+        || (allow_exhausted_shared_reconnect && has_matching_shared_session);
+
     let _shared_lock = if share_stream {
-        let write_lock = app_state.app_config.file_locks.write_lock_str(stream_url).await;
+        let write_lock = app_state.app_config.file_locks.write_lock_str(shared_key).await;
 
         if allow_shared_reuse {
             if let Some(value) = try_shared_stream_response_if_any(
@@ -369,6 +425,7 @@ pub(crate) async fn stream_response_with_provider_handle(
                 session_token,
                 req_headers,
                 activation.placeholder_transition_version,
+                shared_key,
             )
             .await
             {
@@ -391,6 +448,7 @@ pub(crate) async fn stream_response_with_provider_handle(
                 session_token,
                 req_headers,
                 activation.placeholder_transition_version,
+                shared_key,
             )
             .await
             {
@@ -603,7 +661,7 @@ pub(crate) async fn stream_response_with_provider_handle(
         };
         let mut metering = prepare_stream_metering(
             app_state,
-            stream_url,
+            shared_key,
             is_stream_shared,
             stream_details.stream.is_some(),
             stream_details.has_deferred_provider_open(),
@@ -722,7 +780,7 @@ pub(crate) async fn stream_response_with_provider_handle(
                         active_provider: &app_state.active_provider,
                         connection_manager: &app_state.connection_manager,
                     },
-                    stream_url,
+                    shared_key,
                     stream,
                     &fingerprint.addr,
                     shared_subscriber_id,
@@ -735,6 +793,10 @@ pub(crate) async fn stream_response_with_provider_handle(
                 )
                 .await
             {
+                let _ = app_state
+                    .active_users
+                    .set_session_shared_stream_key(&user.username, session_token, shared_key)
+                    .await;
                 metering.commit_shared_registration();
                 let (status_code, header_map) =
                     get_stream_response_with_headers(provider_response.map(|(h, s, _, _)| (h, s)));

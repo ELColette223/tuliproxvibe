@@ -1,3 +1,4 @@
+use crate::model::{ManagedFilterRule, ManagedFilterRuleMetadata};
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -28,6 +29,8 @@ impl Display for TemplateValue {
 pub struct PatternTemplate {
     pub name: String,
     pub value: TemplateValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter_rule: Option<ManagedFilterRuleMetadata>,
     #[serde(skip)]
     pub placeholder: String,
 }
@@ -40,5 +43,11 @@ impl PatternTemplate {
         placeholder.push('!');
 
         self.placeholder = placeholder;
+    }
+
+    pub const fn is_managed_filter_rule(&self) -> bool { self.filter_rule.is_some() }
+
+    pub fn managed_filter_rule(&self) -> Option<ManagedFilterRule> {
+        self.filter_rule.as_ref().map(ManagedFilterRule::from)
     }
 }

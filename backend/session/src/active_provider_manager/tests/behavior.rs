@@ -1017,3 +1017,48 @@ async fn stale_handle_does_not_cancel_newer_generation_slot() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(manager.get_provider_connections_count(), 0);
 }
+
+#[tokio::test(start_paused = true)]
+async fn reserved_owner_falls_back_to_alternate_provider_in_pool_when_reserved_is_full() {
+    let app_cfg = create_test_app_config_with_dual_provider_pool();
+    let event_manager = Arc::new(EventManager::new());
+    let manager = ActiveProviderManager::new(&app_cfg, &event_manager);
+
+    let input_name = "provider_1".intern();
+    let provider_2 = "provider_2".intern();
+    let addr_1: SocketAddr = "127.0.0.1:43201".parse().unwrap();
+    let addr_2: SocketAddr = "127.0.0.1:43202".parse().unwrap();
+    let owner_repeat = "session-owner-repeat";
+
+    // 1. Initial request from owner_repeat reserves provider_1
+    let first = manager.acquire_connection_with_grace_for_session(
+        &input_name,
+        &addr_1,
+        false,
+        default_user_priority(),
+        ConnectionKind::Normal,
+        Some(owner_repeat),
+    );
+    assert!(first.is_some());
+    assert_eq!(first.as_ref().unwrap().allocation.get_provider_name().as_deref(), Some(input_name.as_ref()));
+    manager.refresh_provider_reservation(&input_name, owner_repeat, 30);
+    manager.confirm_playback_activity(owner_repeat);
+
+    // 2. provider_1 max_connections is 1, so the first allocation fills it.
+    assert!(manager.is_exhausted(&input_name));
+
+    // 3. owner_repeat sends a new request: the reservation must not pin it to a full account.
+    let fallback = manager.acquire_connection_with_grace_for_session(
+        &input_name,
+        &addr_2,
+        false,
+        default_user_priority(),
+        ConnectionKind::Normal,
+        Some(owner_repeat),
+    );
+    assert!(
+        fallback.is_some(),
+        "owner_repeat must fall back to available alternate provider when reserved account is exhausted"
+    );
+    assert_eq!(fallback.as_ref().unwrap().allocation.get_provider_name().as_deref(), Some(provider_2.as_ref()));
+}

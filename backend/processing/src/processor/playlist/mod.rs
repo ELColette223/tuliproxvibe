@@ -146,6 +146,7 @@ pub struct ProcessingRun<
     acquired_permit: Option<tuliprox_core::model::UpdateGuardPermit>,
     input_refresh: Option<InputRefreshOverride>,
     library_update_mode: LibraryUpdateMode,
+    offline_target_reprocess: bool,
     maintenance: Option<Arc<dyn tuliprox_core::model::MaintenanceGate>>,
 }
 
@@ -179,6 +180,7 @@ impl<E: EventSink + Clone + 'static> ProcessingRun<E, NoBootstrap, NoopMetadataS
             acquired_permit: None,
             input_refresh: None,
             library_update_mode: LibraryUpdateMode::ExistingCatalog,
+            offline_target_reprocess: false,
             maintenance: None,
         }
     }
@@ -207,6 +209,7 @@ impl<E: EventSink + Clone + 'static, B: UpdateBootstrap, M: MetadataUpdateSink> 
             acquired_permit: self.acquired_permit,
             input_refresh: self.input_refresh,
             library_update_mode: self.library_update_mode,
+            offline_target_reprocess: self.offline_target_reprocess,
             maintenance: self.maintenance,
         }
     }
@@ -258,6 +261,7 @@ impl<E: EventSink + Clone + 'static, B: UpdateBootstrap, M: MetadataUpdateSink> 
             acquired_permit: self.acquired_permit,
             input_refresh: self.input_refresh,
             library_update_mode: self.library_update_mode,
+            offline_target_reprocess: self.offline_target_reprocess,
             maintenance: self.maintenance,
         }
     }
@@ -295,6 +299,15 @@ impl<E: EventSink + Clone + 'static, B: UpdateBootstrap, M: MetadataUpdateSink> 
         self
     }
 
+    /// Rebuilds explicitly selected targets only from persisted input playlists.
+    /// Disabled inputs may participate in this mode; provider, EPG, staged and alias
+    /// downloads are never attempted, even when cache metadata is stale.
+    #[must_use]
+    pub fn with_offline_target_reprocess(mut self) -> Self {
+        self.offline_target_reprocess = true;
+        self
+    }
+
     /// Inputs taken out of service; their provider is not contacted during this run.
     #[must_use]
     pub fn with_maintenance<G: tuliprox_core::model::MaintenanceGate + 'static>(mut self, gate: Arc<G>) -> Self {
@@ -313,7 +326,7 @@ impl<E: EventSink + Clone + 'static, B: UpdateBootstrap, M: MetadataUpdateSink> 
 #[allow(clippy::too_many_lines)]
 pub async fn exec_processing<E: EventSink + Clone + 'static, B: UpdateBootstrap, M: MetadataUpdateSink>(
     run: ProcessingRun<E, B, M>,
-) {
+) -> PlaylistUpdateSummary {
     let ProcessingRun {
         client,
         run_id,
@@ -330,6 +343,7 @@ pub async fn exec_processing<E: EventSink + Clone + 'static, B: UpdateBootstrap,
         acquired_permit,
         input_refresh,
         library_update_mode,
+        offline_target_reprocess,
         maintenance,
     } = run;
 
@@ -342,12 +356,9 @@ pub async fn exec_processing<E: EventSink + Clone + 'static, B: UpdateBootstrap,
         } else {
             warn!("Playlist update lock is closed; update skipped.");
             let execution_order = next_playlist_update_run_order();
-            events.emit(EventMessage::PlaylistUpdate(PlaylistUpdateSummary::for_run(
-                run_id,
-                execution_order,
-                shared::model::PlaylistUpdateState::Failure,
-            )));
-            return;
+            let summary = PlaylistUpdateSummary::for_run(run_id, execution_order, PlaylistUpdateState::Failure);
+            events.emit(EventMessage::PlaylistUpdate(summary.clone()));
+            return summary;
         }
     } else {
         None
@@ -360,12 +371,9 @@ pub async fn exec_processing<E: EventSink + Clone + 'static, B: UpdateBootstrap,
                 error!(
                     "Playlist update bootstrap timed out after {PLAYLIST_UPDATE_MAX_DURATION_SECS} secs while holding playlist lock",
                 );
-                events.emit(EventMessage::PlaylistUpdate(PlaylistUpdateSummary::for_run(
-                    run_id,
-                    execution_order,
-                    shared::model::PlaylistUpdateState::Failure,
-                )));
-                return;
+                let summary = PlaylistUpdateSummary::for_run(run_id, execution_order, PlaylistUpdateState::Failure);
+                events.emit(EventMessage::PlaylistUpdate(summary.clone()));
+                return summary;
             }
         }
     }
@@ -408,6 +416,7 @@ pub async fn exec_processing<E: EventSink + Clone + 'static, B: UpdateBootstrap,
         had_quality_rejections: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         input_refresh,
         library_update_mode,
+        offline_target_reprocess,
         maintenance,
     };
 
@@ -421,23 +430,17 @@ pub async fn exec_processing<E: EventSink + Clone + 'static, B: UpdateBootstrap,
         Ok(Ok((stats, errors))) => (stats, errors),
         Ok(Err(_)) => {
             error!("Playlist processing panicked");
-            events.emit(EventMessage::PlaylistUpdate(PlaylistUpdateSummary::for_run(
-                run_id,
-                execution_order,
-                shared::model::PlaylistUpdateState::Failure,
-            )));
-            return;
+            let summary = PlaylistUpdateSummary::for_run(run_id, execution_order, PlaylistUpdateState::Failure);
+            events.emit(EventMessage::PlaylistUpdate(summary.clone()));
+            return summary;
         }
         Err(_) => {
             error!(
                 "Playlist processing timed out after {PLAYLIST_UPDATE_MAX_DURATION_SECS} secs while holding playlist lock",
             );
-            events.emit(EventMessage::PlaylistUpdate(PlaylistUpdateSummary::for_run(
-                run_id,
-                execution_order,
-                shared::model::PlaylistUpdateState::Failure,
-            )));
-            return;
+            let summary = PlaylistUpdateSummary::for_run(run_id, execution_order, PlaylistUpdateState::Failure);
+            events.emit(EventMessage::PlaylistUpdate(summary.clone()));
+            return summary;
         }
     };
     log_memory_snapshot("exec_processing after_process_sources");
@@ -470,13 +473,14 @@ pub async fn exec_processing<E: EventSink + Clone + 'static, B: UpdateBootstrap,
         has_quality_rejections: ctx.had_quality_rejections.load(std::sync::atomic::Ordering::Acquire),
     }
     .state();
-    events.emit(EventMessage::PlaylistUpdate(PlaylistUpdateSummary {
+    let summary = PlaylistUpdateSummary {
         run_id: Some(run_id.clone()),
         execution_order: Some(execution_order),
         state: outcome,
         stats,
         error,
-    }));
+    };
+    events.emit(EventMessage::PlaylistUpdate(summary.clone()));
 
     let elapsed = start_time.elapsed().as_secs();
     let update_finished_message = format!("🌷 Update process finished! Took {elapsed} secs.");
@@ -493,6 +497,7 @@ pub async fn exec_processing<E: EventSink + Clone + 'static, B: UpdateBootstrap,
     //trim_allocator_after_update();
 
     info!("{update_finished_message}");
+    summary
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

@@ -271,6 +271,8 @@ mod tests {
         let mut template = PatternTemplate {
             name: "groups".to_owned(),
             value: TemplateValue::Single("Sports".to_owned()),
+            filter_rule: None,
+
             placeholder: String::new(),
         };
         template.prepare();

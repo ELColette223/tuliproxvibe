@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use shared::model::{ConfigInputDto, ConfigTargetDto, InputType, TargetOutputDto};
+use shared::model::{ConfigInputDto, ConfigTargetDto, InputType, ManagedFilterRule, TargetOutputDto};
 use std::{fmt, rc::Rc};
 use yew::{Callback, UseStateHandle};
 
@@ -233,6 +233,8 @@ pub enum EditMode {
 #[derive(Clone)]
 pub struct SourceEditorContext {
     pub on_form_change: Callback<(BlockId, BlockInstance)>,
+    pub on_filter_rules_change: Callback<Vec<ManagedFilterRule>>,
+    pub filter_rules: Rc<Vec<ManagedFilterRule>>,
     pub open_target_bouquet: Callback<String>,
     pub bouquet_revision: u64,
     pub output_curation_managed: bool,

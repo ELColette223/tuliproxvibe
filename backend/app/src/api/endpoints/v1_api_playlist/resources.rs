@@ -25,6 +25,7 @@ pub(super) fn create_config_input_for_m3u(url: &str) -> ConfigInput {
         enabled: true,
         options: Some(ConfigInputOptions {
             flags: ConfigInputFlags::XtreamLiveStreamUsePrefix | ConfigInputFlags::ResolveBackground,
+            connection_limit_policy: shared::model::ConnectionLimitPolicy::Strict,
             update_quality: ConfigInputUpdateQuality::default(),
             resolve_delay: shared::defaults::default_resolve_delay_secs(),
             probe_delay: shared::defaults::default_probe_delay_secs(),
@@ -49,6 +50,7 @@ pub(super) fn create_config_input_for_xtream(username: &str, password: &str, hos
         enabled: true,
         options: Some(ConfigInputOptions {
             flags: ConfigInputFlags::XtreamLiveStreamUsePrefix | ConfigInputFlags::ResolveBackground,
+            connection_limit_policy: shared::model::ConnectionLimitPolicy::Strict,
             update_quality: ConfigInputUpdateQuality::default(),
             resolve_delay: shared::defaults::default_resolve_delay_secs(),
             probe_delay: shared::defaults::default_probe_delay_secs(),

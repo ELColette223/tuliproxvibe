@@ -1,5 +1,7 @@
 use crate::{
-    model::{PlaylistItemType, SearchRequest, StreamProperties, UiPlaylistItem, VirtualId, XtreamCluster},
+    model::{
+        PlaylistItemType, ProxyConfigDto, SearchRequest, StreamProperties, UiPlaylistItem, VirtualId, XtreamCluster,
+    },
     utils::{arc_str_option_serde, arc_str_serde},
 };
 use serde::{Deserialize, Serialize};
@@ -10,6 +12,8 @@ pub struct PlaylistRequestXtream {
     pub username: String,
     pub password: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyConfigDto>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]

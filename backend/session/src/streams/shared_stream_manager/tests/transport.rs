@@ -66,6 +66,11 @@ async fn shared_timeout_ends_only_its_subscriber() -> Result<(), Box<dyn std::er
         owner: None,
         deadline: Some(Box::pin(tokio::time::sleep(Duration::ZERO))),
         released: false,
+        terminal_outcome: Arc::new(std::sync::Mutex::new(None)),
+        terminal_observed: false,
+        subscriber_terminal_error: Arc::new(std::sync::Mutex::new(None)),
+        cancel_token: CancellationToken::new(),
+        preempted_token: CancellationToken::new(),
     };
     assert!(timeout(Duration::from_secs(2), response.next()).await?.is_none());
     timeout(Duration::from_secs(2), async {

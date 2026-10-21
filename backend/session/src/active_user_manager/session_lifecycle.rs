@@ -68,6 +68,7 @@ impl Default for UserSession {
             virtual_id: 0,
             provider: Arc::from(""),
             stream_url: Arc::from(""),
+            shared_stream_key: None,
             provider_session_headers: HashMap::new(),
             provider_session_headers_host: None,
             provider_session_cookies: Arc::default(),

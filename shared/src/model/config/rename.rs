@@ -54,6 +54,7 @@ mod tests {
         let templates = vec![PatternTemplate {
             name: "GROUP_PATTERN".to_string(),
             value: TemplateValue::Single("US.*".to_string()),
+            filter_rule: None,
             placeholder: "!GROUP_PATTERN!".to_string(),
         }];
 

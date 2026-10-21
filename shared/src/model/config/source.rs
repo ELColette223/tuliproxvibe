@@ -423,11 +423,13 @@ sources: []
             PatternTemplate {
                 name: "BASE".to_string(),
                 value: crate::model::TemplateValue::Single(r#"Group ~ "US""#.to_string()),
+                filter_rule: None,
                 placeholder: String::new(),
             },
             PatternTemplate {
                 name: "FILTER_NAME".to_string(),
                 value: crate::model::TemplateValue::Single("!BASE! AND Type = live".to_string()),
+                filter_rule: None,
                 placeholder: String::new(),
             },
         ];

@@ -22,6 +22,12 @@ pub enum StreamError {
     InvalidTimestamp(String),
     #[error("SyncLoss: {0}")]
     SyncLoss(String),
+    #[error("Provider recovery exhausted")]
+    RecoveryExhausted,
+    #[error("Provider body idle timeout")]
+    ProviderIdleTimeout,
+    #[error("Shared subscriber lagged behind the burst buffer")]
+    SubscriberLagged,
 }
 
 impl StreamError {
@@ -98,6 +104,9 @@ impl StreamError {
             Self::MalformedPacket(_) => "malformed_packet",
             Self::InvalidTimestamp(_) => "invalid_timestamp",
             Self::SyncLoss(_) => "sync_loss",
+            Self::RecoveryExhausted => "recovery_exhausted",
+            Self::ProviderIdleTimeout => "timeout",
+            Self::SubscriberLagged => "subscriber_lagged",
         }
     }
 
@@ -107,6 +116,12 @@ impl StreamError {
             _ => None,
         }
     }
+
+    /// Returns `true` for errors that represent a terminal origin condition:
+    /// the shared stream should stop broadcasting and propagate to subscribers.
+    pub fn is_terminal_origin_error(&self) -> bool {
+        matches!(self, Self::RecoveryExhausted | Self::ProviderIdleTimeout)
+    }
 }
 
 #[cfg(test)]
@@ -114,10 +129,52 @@ mod tests {
     use super::StreamError;
 
     #[test]
+    fn recovery_exhausted_exposes_terminal_provider_failure_class() {
+        let err = StreamError::RecoveryExhausted;
+        assert_eq!(err.provider_error_class(), "recovery_exhausted");
+        assert_eq!(err.provider_http_status(), None);
+    }
+
+    #[test]
     fn reqwest_stream_error_exposes_provider_failure_metadata() {
         let err = StreamError::Reqwest { message: "upstream failed".to_string(), class: "http_5xx", status: Some(503) };
 
         assert_eq!(err.provider_error_class(), "http_5xx");
         assert_eq!(err.provider_http_status(), Some(503));
+    }
+
+    #[test]
+    fn provider_idle_timeout_is_classified_as_timeout() {
+        let err = StreamError::ProviderIdleTimeout;
+        assert_eq!(err.provider_error_class(), "timeout");
+        assert_eq!(err.provider_http_status(), None);
+    }
+
+    #[test]
+    fn subscriber_lagged_has_distinct_class_from_provider_errors() {
+        let err = StreamError::SubscriberLagged;
+        assert_eq!(err.provider_error_class(), "subscriber_lagged");
+        assert_eq!(err.provider_http_status(), None);
+    }
+
+    #[test]
+    fn recovery_exhausted_is_terminal_origin_error() {
+        assert!(StreamError::RecoveryExhausted.is_terminal_origin_error());
+    }
+
+    #[test]
+    fn provider_idle_timeout_is_terminal_origin_error() {
+        assert!(StreamError::ProviderIdleTimeout.is_terminal_origin_error());
+    }
+
+    #[test]
+    fn subscriber_lagged_is_not_terminal_origin_error() {
+        assert!(!StreamError::SubscriberLagged.is_terminal_origin_error());
+    }
+
+    #[test]
+    fn reqwest_error_is_not_terminal_origin_error() {
+        let err = StreamError::Reqwest { message: "foo".to_string(), class: "http_5xx", status: Some(503) };
+        assert!(!err.is_terminal_origin_error());
     }
 }

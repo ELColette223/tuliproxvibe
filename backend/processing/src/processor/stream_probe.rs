@@ -281,7 +281,9 @@ async fn prepare_generic_stream_metadata<E: EventSink>(
     } else if is_remote_probe {
         FfmpegExecutor::new().probe_remote_url_with_cancel(client, &params, cancel_token).await
     } else {
-        FfmpegExecutor::new().probe_url_with_cancel(&params, config.proxy.as_ref(), cancel_token).await
+        FfmpegExecutor::new()
+            .probe_url_with_cancel(&params, input.proxy.as_ref().or(config.proxy.as_ref()), cancel_token)
+            .await
     };
 
     if let Some(handle) = acquired_handle {

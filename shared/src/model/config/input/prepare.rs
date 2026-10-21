@@ -246,6 +246,17 @@ impl ConfigInputDto {
 
         self.url = self.url.trim().to_string();
         self.normalize_input_type_from_batch_url();
+        if let Some(proxy) = self.proxy.as_mut() {
+            if !self.input_type.is_xtream() {
+                return Err(TuliproxError::ConfigInput(format!(
+                    "proxy is supported only for Xtream inputs (input: {})",
+                    self.name
+                )));
+            }
+            proxy
+                .prepare_input_proxy()
+                .map_err(|err| TuliproxError::ConfigInput(format!("invalid proxy for input '{}': {err}", self.name)))?;
+        }
         if let Some(options) = self.options.as_ref() {
             if options.disable_hls_streaming && !self.input_type.is_xtream() {
                 return Err(TuliproxError::ConfigInput(format!(

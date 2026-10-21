@@ -241,6 +241,7 @@ fn processing_context_with_events<E: EventSink>(storage_dir: &Path, events: E) -
         partial_refresh: Arc::new(AtomicBool::new(false)),
         had_quality_rejections: Arc::new(AtomicBool::new(false)),
         maintenance: None,
+        offline_target_reprocess: false,
     }
 }
 
@@ -1715,7 +1716,7 @@ fn resolve_stage_checks_maintenance_before_any_provider_work() {
     let start = source.find("pub(crate) async fn playlist_resolve<").expect("playlist_resolve");
     let body = &source[start..];
     let body = &body[..body.find("\n}\n").expect("function end")];
-    let gate = body.find("if ctx.is_input_in_maintenance(").expect("maintenance gate in playlist_resolve");
+    let gate = body.find("ctx.is_input_in_maintenance(").expect("maintenance gate in playlist_resolve");
     let series = body.find("playlist_resolve_series(").expect("series resolve call");
     assert!(gate < series, "the gate must run before resolve and probe");
 }

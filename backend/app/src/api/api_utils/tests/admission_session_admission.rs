@@ -2,7 +2,7 @@ use super::{
     activate_session_before_stream_open, admission_failure_video_type, create_test_app_config, create_test_app_state,
     create_test_app_state_for_config, create_test_fingerprint, create_test_live_channel,
     create_test_provider_app_config, create_test_shared_target, load_test_channel, load_test_user,
-    resolve_admission_with_strategies, should_allow_exhausted_shared_reconnect,
+    resolve_admission_with_strategies, shared_live_mpeg_ts_key, should_allow_exhausted_shared_reconnect,
     should_defer_provider_open_for_grace_hold, spawn_load_test_origin, stream_admission_rejected_response,
     stream_response, AdmissionRequest, EvictionReentryGuard, SessionActivationRequest,
 };
@@ -148,13 +148,31 @@ fn test_should_allow_exhausted_shared_reconnect_only_for_matching_shared_session
         started_at: 1,
         permission: UserConnectionPermission::Allowed,
         lifecycle: crate::api::model::PlaybackLifecycle::Active,
+        shared_stream_key: Some("mpegts:origin:8:provider449924".intern()),
         ..Default::default()
     };
+    let key = "mpegts:origin:8:provider449924";
 
-    assert!(should_allow_exhausted_shared_reconnect(true, Some(&session), 282, "http://provider/live/449924.ts"));
-    assert!(!should_allow_exhausted_shared_reconnect(false, Some(&session), 282, "http://provider/live/449924.ts"));
-    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&session), 999, "http://provider/live/449924.ts"));
-    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&session), 282, "http://provider/live/other.ts"));
+    assert!(should_allow_exhausted_shared_reconnect(true, Some(&session), 282, key));
+    assert!(!should_allow_exhausted_shared_reconnect(false, Some(&session), 282, key));
+    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&session), 999, key));
+    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&session), 282, "mpegts:origin:8:providerother"));
+    let mut exhausted_session = session.clone();
+    exhausted_session.permission = UserConnectionPermission::Exhausted;
+    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&exhausted_session), 282, key));
+    // A session that never joined a shared origin has no key to match.
+    let mut session_without_identity = session.clone();
+    session_without_identity.shared_stream_key = None;
+    assert!(!should_allow_exhausted_shared_reconnect(true, Some(&session_without_identity), 282, key));
+}
+
+#[test]
+fn shared_live_mpeg_ts_key_uses_origin_id_or_target_virtual_fallback() {
+    assert_eq!(shared_live_mpeg_ts_key(7, "input", Some("origin-1"), 99), "mpegts:origin:5:inputorigin-1");
+    assert_eq!(shared_live_mpeg_ts_key(7, "input", Some("   "), 99), "mpegts:fallback:7:99");
+    assert_eq!(shared_live_mpeg_ts_key(7, "input", None, 99), "mpegts:fallback:7:99");
+    assert_ne!(shared_live_mpeg_ts_key(7, "7", Some("99"), 99), shared_live_mpeg_ts_key(7, "7", None, 99));
+    assert_ne!(shared_live_mpeg_ts_key(7, "a:b", Some("c"), 99), shared_live_mpeg_ts_key(7, "a", Some("b:c"), 99));
 }
 
 #[tokio::test]

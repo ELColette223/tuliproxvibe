@@ -139,7 +139,12 @@ pub(super) async fn user_api_get_json(
     app_state: &AppState,
     input_source: &InputSource,
 ) -> Result<Value, TuliproxError> {
-    let client = app_state.http_clients.default.load();
+    let global_client = app_state.http_clients.default.load();
+    let client = tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &global_client,
+        input_source.proxy.as_ref(),
+    )?;
     let url = Url::parse(input_source.url.as_str()).map_err(|e| {
         TuliproxError::ConfigPanelApi(format!(
             "panel_api user_api invalid url {}: {e}",

@@ -11,7 +11,7 @@ use crate::{
 };
 use shared::{
     model::{
-        ConfigInputAliasDto, ConfigProviderDto, InputType, StalkerAuthMode, StalkerDeviceProfileDto,
+        ConfigInputAliasDto, ConfigProviderDto, InputType, ProxyConfigDto, StalkerAuthMode, StalkerDeviceProfileDto,
         StalkerEndpointPreference, StalkerInputConfigDto, StalkerMagPreset, XtreamLoginRequest,
     },
     utils::Internable,
@@ -86,6 +86,8 @@ pub struct AliasItemFormProps {
     #[prop_or_default]
     pub providers: Vec<ConfigProviderDto>,
     #[prop_or_default]
+    pub proxy: Option<ProxyConfigDto>,
+    #[prop_or_default]
     pub initial: Option<ConfigInputAliasDto>,
     #[prop_or(false)]
     pub readonly: bool,
@@ -153,6 +155,7 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
         let exp_date_request_in_flight = exp_date_request_in_flight.clone();
         let exp_date_request_token = exp_date_request_token.clone();
         let providers = props.providers.clone();
+        let proxy = props.proxy.clone();
         let translate = translate.clone();
 
         Some(ToolAction {
@@ -190,6 +193,7 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
                     url,
                     username,
                     password,
+                    proxy: proxy.clone(),
                     providers: (!providers.is_empty()).then_some(providers.clone()),
                 };
                 let no_exp_date_msg = translate.t("MESSAGES.SOURCE_EDITOR.NO_EXPIRATION_DATE_RETURNED");

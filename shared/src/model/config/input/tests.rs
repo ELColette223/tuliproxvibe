@@ -1,5 +1,8 @@
 use super::*;
-use crate::model::{ClusterFlags, ConfigInputUpdateQualityDto, Prepare, StalkerAuthMode, StalkerDeviceProfileDto};
+use crate::model::{
+    ClusterFlags, ConfigInputUpdateQualityDto, ConnectionLimitPolicy, Prepare, ProxyConfigDto, StalkerAuthMode,
+    StalkerDeviceProfileDto,
+};
 use std::{collections::HashSet, net::IpAddr};
 
 fn create_test_dto() -> ConfigInputDto { ConfigInputDto { name: "test_input".intern(), ..ConfigInputDto::default() } }

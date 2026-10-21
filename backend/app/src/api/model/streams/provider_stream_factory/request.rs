@@ -1,6 +1,7 @@
 use super::{
     error::{
-        classify_provider_io_error, classify_provider_status_error, failed_stream_account,
+        account_full_status_from_io_error, classify_provider_io_error, classify_provider_status_error,
+        failed_stream_account, is_account_full_status, looks_like_connection_limit_message,
         should_reject_success_response_content_type, ProviderStreamRequestFailure,
     },
     options::ProviderRequestCredentialState,
@@ -233,8 +234,11 @@ async fn provider_stream_request(
     request_client: &reqwest::Client,
     stream_options: &ProviderStreamFactoryOptions,
 ) -> Result<Option<ProviderStreamFactoryResponse>, ProviderStreamRequestFailure> {
+    let global_proxy = ctx.app_config.config.load().proxy.clone();
     let use_manual_redirects = stream_options.requires_public_destination()
-        || tuliprox_core::model::should_use_manual_redirects(&ctx.app_config)
+        || tuliprox_core::model::should_use_manual_redirects_for_proxy(
+            stream_options.proxy().or(global_proxy.as_ref()),
+        )
         || provider_headers_require_manual_redirects(stream_options.get_headers());
     if log_enabled!(log::Level::Debug) {
         let diagnostics =
@@ -247,15 +251,46 @@ async fn provider_stream_request(
     }
     let response_result = if use_manual_redirects {
         let client_no_redirect = if stream_options.requires_public_destination() {
-            ctx.http_clients.public_no_redirect.load()
+            ctx.http_clients.public_no_redirect.load().as_ref().clone()
+        } else if stream_options.proxy().is_some() {
+            // The input's proxy must be honoured on redirects too; the shared client is not.
+            let fallback = ctx.http_clients.no_redirect.load();
+            match tuliprox_core::utils::request::create_input_http_client_no_redirect(
+                &ctx.app_config,
+                &fallback,
+                stream_options.proxy(),
+            ) {
+                Ok(client) => client,
+                Err(err) => {
+                    return Err(ProviderStreamRequestFailure::Status {
+                        status: StatusCode::BAD_GATEWAY,
+                        provider_error_class: classify_provider_io_error(&io::Error::other(err.to_string())),
+                        serve_channel_unavailable: true,
+                    });
+                }
+            }
         } else {
-            ctx.http_clients.no_redirect.load()
+            ctx.http_clients.no_redirect.load().as_ref().clone()
         };
         send_with_manual_redirects(&client_no_redirect, stream_options, &ctx.app_config).await
     } else {
         // Use send_with_retry_and_provider for automatic failover support
         let url = stream_options.get_url();
         let provider = stream_options.get_provider().cloned();
+        let request_client = match tuliprox_core::utils::request::create_input_http_client(
+            &ctx.app_config,
+            request_client,
+            stream_options.proxy(),
+        ) {
+            Ok(client) => client,
+            Err(err) => {
+                return Err(ProviderStreamRequestFailure::Status {
+                    status: StatusCode::BAD_GATEWAY,
+                    provider_error_class: classify_provider_io_error(&io::Error::other(err.to_string())),
+                    serve_channel_unavailable: true,
+                });
+            }
+        };
 
         send_with_retry_and_provider_policy_with_options(
             &ctx.app_config,
@@ -267,7 +302,7 @@ async fn provider_stream_request(
                 .with_http_error_responses(stream_options.flags.contains(ProviderStreamFactoryFlags::HlsResource)),
             |resolved_url| {
                 let (client, _partial_content) = prepare_client(
-                    request_client,
+                    &request_client,
                     stream_options,
                     Some(resolved_url),
                     ProviderRequestCredentialState::OriginalOrigin,
@@ -297,6 +332,13 @@ async fn provider_stream_request(
                         "Provider returned HTML content for non-adaptive stream {}",
                         sanitize_sensitive_info(stream_options.get_log_url().as_ref())
                     );
+                    let preview = response.text().await.unwrap_or_default();
+                    if looks_like_connection_limit_message(&preview) {
+                        return Err(ProviderStreamRequestFailure::AccountFull {
+                            status: StatusCode::TOO_MANY_REQUESTS,
+                            provider_error_class: "account_full_html",
+                        });
+                    }
                     return Err(ProviderStreamRequestFailure::Status {
                         status: StatusCode::BAD_GATEWAY,
                         provider_error_class: "unexpected_content_type",
@@ -346,6 +388,10 @@ async fn provider_stream_request(
                 return Err(ProviderStreamRequestFailure::HlsStatus { status, headers });
             }
 
+            if is_account_full_status(status) {
+                debug!("Account-full status response : {status}");
+                return Err(ProviderStreamRequestFailure::AccountFull { status, provider_error_class: "account_full" });
+            }
             if status.is_client_error() {
                 debug!("Client error status response : {status}");
                 return match status {
@@ -398,6 +444,17 @@ async fn provider_stream_request(
                 sanitize_sensitive_info(&err.to_string()),
                 sanitize_sensitive_info(&diagnostics)
             );
+            // HLS resources must keep the upstream status; rotating them would replace a
+            // retryable upstream error with a synthesized channel-unavailable body.
+            if !stream_options.flags.contains(ProviderStreamFactoryFlags::HlsResource) {
+                if let Some(status) = account_full_status_from_io_error(&err) {
+                    debug!("Account-full status recovered from transport error: {status}");
+                    return Err(ProviderStreamRequestFailure::AccountFull {
+                        status,
+                        provider_error_class: "account_full",
+                    });
+                }
+            }
             Err(ProviderStreamRequestFailure::Status {
                 status: StatusCode::SERVICE_UNAVAILABLE,
                 provider_error_class: classify_provider_io_error(&err),

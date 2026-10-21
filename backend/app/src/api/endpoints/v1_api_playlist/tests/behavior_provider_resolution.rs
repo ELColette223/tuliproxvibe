@@ -265,6 +265,7 @@ async fn playlist_live_input_route_supports_stalker_inputs() {
         enabled: true,
         options: Some(ConfigInputOptions {
             flags: crate::model::ConfigInputFlagsSet::new(),
+            connection_limit_policy: shared::model::ConnectionLimitPolicy::Strict,
             update_quality: ConfigInputUpdateQuality::default(),
             resolve_delay: shared::defaults::default_resolve_delay_secs(),
             probe_delay: shared::defaults::default_probe_delay_secs(),
@@ -412,6 +413,7 @@ async fn initial_stalker_playback_resolution_uses_the_requested_items_own_comman
         enabled: true,
         options: Some(ConfigInputOptions {
             flags: crate::model::ConfigInputFlagsSet::new(),
+            connection_limit_policy: shared::model::ConnectionLimitPolicy::Strict,
             update_quality: ConfigInputUpdateQuality::default(),
             resolve_delay: shared::defaults::default_resolve_delay_secs(),
             probe_delay: shared::defaults::default_probe_delay_secs(),

@@ -234,6 +234,7 @@ pub struct SetupContext {
     pub setup_password_repeat: UseStateHandle<String>,
     pub config_forms: UseStateHandle<SetupConfigFormState>,
     pub sources: UseStateHandle<SourcesConfigDto>,
+    pub filter_rules: UseStateHandle<Vec<shared::model::ManagedFilterRule>>,
     pub api_users: UseStateHandle<Vec<TargetUserDto>>,
     pub is_submitting: UseStateHandle<bool>,
     pub is_completed: UseStateHandle<bool>,

@@ -1,5 +1,5 @@
 use crate::{
-    model::{macros, ConfigInputUpdateQuality, ConfigProvider, EpgConfig, PanelApiConfig},
+    model::{macros, ConfigInputUpdateQuality, ConfigProvider, EpgConfig, PanelApiConfig, ProxyConfig},
     utils::get_csv_file_path,
 };
 use chrono::Utc;
@@ -10,9 +10,9 @@ use shared::{
     foundation::Filter,
     model::{
         ClusterFlags, ConfigInputAliasDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto,
-        FlussonicHlsCatchup, InputFetchMethod, InputType, MediaServerCatalogConfigDto, MediaServerInputConfigDto,
-        MediaServerLibrarySelector, ProviderAccountIdentity, StagedInputType, StalkerAuthMode, StalkerDeviceProfileDto,
-        StalkerEndpointPreference, StalkerInputConfigDto, StalkerMagPreset,
+        ConnectionLimitPolicy, FlussonicHlsCatchup, InputFetchMethod, InputType, MediaServerCatalogConfigDto,
+        MediaServerInputConfigDto, MediaServerLibrarySelector, ProviderAccountIdentity, StagedInputType,
+        StalkerAuthMode, StalkerDeviceProfileDto, StalkerEndpointPreference, StalkerInputConfigDto, StalkerMagPreset,
     },
     utils::{
         get_credentials_from_url, get_credentials_from_url_str, is_non_blank_optional_string,
@@ -60,6 +60,7 @@ create_bitset!(
 #[derive(Debug, Clone)]
 pub struct ConfigInputOptions {
     pub flags: ConfigInputFlagsSet,
+    pub connection_limit_policy: ConnectionLimitPolicy,
     pub update_quality: ConfigInputUpdateQuality,
     pub flussonic_hls_catchup: FlussonicHlsCatchup,
     pub flussonic_hls_catchup_max_duration_secs: u32,
@@ -109,6 +110,7 @@ impl From<&ConfigInputOptionsDto> for ConfigInputOptions {
 
         Self {
             flags,
+            connection_limit_policy: dto.connection_limit_policy,
             update_quality: ConfigInputUpdateQuality::from(&dto.update_quality),
             flussonic_hls_catchup: dto.flussonic_hls_catchup,
             flussonic_hls_catchup_max_duration_secs: dto.flussonic_hls_catchup_max_duration_secs,
@@ -539,6 +541,7 @@ pub struct ConfigInput {
     pub epg: Option<EpgConfig>,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub proxy: Option<ProxyConfig>,
     pub persist: Option<String>,
     pub enabled: bool,
     pub account_disabled: bool,
@@ -612,8 +615,10 @@ impl ConfigInput {
     fn apply_expiration(&mut self) {
         if is_input_expired(self.exp_date) {
             warn!("Account {} expired for provider: {}", self.username.as_ref().map_or("?", |s| s.as_str()), self.name);
-            // Expiry stays derived from `exp_date`, so a fetched renewal unblocks without reload.
-            if !self.aliases.iter().flatten().any(|alias| alias.enabled && !is_input_expired(alias.exp_date)) {
+            // An expired root must not take its still-valid alias pool down with it.
+            let has_usable_alias =
+                self.aliases.iter().flatten().any(|alias| alias.enabled && !is_input_expired(alias.exp_date));
+            if !has_usable_alias {
                 self.enabled = false;
             }
         }
@@ -637,6 +642,21 @@ impl ConfigInput {
 
     #[inline]
     pub fn has_flag(&self, flag: ConfigInputFlags) -> bool { self.has_flag_or(flag, false) }
+
+    #[inline]
+    pub fn connection_limit_policy(&self) -> ConnectionLimitPolicy {
+        self.options.as_ref().map_or(ConnectionLimitPolicy::Strict, |options| options.connection_limit_policy)
+    }
+
+    #[inline]
+    pub fn bypass_local_connection_cap(&self) -> bool {
+        matches!(self.connection_limit_policy(), ConnectionLimitPolicy::BypassLocalCap)
+    }
+
+    #[inline]
+    pub fn rotate_on_connection_full(&self) -> bool {
+        matches!(self.connection_limit_policy(), ConnectionLimitPolicy::RotateOnFull)
+    }
 
     #[inline]
     /// Returns `default` when `self.options` is `None`; unlike `has_flag`, which returns
@@ -926,6 +946,7 @@ impl ConfigInput {
             epg: self.epg.clone(),
             username: alias.username.clone(),
             password: alias.password.clone(),
+            proxy: self.proxy.clone(),
             persist: self.persist.clone(),
             enabled: self.enabled,
             account_disabled: !alias.enabled,
@@ -1039,6 +1060,7 @@ impl From<&ConfigInputDto> for ConfigInput {
             epg: dto.epg.as_ref().map(EpgConfig::from),
             username: dto.username.clone(),
             password: dto.password.clone(),
+            proxy: dto.proxy.as_ref().map(ProxyConfig::from),
             persist: dto.persist.clone(),
             enabled: dto.enabled,
             account_disabled: dto.account_disabled,
@@ -1156,7 +1178,7 @@ mod tests {
     use crate::model::ConfigProvider;
     use shared::model::{
         ConfigInputUpdateQualityDto, ConfigProviderDto, MediaServerInputConfigDto, MediaServerLibrarySelector,
-        ProviderUrlSelectionPolicy, XtreamCluster,
+        ProviderUrlSelectionPolicy, ProxyConfigDto, XtreamCluster,
     };
     use std::{borrow::Cow, sync::Arc};
 
@@ -1278,6 +1300,40 @@ mod tests {
         assert_eq!(options.update_quality.threshold(XtreamCluster::Series), 85);
     }
 
+    #[test]
+    fn expired_root_keeps_eligible_alias_pool_without_allocating_root() {
+        let mut input = ConfigInput::from(&ConfigInputDto {
+            name: Arc::from("pool"),
+            input_type: InputType::Xtream,
+            enabled: true,
+            url: "http://provider.example".to_string(),
+            username: Some("root".to_string()),
+            password: Some("root-pass".to_string()),
+            max_connections: 1,
+            exp_date: Some(1),
+            aliases: Some(vec![ConfigInputAliasDto {
+                name: Arc::from("alias"),
+                enabled: true,
+                url: "http://provider.example".to_string(),
+                username: Some("alias-user".to_string()),
+                password: Some("alias-pass".to_string()),
+                max_connections: 1,
+                ..Default::default()
+            }]),
+            ..Default::default()
+        });
+        input.prepare(&[]).expect("prepare expired root with valid alias");
+        assert!(input.enabled);
+        assert_eq!(input.exp_date, Some(1));
+        assert!(input.aliases.as_ref().expect("aliases")[0].enabled);
+
+        let mut no_alias = input.clone();
+        no_alias.aliases = None;
+        no_alias.enabled = true;
+        no_alias.prepare(&[]).expect("prepare expired root without alias");
+        assert!(!no_alias.enabled);
+    }
+
     fn quality_options_dto() -> ConfigInputOptionsDto {
         ConfigInputOptionsDto {
             update_quality: ConfigInputUpdateQualityDto { live: 95, vod: 90, series: 85 },
@@ -1290,6 +1346,34 @@ mod tests {
         assert_eq!(options.update_quality.threshold(XtreamCluster::Live), 95);
         assert_eq!(options.update_quality.threshold(XtreamCluster::Video), 90);
         assert_eq!(options.update_quality.threshold(XtreamCluster::Series), 85);
+    }
+
+    #[test]
+    fn xtream_proxy_conversion_and_alias_inheritance_are_preserved() {
+        let dto = ConfigInputDto {
+            input_type: InputType::Xtream,
+            proxy: Some(ProxyConfigDto {
+                url: "socks5h://proxy.example:1080".to_string(),
+                username: Some("user".to_string()),
+                password: Some("pass".to_string()),
+            }),
+            aliases: Some(vec![ConfigInputAliasDto {
+                name: "alias".into(),
+                url: "https://alias.example.invalid".to_string(),
+                ..ConfigInputAliasDto::default()
+            }]),
+            ..ConfigInputDto::default()
+        };
+        let input = ConfigInput::from(&dto);
+        let proxy = input.proxy.as_ref().expect("runtime proxy");
+        assert_eq!(proxy.url, "socks5h://proxy.example:1080");
+
+        let alias = input.aliases.as_ref().and_then(|aliases| aliases.first()).expect("runtime alias");
+        let alias_input = input.as_input(alias);
+        let alias_proxy = alias_input.proxy.as_ref().expect("alias inherits input proxy");
+        assert_eq!(alias_proxy.url, proxy.url);
+        assert_eq!(alias_proxy.username, proxy.username);
+        assert_eq!(alias_proxy.password, proxy.password);
     }
 
     #[test]

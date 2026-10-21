@@ -50,4 +50,17 @@ impl ProxyConfigDto {
         }
         Ok(())
     }
+
+    pub fn prepare_input_proxy(&mut self) -> Result<(), TuliproxError> {
+        self.prepare()?;
+        let parsed = url::Url::parse(&self.url)
+            .map_err(|err| TuliproxError::ConfigProxy(format!("Invalid proxy URL: {err}")))?;
+        if !matches!(parsed.scheme().to_ascii_lowercase().as_str(), "http" | "https" | "socks5" | "socks5h") {
+            return Err(TuliproxError::ConfigProxy(format!("Unsupported proxy scheme: {}", parsed.scheme())));
+        }
+        if parsed.host_str().is_none() {
+            return Err(TuliproxError::ConfigProxy("Proxy URL host missing".to_string()));
+        }
+        Ok(())
+    }
 }

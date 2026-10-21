@@ -1,4 +1,4 @@
-use crate::{ActiveProviderManager, CleanupEvent};
+use crate::{ActiveProviderManager, CleanupEvent, PROVIDER_END_CLOSED, PROVIDER_END_ERROR};
 use bytes::Bytes;
 use std::{
     collections::{HashMap, VecDeque},
@@ -12,7 +12,7 @@ use tokio::{
     time::{Duration, Sleep},
 };
 use tokio_util::sync::CancellationToken;
-use tuliprox_core::model::{AllocationId, ProviderHandle, SharedSubscriberId};
+use tuliprox_core::model::{AllocationId, ProviderHandle, SharedSubscriberId, StreamError};
 
 const DEFAULT_SHARED_BUFFER_SIZE_BYTES: usize = 1024 * 1024 * 32;
 
@@ -32,6 +32,38 @@ const SHARED_CLEANUP_ADMISSION_TIMEOUT: Duration = Duration::from_secs(5);
 // is byte-bounded already; this caps how many of its entries are cloned into the
 // per-subscriber vector at once so a long backlog cannot balloon that vector.
 const MAX_SUBSCRIBER_LIVE_BATCH_CHUNKS: usize = 64;
+
+/// Typed terminal outcome of a shared origin, replacing the old boolean flag.
+/// Stored once by the broadcaster when the provider body ends or errors; each
+/// subscriber drains remaining burst data and then propagates this outcome.
+#[derive(Debug, Clone)]
+enum TerminalOutcome {
+    /// Provider body ended normally (EOF).
+    ProviderEof,
+    /// Provider body produced a terminal `StreamError`.
+    ProviderError(StreamError),
+}
+
+impl TerminalOutcome {
+    /// The `StreamError` to deliver to each subscriber, if any.
+    fn as_stream_error(&self) -> Option<StreamError> {
+        match self {
+            Self::ProviderEof => None,
+            Self::ProviderError(e) => Some(e.clone()),
+        }
+    }
+
+    /// Classification constants for the cleanup event.
+    fn cleanup_classification(&self) -> (u8, Option<&'static str>) {
+        match self {
+            Self::ProviderEof => (PROVIDER_END_CLOSED, None),
+            Self::ProviderError(e) => (PROVIDER_END_ERROR, Some(e.provider_error_class())),
+        }
+    }
+
+    /// Whether this outcome represents a provider failure (not a clean EOF).
+    fn is_failure(&self) -> bool { matches!(self, Self::ProviderError(_)) }
+}
 
 pub struct PendingSharedSubscriberCleanup {
     permit: Option<tokio::sync::mpsc::OwnedPermit<CleanupEvent>>,
@@ -76,6 +108,16 @@ struct ReceiverStreamWrapper<S> {
     owner: Option<Arc<str>>,
     deadline: Option<Pin<Box<Sleep>>>,
     released: bool,
+    terminal_outcome: Arc<std::sync::Mutex<Option<TerminalOutcome>>>,
+    terminal_observed: bool,
+    /// Subscriber-local terminal error slot (e.g. `SubscriberLagged`), shared with the
+    /// forwarder task. When the forwarder detects lag it records the error here instead
+    /// of cancelling the subscriber, so the wrapper can deliver the error to the client
+    /// and only then classify its reserved cleanup. Takes precedence over the origin's
+    /// terminal outcome.
+    subscriber_terminal_error: Arc<std::sync::Mutex<Option<StreamError>>>,
+    cancel_token: CancellationToken,
+    preempted_token: CancellationToken,
 }
 
 #[derive(Clone, Debug)]
@@ -119,6 +161,7 @@ pub struct SharedStreamState {
     stop_token: CancellationToken,
     burst_buffer: Arc<Mutex<BurstBuffer>>,
     live_notification: Arc<Notify>,
+    terminal_outcome: Arc<std::sync::Mutex<Option<TerminalOutcome>>>,
     task_handles: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
     subscriber_idle_timeout_secs: u64,
     subscriber_max_duration: Option<Duration>,

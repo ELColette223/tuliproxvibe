@@ -9,6 +9,7 @@ use crate::{
     model::{ConfigInputUpdateQualityDto, PatternTemplate, Prepare},
     utils::is_blank_optional_string,
 };
+use strum_macros::{AsRefStr, Display, EnumString};
 
 #[derive(
     Debug,
@@ -35,6 +36,24 @@ impl FlussonicHlsCatchup {
     pub fn is_native(value: &Self) -> bool { matches!(value, Self::Native) }
 }
 
+/// How the local connection cap of a provider is treated when it is reached.
+#[derive(
+    Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default, EnumString, AsRefStr, Display,
+)]
+#[strum(serialize_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionLimitPolicy {
+    /// Local cap is enforced; requests over the cap are rejected.
+    #[default]
+    Strict,
+    /// Local cap is ignored; the provider is still the source of truth.
+    BypassLocalCap,
+    /// When the provider reports the account full, retry on the next account in the pool.
+    RotateOnFull,
+}
+
+pub fn is_default_connection_limit_policy(v: &ConnectionLimitPolicy) -> bool { *v == ConnectionLimitPolicy::default() }
+
 pub const fn default_flussonic_hls_catchup_max_duration_secs() -> u32 { 4 * 60 * 60 }
 
 fn is_default_flussonic_hls_catchup_max_duration_secs(value: &u32) -> bool {
@@ -52,6 +71,8 @@ pub struct ConfigInputOptionsDto {
     pub skip_series: bool,
     #[serde(default, skip_serializing_if = "ConfigInputUpdateQualityDto::is_disabled")]
     pub update_quality: ConfigInputUpdateQualityDto,
+    #[serde(default, skip_serializing_if = "is_default_connection_limit_policy")]
+    pub connection_limit_policy: ConnectionLimitPolicy,
     #[serde(default = "default_xtream_live_stream_use_prefix", skip_serializing_if = "is_true")]
     pub xtream_live_stream_use_prefix: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -115,6 +136,7 @@ impl Default for ConfigInputOptionsDto {
             skip_vod: false,
             skip_series: false,
             update_quality: ConfigInputUpdateQualityDto::default(),
+            connection_limit_policy: ConnectionLimitPolicy::default(),
             xtream_live_stream_use_prefix: default_xtream_live_stream_use_prefix(),
             xtream_live_stream_without_extension: false,
             disable_hls_streaming: false,
@@ -147,6 +169,7 @@ impl ConfigInputOptionsDto {
             && !self.skip_vod
             && !self.skip_series
             && self.update_quality.is_empty()
+            && is_default_connection_limit_policy(&self.connection_limit_policy)
             && self.xtream_live_stream_use_prefix
             && !self.xtream_live_stream_without_extension
             && !self.disable_hls_streaming
@@ -174,6 +197,7 @@ impl ConfigInputOptionsDto {
         self.skip_vod = false;
         self.skip_series = false;
         self.update_quality.clean();
+        self.connection_limit_policy = ConnectionLimitPolicy::default();
         self.xtream_live_stream_use_prefix = default_as_true();
         self.xtream_live_stream_without_extension = false;
         self.disable_hls_streaming = false;

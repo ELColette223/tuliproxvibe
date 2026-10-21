@@ -274,6 +274,7 @@ impl Publication {
             processing: PipelineStats::default(),
             accepted_empty_clusters: ClusterFlags::empty(),
             library_empty: tuliprox_repository::LibraryEmptyPublication::None,
+            bouquet_snapshot: Vec::new(),
         };
         let (result, errors) = tokio::time::timeout(
             Duration::from_secs(5),

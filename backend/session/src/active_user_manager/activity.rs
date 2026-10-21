@@ -24,6 +24,7 @@ impl ActiveUserManager {
             virtual_id: params.virtual_id,
             provider: params.provider.intern(),
             stream_url: params.stream_url.intern(),
+            shared_stream_key: None,
             provider_session_headers: HashMap::new(),
             provider_session_headers_host: None,
             provider_session_cookies: Arc::default(),
@@ -204,6 +205,22 @@ impl ActiveUserManager {
 
     pub async fn get_and_update_user_session(&self, username: &str, token: &str) -> Option<UserSession> {
         self.update_user_session(username, token).await
+    }
+
+    /// Records the shared-origin key a session's playback joined, so a later request on the
+    /// same session resolves to the same shared origin instead of a fresh provider open.
+    pub async fn set_session_shared_stream_key(&self, username: &str, token: &str, key: &str) -> bool {
+        let mut user_connections = self.write_connections().await;
+        let Some(session) = user_connections
+            .by_key
+            .get_mut(username)
+            .and_then(|connection_data| connection_data.sessions.iter_mut().find(|session| session.token == token))
+        else {
+            return false;
+        };
+        session.shared_stream_key = Some(key.intern());
+        session.ts = current_time_secs();
+        true
     }
 
     /// Checks an in-flight resource against the same session and account binding without touching admission.

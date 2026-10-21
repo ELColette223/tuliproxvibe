@@ -10,13 +10,16 @@ use axum::{
     },
     response::IntoResponse,
 };
-use log::{trace, warn};
+use log::trace;
 use serde::Deserialize;
 use shared::{
     model::{LogLevel, LogWsMessage, Permission, WsCloseCode},
     utils::concat_path_leading_slash,
 };
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 #[derive(Debug, Deserialize, Default)]
 pub struct LogWsQuery {
@@ -87,6 +90,8 @@ async fn wait_for_socket_auth(socket: &mut WebSocket, verifier: Option<&TokenVer
 }
 
 async fn handle_socket(mut socket: WebSocket, app_state: Arc<AppState>, auth_required: bool, query: LogWsQuery) {
+    const LAG_NOTICE_INTERVAL: Duration = Duration::from_secs(30);
+
     let verifier = get_token_verifier(&app_state, auth_required);
     let mut is_authorized = !auth_required;
     let mut min_level: Option<LogLevel> = query.min_level.as_deref().and_then(|s| s.parse().ok());
@@ -115,6 +120,10 @@ async fn handle_socket(mut socket: WebSocket, app_state: Arc<AppState>, auth_req
     }
 
     let mut rx = subscribe_logs();
+    // Never feed lag diagnostics back through `warn!`/`info!`: ReloadableLogger
+    // pushes every record into this same broadcast bus, which turns a slow
+    // websocket client into a self-amplifying memory/log flood.
+    let mut last_lag_notice: Option<Instant> = None;
 
     loop {
         tokio::select! {
@@ -130,7 +139,18 @@ async fn handle_socket(mut socket: WebSocket, app_state: Arc<AppState>, auth_req
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!("Log stream client lagged, dropped {skipped} messages");
+                        let now = Instant::now();
+                        let should_notice = last_lag_notice
+                            .is_none_or(|prev| now.duration_since(prev) >= LAG_NOTICE_INTERVAL);
+                        if should_notice {
+                            last_lag_notice = Some(now);
+                            // stderr only — never `warn!`/`info!` here: that would
+                            // re-enter the same broadcast bus and amplify the lag.
+                            eprintln!(
+                                "Log stream client lagged, dropped {skipped} messages (suppressing repeats for {}s)",
+                                LAG_NOTICE_INTERVAL.as_secs()
+                            );
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         break;

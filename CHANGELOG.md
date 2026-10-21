@@ -192,6 +192,24 @@
 
 ## 🌟 New Features
 
+- **Visual target filter.** The target table's filter column opens a visual editor for the keep-selection stored in
+  `target.filter`: categories and individual channels can be included or excluded, with a live preview of what stays
+  in the target. The same rules are editable as a tree in the source editor, and the generated filter is shown next
+  to the summary. A shared filter builder converts between the tree and the filter DSL in both directions, and
+  reusable filter-rule templates can be stored alongside normal pattern templates.
+- **Bouquet editor persistence.** Selections made in the bouquet editor are saved with the target instead of being
+  re-derived on every visit, and the editor's saved snapshot is merged only after a non-empty successful publication,
+  so a failed or empty update no longer clears an existing selection.
+- **Per-input Xtream proxy.** An Xtream input can carry its own `proxy` block (`url`, optional `username` and
+  `password`) that replaces the global `config.yml` proxy for that input's playlist, EPG, account-expiry check,
+  metadata/probe work, HLS manifest and segment fetches, and playback opens. Aliases inherit it. Supported schemes:
+  `http`, `https`, `socks5`, `socks5h`. Setting `proxy` on a non-Xtream input is rejected at config load, and an
+  unusable proxy fails the request instead of silently falling back to a direct connection.
+- **Stable channel IDs (`options.preserve_stream_ids`).** A target can keep channel IDs stable across source updates
+  by deriving the virtual ID from the channel's semantic identity (target name, item type, group and channel name)
+  instead of the upstream provider's stream ID. Legacy mapping records are reconciled onto the new identity, so
+  already-published IDs keep resolving after the switch and clients no longer lose channels or need a playlist reload
+  when the provider renumbers its streams.
 - **Emby and Jellyfin inputs import their libraries.** `type: emby` and `type: jellyfin` inputs now import the selected
   movie and TV libraries like Plex inputs do, and Tuliprox proxies direct playback (with `Range` support) and artwork
   without exposing server URLs or tokens to clients. Credentials are resolved from `media_server.token`, then
@@ -1129,6 +1147,34 @@
 
 ## 🐛 Fixes
 
+- **Stable shared MPEG-TS keying.** Shared live MPEG-TS origins are keyed by input identity and upstream stream ID
+  (with a target/virtual-ID fallback) instead of the request URL, so two inputs with the same provider stream ID no
+  longer collide and a reconnect lands on the origin the session already holds. An exhausted-permission session may
+  only rejoin the shared origin it is already subscribed to.
+- **Fail-closed shared-stream continuity.** A shared live MPEG-TS origin ends when the upstream body ends, errors, or
+  goes idle (40 s without media bytes) instead of splicing a fresh HTTP body into an already committed response. The
+  idle deadline renews on media progress, so a slow but alive stream is not cut. Subscribers see a terminal error
+  (`provider_idle_timeout`, `recovery_exhausted`, …) rather than a silently truncated body.
+- **Subscriber lag is isolated.** A subscriber that falls behind the shared burst buffer is terminated alone with
+  `subscriber_lagged`; the origin and the other subscribers continue, and post-gap bytes are never delivered.
+- **Accurate disconnect reasons.** Active-stream disconnects are logged with address, stream/virtual ID, provider,
+  channel, duration, bytes sent, reason, provider error class, HTTP status and reconnect count, and stream history
+  records provider idle timeouts, terminal provider errors and subscriber lag instead of falling back to
+  `client_closed`. Client-closed and preempted causes are preserved.
+- **Xtream root expiry keeps a usable alias pool.** An expired root account is excluded from allocation while its
+  unexpired aliases stay available, so the pool keeps serving instead of the whole input going offline. The expiry
+  worker records the root's state without disabling the input when a usable alias exists.
+- **Alias-pool failover for live streams.** A reserved provider that is full, unavailable or excluded falls back to
+  the rest of the input's pool instead of pinning the request to that account, and `over_limit` is only consulted for
+  item types that require provider affinity. This removes premature rejections for live streams.
+- **Account-full rotation recovers transport-level rejections.** Panels that answer with a transport error carrying
+  `429 Too Many Requests` are recognized as account-full, so `rotate_on_full` moves to the next account instead of
+  serving a channel-unavailable response. HLS resource fetches keep the upstream status and retry headers and are
+  never rotated.
+- **Log console no longer floods.** Log WebSocket entries are batched into one UI update per 100 ms and the retained
+  line count is capped, so a provider reconnect loop emitting thousands of lines per second no longer stalls the tab.
+- **Source editor save/drag no longer panics.** A shared borrow held across a `borrow_mut()` callback no longer
+  aborts the editor.
 - **Long Telegram and ntfy notifications are no longer rejected.** Telegram accepts at most 4096 characters (UTF-16
   units) and ntfy 4096 bytes per message; neither channel had a limit, so a large watch or statistics notification
   failed and landed in the dead letter queue. Telegram now cuts the final text, after `MarkdownV2` escaping, and drops
@@ -1614,6 +1660,20 @@
 
 ## ⚙️ New Settings
 
+- **source.yml (input `options.connection_limit_policy`)** (`strict` | `bypass_local_cap` | `rotate_on_full`, default
+  `strict`): what happens when an input's local connection cap is reached. `strict` keeps today's behavior and rejects
+  over-cap requests. `bypass_local_cap` ignores the local cap; the provider still enforces its own limit, so the
+  account's real capacity is never exceeded and only Tuliprox's local counter stops rejecting early.
+  `rotate_on_full` treats an account-full rejection from the provider (HTTP 429, 503, 509, or a `200` body stating the
+  connection limit was reached) as a signal to retry the open on the next account in the input's pool; each failed
+  account is excluded for the rest of that request and rotation never preempts another user. Editable in the Web UI
+  under Sources → Options as two stacked toggles, where the second implies the first.
+
+- **source.yml (input `proxy`)**: `url` plus optional `username` and `password`. Xtream-only; see the feature above.
+
+- **source.yml (target `options.preserve_stream_ids`)** (bool, default `false`): keeps channel IDs stable across
+  source updates; see the feature above.
+
 - **config.yml (`reverse_proxy.stream`)**:
   - `hls_wrap_media_playlist` (default `true`): answers a proxied live HLS entry request whose provider returns a media
     playlist with a single-variant master playlist, so playlist refreshes keep their provider account across client
@@ -1771,6 +1831,8 @@
 
 ## 🛠 Maintenance
 
+- **Docker build uses Rust 1.98.** The builder image and toolchain pin were updated so the workspace's
+  `rust-version` is satisfied by the container build.
 - **`ClusterFlags` is built on `create_bitset!`.** It was the last user of the `bitflags` crate, which is removed
   from `shared`. The API and the persisted `[live,vod]` form are unchanged.
 - **Testkit scenarios can pause and tune reconnect windows.** A step with only `pause_millis` (1 to 300000) idles the

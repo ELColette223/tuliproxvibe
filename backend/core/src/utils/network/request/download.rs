@@ -287,6 +287,7 @@ pub async fn get_remote_content_as_file_with_options(
         provider: input.get_resolve_provider(url.as_str()),
         username: input.username.clone(),
         password: input.password.clone(),
+        proxy: input.proxy.clone(),
         method: input.method,
         headers: input.headers.clone(),
     };

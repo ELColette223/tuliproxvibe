@@ -73,6 +73,7 @@
     overflow: hidden;
   }
 
+  &__cols-1,
   &__cols-2,
   &__cols-3 {
     display: grid;
@@ -81,6 +82,10 @@
     .tp__form-field {
       min-width: 0;
     }
+  }
+
+  &__cols-1 {
+    grid-template-columns: 1fr;
   }
 
   &__cols-2 {

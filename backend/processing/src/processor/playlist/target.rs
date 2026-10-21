@@ -249,9 +249,11 @@ pub(crate) struct PreparedTarget {
     pub(crate) epg: Vec<Epg>,
     pub(crate) processing: PipelineStats,
     pub(crate) accepted_empty_clusters: ClusterFlags,
+    pub(crate) bouquet_snapshot: Vec<shared::model::TargetBouquetCategorySelectionDto>,
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 pub(crate) async fn prepare_playlist_for_target<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
     ctx: &PlaylistProcessingContext<E, M>,
     playlists: &mut [FetchedPlaylist<'_>],
@@ -280,8 +282,16 @@ pub(crate) async fn prepare_playlist_for_target<E: EventSink + Clone + 'static, 
 
     let bouquet_file =
         tuliprox_repository::load_target_bouquet(&ctx.config, &target.name).await.map_err(|err| vec![err])?;
+    let has_visual_selection = bouquet_file.as_ref().is_some_and(|file| file.bouquet.selection.is_some());
     let bouquet_filter =
         bouquet_file.and_then(|file| tuliprox_core::model::TargetBouquetFilter::from_dto(file.bouquet));
+    // Only a fully available source may establish a new category's initial IDs.
+    // Partial inputs block target processing upstream; rejected-quality or errored
+    // inputs can still be Ready with a fallback/incomplete playlist.
+    let snapshot_enabled = has_visual_selection
+        && !ctx.had_quality_rejections.load(std::sync::atomic::Ordering::Acquire)
+        && playlists.iter().all(|playlist| stats.get(&playlist.input.name).is_some_and(|stat| stat.error_count == 0));
+    let mut bouquet_snapshot = BouquetSnapshot::default();
     if let Some(ref filter) = bouquet_filter {
         let (live, vod, series) = filter.cluster_counts();
         debug!("Loaded target bouquet for '{}': live={:?}, vod={:?}, series={:?}", target.name, live, vod, series);
@@ -299,9 +309,16 @@ pub(crate) async fn prepare_playlist_for_target<E: EventSink + Clone + 'static, 
             format!("target '{}' input '{}' before_pipe", target.name, provider_fpl.input.name).as_str(),
         );
         step.broadcast("Executing transformations on '{}' playlist", &target.name);
-        let (mut processed_fpl, input_outcome) =
-            execute_pipe(target, &pipe, provider_fpl, &mut duplicates, consume_input_source, bouquet_filter.as_ref())
-                .map_err(|err| vec![err])?;
+        let (mut processed_fpl, input_outcome) = execute_pipe(
+            target,
+            &pipe,
+            provider_fpl,
+            &mut duplicates,
+            consume_input_source,
+            bouquet_filter.as_ref(),
+            snapshot_enabled.then_some(&mut bouquet_snapshot),
+        )
+        .map_err(|err| vec![err])?;
         debug!("Target '{}' input '{}' pipeline outcome: {input_outcome:?}", target.name, provider_fpl.input.name);
         aggregate_outcome.merge(input_outcome);
         log_memory_snapshot(
@@ -361,6 +378,14 @@ pub(crate) async fn prepare_playlist_for_target<E: EventSink + Clone + 'static, 
         epg: new_epg,
         processing: aggregate_outcome.to_stats(),
         accepted_empty_clusters,
+        bouquet_snapshot: bouquet_snapshot
+            .into_iter()
+            .map(|((cluster, name), included_channel_ids)| shared::model::TargetBouquetCategorySelectionDto {
+                cluster,
+                name,
+                included_channel_ids: included_channel_ids.into_iter().collect(),
+            })
+            .collect(),
     })
 }
 
@@ -532,6 +557,16 @@ pub(super) async fn finalize_prepared_target_with_tmdb<E: EventSink + Clone + 's
     }
 
     let eligible_catalog = prepare_eligible_catalog(target, new_playlist, &mut step);
+    if ctx.offline_target_reprocess && target.get_xtream_output().is_some_and(|xtream| xtream.trakt.is_some()) {
+        step.stop("Offline target rebuild cannot fetch Trakt curation; preserving finalized artifacts");
+        return (
+            Err(vec![TuliproxError::RepositoryPlaylist(format!(
+                "Target '{}' requires online Trakt curation and cannot be reprocessed offline",
+                target.name
+            ))]),
+            errors,
+        );
+    }
     let views = prepare_target_playlist_views(&ctx.client, tmdb_client, target, eligible_catalog).await;
     if views.base.is_empty()
         && views.xtream.is_none()
@@ -591,6 +626,19 @@ pub(super) async fn finalize_prepared_target_with_tmdb<E: EventSink + Clone + 's
         },
     )
     .await;
+    if result.is_ok() && !prepared.bouquet_snapshot.is_empty() {
+        // The repository re-reads the current v3 selection under the same mutation
+        // lock as user edits, preserving existing explicit channel choices.
+        if let Err(err) = tuliprox_repository::merge_target_bouquet_selection_snapshot(
+            &ctx.config,
+            &target.name,
+            prepared.bouquet_snapshot,
+        )
+        .await
+        {
+            errors.push(err);
+        }
+    }
     let watch_playlist = target_watch_view(&finalized_base, finalized_xtream.as_deref());
     if result.is_ok() && process_watch(&ctx.config, &ctx.events, target, watch_playlist).await {
         step.tick("group watches");
@@ -609,8 +657,9 @@ pub(crate) async fn playlist_resolve<E: EventSink + Clone + 'static, M: Metadata
     provider_fpl: &mut FetchedPlaylist<'_>,
     processed_fpl: &mut FetchedPlaylist<'_>,
 ) {
-    // Resolve and probe talk to the provider; an input in maintenance keeps what it has.
-    if ctx.is_input_in_maintenance(&processed_fpl.input.name) {
+    // Offline target rebuilds use only the persisted input, and an input in maintenance keeps
+    // what it has: resolution and probes would contact the provider either way.
+    if ctx.offline_target_reprocess || ctx.is_input_in_maintenance(&processed_fpl.input.name) {
         return;
     }
     playlist_resolve_series(ctx, target, errors, pipe, provider_fpl, processed_fpl).await;

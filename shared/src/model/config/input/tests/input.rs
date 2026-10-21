@@ -264,3 +264,84 @@ fn user_agent_stream_index_round_trips_and_keeps_options_non_empty() -> Result<(
     assert!(options.is_empty());
     Ok(())
 }
+
+#[test]
+fn xtream_input_proxy_is_normalized_and_serialized() {
+    let mut dto = ConfigInputDto {
+        name: "proxied".intern(),
+        input_type: InputType::Xtream,
+        url: "https://provider.example".to_string(),
+        username: Some("user".to_string()),
+        password: Some("pass".to_string()),
+        proxy: Some(ProxyConfigDto {
+            url: " socks5h://proxy.example:1080 ".to_string(),
+            username: Some(" proxy-user ".to_string()),
+            password: Some(" proxy-pass ".to_string()),
+        }),
+        ..ConfigInputDto::default()
+    };
+
+    prepare_dto(&mut dto).expect("Xtream proxy should prepare");
+    let proxy = dto.proxy.as_ref().expect("proxy should remain configured");
+    assert_eq!(proxy.url, "socks5h://proxy.example:1080");
+    assert_eq!(proxy.username.as_deref(), Some("proxy-user"));
+    assert_eq!(proxy.password.as_deref(), Some("proxy-pass"));
+    let yaml = serde_saphyr::to_string(&dto).expect("input should serialize");
+    assert!(yaml.contains("proxy:"));
+    assert!(yaml.contains("socks5h://proxy.example:1080"));
+}
+
+#[test]
+fn input_proxy_is_rejected_for_non_xtream_inputs() {
+    let mut dto = ConfigInputDto {
+        name: "m3u".intern(),
+        input_type: InputType::M3u,
+        url: "https://provider.example/playlist.m3u".to_string(),
+        proxy: Some(ProxyConfigDto { url: "http://proxy.example:8080".to_string(), ..Default::default() }),
+        ..ConfigInputDto::default()
+    };
+
+    let error = prepare_dto(&mut dto).expect_err("M3U input proxy must be rejected");
+    assert!(error.to_string().contains("only for Xtream inputs"));
+}
+
+#[test]
+fn xtream_input_proxy_rejects_unsupported_scheme() {
+    let mut dto = ConfigInputDto {
+        name: "proxied".intern(),
+        input_type: InputType::Xtream,
+        url: "https://provider.example".to_string(),
+        username: Some("user".to_string()),
+        password: Some("pass".to_string()),
+        proxy: Some(ProxyConfigDto { url: "ftp://proxy.example".to_string(), ..Default::default() }),
+        ..ConfigInputDto::default()
+    };
+
+    let error = prepare_dto(&mut dto).expect_err("unsupported proxy scheme must be rejected");
+    assert!(error.to_string().contains("Unsupported proxy scheme"));
+}
+
+#[test]
+fn connection_limit_policy_defaults_to_strict_and_is_omitted_on_serialize() -> Result<(), serde_json::Error> {
+    let options: ConfigInputOptionsDto = serde_json::from_str("{}")?;
+    assert_eq!(options.connection_limit_policy, ConnectionLimitPolicy::Strict);
+    assert!(options.is_empty());
+
+    let json = serde_json::to_value(&options)?;
+    assert!(json.get("connection_limit_policy").is_none());
+    Ok(())
+}
+
+#[test]
+fn connection_limit_policy_round_trips_non_default() -> Result<(), serde_json::Error> {
+    let options = ConfigInputOptionsDto {
+        connection_limit_policy: ConnectionLimitPolicy::RotateOnFull,
+        ..ConfigInputOptionsDto::default()
+    };
+    assert!(!options.is_empty());
+    let json = serde_json::to_string(&options)?;
+    assert!(json.contains("rotate_on_full"));
+    let restored: ConfigInputOptionsDto = serde_json::from_str(&json)?;
+    assert_eq!(restored.connection_limit_policy, ConnectionLimitPolicy::RotateOnFull);
+    Ok(())
+}

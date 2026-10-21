@@ -13,8 +13,9 @@ use crate::{
             is_session_based_playback, is_stream_share_enabled, local_stream_response, maintenance_rejection_response,
             redirect, redirect_response, reentry_suppressed_response, resolve_initial_stalker_playback_url,
             resource_proxy_response, resource_redirect_or_proxy, separate_number_and_remainder,
-            should_allow_exhausted_shared_reconnect, stream_response, stream_response_with_provider_handle,
-            try_option_bad_request, try_result_bad_request, try_unwrap_body, RedirectParams,
+            shared_live_mpeg_ts_key, should_allow_exhausted_shared_reconnect, stream_response_with_provider_handle,
+            stream_response_with_shared_key, try_option_bad_request, try_result_bad_request, try_unwrap_body,
+            RedirectParams,
         },
         endpoints::{
             hls_api::{
@@ -498,7 +499,16 @@ async fn xtream_player_api_stream(
         crate::api::api_utils::EvictionReentryGuard::SocketPlayback { virtual_id }
     };
     let user_session = app_state.active_users.get_and_update_user_session(&user.username, &session_key).await;
-
+    let share_stream = is_stream_share_enabled(item_type, &target);
+    let shared_key = shared_live_mpeg_ts_key(
+        target.id,
+        pli.input_name.as_ref(),
+        pli.get_input_stream_id().as_deref(),
+        pli.virtual_id.get(),
+    );
+    let session_matches_shared_key =
+        user_session.as_ref().is_some_and(|session| session.shared_stream_key.as_deref() == Some(shared_key.as_str()))
+            && user_session.as_ref().is_some_and(|session| session.virtual_id == virtual_id.get());
     let session_url = if let Some(session) = &user_session {
         if session.permission == UserConnectionPermission::Exhausted {
             let stream_channel = create_stream_channel_with_type(target.id, &pli, item_type);
@@ -525,7 +535,7 @@ async fn xtream_player_api_stream(
             );
         }
 
-        if app_state.active_provider.is_over_limit(&session.provider) {
+        if item_type.requires_provider_affinity() && app_state.active_provider.is_over_limit(&session.provider) {
             let stream_channel = create_stream_channel_with_type(target.id, &pli, item_type);
             if playback_ext == HLS_EXT {
                 return hls_admission_failure_manifest_response(
@@ -574,7 +584,11 @@ async fn xtream_player_api_stream(
             .into_response();
         }
 
-        session.stream_url.clone()
+        if session_matches_shared_key {
+            pli.url.clone()
+        } else {
+            session.stream_url.clone()
+        }
     } else {
         pli.url.clone()
     };
@@ -610,12 +624,8 @@ async fn xtream_player_api_stream(
         .kind()
         .or(user_session.as_ref().and_then(|session| session.connection_kind))
         .unwrap_or(crate::api::model::ConnectionKind::Normal);
-    let allow_exhausted_shared_reconnect = should_allow_exhausted_shared_reconnect(
-        is_stream_share_enabled(item_type, &target),
-        user_session.as_ref(),
-        virtual_id.get(),
-        session_url.as_ref(),
-    );
+    let allow_exhausted_shared_reconnect =
+        should_allow_exhausted_shared_reconnect(share_stream, user_session.as_ref(), virtual_id.get(), &shared_key);
     if connection_permission == UserConnectionPermission::Exhausted && !allow_exhausted_shared_reconnect {
         if connection_admission.is_reentry_suppressed() {
             return reentry_suppressed_response();
@@ -715,7 +725,7 @@ async fn xtream_player_api_stream(
     let pinned_provider =
         user_session.as_ref().filter(|_| item_type.requires_provider_affinity()).map(|session| &session.provider);
 
-    stream_response(
+    stream_response_with_shared_key(
         fingerprint,
         app_state,
         session_key.as_str(),
@@ -731,6 +741,8 @@ async fn xtream_player_api_stream(
         connection_kind,
         allow_exhausted_shared_reconnect,
         grace_mode,
+        None,
+        Some(&shared_key),
     )
     .await
     .into_response()
@@ -1412,8 +1424,20 @@ pub async fn xtream_get_stream_info_response(
                 }
 
                 // fetch info from the upstream provider
+                let global_client = app_state.http_clients.default.load();
+                let client = match tuliprox_core::utils::request::create_input_http_client(
+                    &app_state.app_config,
+                    &global_client,
+                    input.proxy.as_ref(),
+                ) {
+                    Ok(client) => client,
+                    Err(err) => {
+                        error!("Failed to create Xtream input proxy client: {err}");
+                        return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+                    }
+                };
                 if let Ok(content) = xtream::get_xtream_stream_info(
-                    &app_state.http_clients.default.load(),
+                    &client,
                     &app_state.app_config,
                     &app_state.playlists,
                     user,
@@ -1518,9 +1542,21 @@ async fn xtream_get_short_epg(
                         }
 
                         let input_source = InputSource::from(&*input).with_url(info_url);
+                        let global_client = app_state.http_clients.default.load();
+                        let client = match tuliprox_core::utils::request::create_input_http_client(
+                            &app_state.app_config,
+                            &global_client,
+                            input.proxy.as_ref(),
+                        ) {
+                            Ok(client) => client,
+                            Err(err) => {
+                                error!("Failed to create Xtream input proxy client: {err}");
+                                return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+                            }
+                        };
                         return match request::download_text_content(
                             &app_state.app_config,
-                            &app_state.http_clients.default.load(),
+                            &client,
                             &input_source,
                             None,
                             None,
@@ -1655,14 +1691,14 @@ async fn xtream_get_catchup_response(
     }
 
     let input_source = InputSource::from(&*input).with_url(info_url);
+    let global_client = app_state.http_clients.default.load();
+    let client = try_result_bad_request!(tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &global_client,
+        input.proxy.as_ref(),
+    ));
     let content = try_result_bad_request!(
-        xtream::get_xtream_stream_info_content(
-            &app_state.app_config,
-            &app_state.http_clients.default.load(),
-            &input_source,
-            false,
-        )
-        .await
+        xtream::get_xtream_stream_info_content(&app_state.app_config, &client, &input_source, false).await
     );
 
     let mut doc: Map<String, Value> = try_result_bad_request!(serde_json::from_str(&content));

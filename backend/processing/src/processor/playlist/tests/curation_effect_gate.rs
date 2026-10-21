@@ -74,6 +74,7 @@ pub(super) fn processing_context(
         partial_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         had_quality_rejections: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         maintenance: None,
+        offline_target_reprocess: false,
         input_refresh: None,
         library_update_mode: LibraryUpdateMode::ExistingCatalog,
     }
@@ -233,6 +234,7 @@ async fn assert_curation_preserves_empty_mixed_output_guard(canonical: Option<sh
         processing: PipelineStats::default(),
         accepted_empty_clusters: ClusterFlags::Vod,
         library_empty: tuliprox_repository::LibraryEmptyPublication::None,
+        bouquet_snapshot: Vec::new(),
     };
 
     let (result, errors) = finalize_prepared_target(Arc::new(context), prepared).await;
@@ -324,6 +326,7 @@ async fn complete_empty_curation_publishes_empty_watch_group_state() {
         processing: PipelineStats::default(),
         accepted_empty_clusters: ClusterFlags::empty(),
         library_empty: tuliprox_repository::LibraryEmptyPublication::None,
+        bouquet_snapshot: Vec::new(),
     };
     let (result, errors) = finalize_prepared_target(Arc::new(context), prepared).await;
     server.await.expect("Trakt server should finish");

@@ -12,7 +12,8 @@ use shared::{
     foundation::{get_filter, prepare_templates, MapperScript},
     model::{
         permission::Permission, ApiProxyConfigDto, AppConfigDto, ConfigDto, ConfigInputDto, IpCheckDto, LibraryStatus,
-        PlansConfigDto, SourcesConfigDto, TargetOutputDto, XtreamLoginInfo, XtreamLoginRequest,
+        ManagedFilterRule, PlansConfigDto, SourcesConfigDto, SourcesEditorSaveDto, TargetOutputDto, XtreamLoginInfo,
+        XtreamLoginRequest,
     },
     utils::{
         concat_path, concat_path_leading_slash, HEADER_CONFIG_API_PROXY_REVISION, HEADER_CONFIG_MAIN_REVISION,
@@ -431,6 +432,14 @@ impl ConfigService {
     }
 
     pub async fn save_sources(&self, dto: SourcesConfigDto) -> Result<(), Error> {
+        self.save_sources_with_filter_rules(dto, None).await
+    }
+
+    pub async fn save_sources_with_filter_rules(
+        &self,
+        sources: SourcesConfigDto,
+        filter_rules: Option<Vec<ManagedFilterRule>>,
+    ) -> Result<(), Error> {
         let mut revision = self.revisions.borrow().sources.clone();
         if revision.is_none() {
             self.fetch_server_config().await;
@@ -444,9 +453,9 @@ impl ConfigService {
 
         let request_headers = vec![(HEADER_IF_MATCH.to_string(), revision)];
         self.event_service.set_config_change_message_blocked(true);
-        match request_post_meta::<SourcesConfigDto, ()>(
+        match request_post_meta::<SourcesEditorSaveDto, ()>(
             &self.sources_path,
-            dto,
+            SourcesEditorSaveDto { sources, filter_rules },
             None,
             None,
             Some(&request_headers),

@@ -4,6 +4,7 @@ dist
 /resources/*.ts
 /release
 /target
+/target-docker*
 /frontend/build
 # Default ignored files
 /shelf/
@@ -46,6 +47,7 @@ artifacts
 
 # Ignore VSCode settings and files
 /.vscode
+/.claude
 
 .envrc
 backend/app/Cargo.lock
@@ -83,3 +85,16 @@ GOAL.md
 # Testkit report artifacts
 /testkit-report/
 
+/backup/
+/data/
+/config/*.yml
+/config/*.txt
+/config/*.db
+/config/*.lock
+/config/.*
+!/config/.env.example
+/config/bouquets
+/docker/config/
+/docker/data/
+
+.tmp-validate/

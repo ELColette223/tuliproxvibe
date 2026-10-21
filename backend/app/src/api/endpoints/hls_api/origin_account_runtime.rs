@@ -671,7 +671,8 @@ impl HlsOriginAccountRuntime for AppHlsOriginAccountRuntime {
                         rewrite_secret: app_state.get_encrypt_secret().to_vec(),
                         now_ms: current_time_millis(),
                     },
-                );
+                )
+                .await;
                 trigger_origin_refresh_sync(request).await;
                 if session.read().await.origin_account_manifest_pending.is_some() {
                     return Err(HlsBoundAccountAcquireErrorKind::Unavailable);

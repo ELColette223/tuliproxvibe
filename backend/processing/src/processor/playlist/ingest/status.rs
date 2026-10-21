@@ -16,10 +16,16 @@ use tuliprox_core::model::{ClusterForceUpdate, ConfigInput, ConfigInputFlags, Pr
 use tuliprox_iptv::{provider::PlaylistFetch, xtream};
 use tuliprox_repository::PlaylistSource;
 
-// Inputs disabled in the config are always disabled.
-// Command-line targets can only restrict enabled inputs, never enable them.
-pub(crate) fn is_input_enabled(input: &ConfigInput, user_targets: &ProcessTargets) -> bool {
-    input.enabled && (!user_targets.enabled || user_targets.has_input(input.id))
+// A normal run never enables disabled inputs; only an explicit offline target
+// rebuild may consume their already-persisted playlists.
+pub(crate) fn is_input_enabled(
+    input: &ConfigInput,
+    user_targets: &ProcessTargets,
+    offline_target_reprocess: bool,
+) -> bool {
+    let explicitly_selected_offline =
+        offline_target_reprocess && user_targets.enabled && !user_targets.targets.is_empty();
+    (input.enabled || explicitly_selected_offline) && (!user_targets.enabled || user_targets.has_input(input.id))
 }
 
 pub(crate) async fn with_sequential_group<T>(

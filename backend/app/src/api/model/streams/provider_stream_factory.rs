@@ -7,6 +7,7 @@ use shared::{
 use std::{
     net::SocketAddr,
     sync::{atomic::AtomicU8, Arc},
+    time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 use tuliprox_core::model::AllocationId;
@@ -17,6 +18,7 @@ use url::Url;
 const RETRY_SECONDS: u64 = 5;
 
 const ERR_MAX_RETRY_COUNT: u32 = 5;
+const SHARED_MPEGTS_BODY_IDLE: Duration = Duration::from_secs(40);
 
 /// Describes whether the provider response head is available before Tuliprox commits the client response head.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -60,6 +62,7 @@ pub struct ProviderStreamFactoryOptions {
     requested_range: Option<HeaderValue>,
     reconnect_flag: CancellationToken,
     provider: Option<Arc<ConfigProvider>>,
+    proxy: Option<crate::model::ProxyConfig>,
     username: Option<String>,
     client_ip: Option<String>,
     user_agent: Option<String>,
@@ -98,7 +101,10 @@ mod options;
 mod request;
 mod response;
 #[allow(unused_imports, reason = "Retains the existing module interface in production and test builds.")]
-pub use opening::{create_provider_stream, open_provider_stream_with_lifecycle, ProviderStreamOpen};
+pub use opening::{
+    create_provider_stream, create_provider_stream_outcome, open_provider_stream_outcome_with_lifecycle,
+    open_provider_stream_with_lifecycle, ProviderStreamOpen, ProviderStreamOpenOutcome,
+};
 pub(crate) use options::ProviderStreamFactoryParams;
 #[cfg(test)]
 use request::{prepare_client, provider_headers_require_manual_redirects, send_with_manual_redirects};

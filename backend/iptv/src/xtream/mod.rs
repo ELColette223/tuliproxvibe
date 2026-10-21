@@ -981,8 +981,9 @@ mod tests {
     use shared::{
         error::TuliproxError,
         model::{
-            ConfigInputOptionsDto, ConfigInputUpdateQualityDto, InputType, PlaylistGroup, PlaylistItem,
-            PlaylistItemHeader, PlaylistItemType, ProxyType, UpdateQualityPolicy, XtreamCluster, XtreamPlaylistItem,
+            ConfigInputAliasDto, ConfigInputOptionsDto, ConfigInputUpdateQualityDto, InputType, PlaylistGroup,
+            PlaylistItem, PlaylistItemHeader, PlaylistItemType, ProxyType, UpdateQualityPolicy, XtreamCluster,
+            XtreamPlaylistItem,
         },
         utils::Internable,
     };
@@ -991,8 +992,8 @@ mod tests {
         Arc,
     };
     use tuliprox_core::model::{
-        ClusterForceUpdate, ClusterUpdateAcceptance, ClusterUpdateRejection, ConfigInput, ConfigInputFlags,
-        ConfigInputFlagsSet, ConfigInputOptions, ProxyUserCredentials,
+        ClusterForceUpdate, ClusterUpdateAcceptance, ClusterUpdateRejection, ConfigInput, ConfigInputAlias,
+        ConfigInputFlags, ConfigInputFlagsSet, ConfigInputOptions, ProxyUserCredentials,
     };
     use tuliprox_repository::{
         XtreamClusterPublishBatchResult, XtreamClusterPublishOutcome, XtreamClusterQualityPolicy,
@@ -1046,6 +1047,48 @@ mod tests {
         let sink = RecordingSink::default();
         super::notify_account_expire_at(EXPIRY, None, &sink, "user", "provider");
         assert_eq!(sink.states().len(), 0);
+    }
+
+    #[test]
+    fn expired_root_catalog_uses_eligible_alias_without_changing_input_identity() {
+        let input = ConfigInput {
+            name: "erizadez79".intern(),
+            input_type: InputType::Xtream,
+            url: "https://provider.example".to_string(),
+            username: Some("expired-root".to_string()),
+            password: Some("root-password".to_string()),
+            exp_date: Some(1),
+            aliases: Some(vec![
+                ConfigInputAlias::from(&ConfigInputAliasDto {
+                    name: "expired-alias".intern(),
+                    username: Some("expired".to_string()),
+                    password: Some("expired-password".to_string()),
+                    url: "https://provider.example".to_string(),
+                    exp_date: Some(1),
+                    enabled: true,
+                    ..ConfigInputAliasDto::default()
+                }),
+                ConfigInputAlias::from(&ConfigInputAliasDto {
+                    name: "active-alias".intern(),
+                    username: Some("active".to_string()),
+                    password: Some("alias-password".to_string()),
+                    url: "https://provider.example".to_string(),
+                    enabled: true,
+                    ..ConfigInputAliasDto::default()
+                }),
+            ]),
+            ..ConfigInput::default()
+        };
+        let account = input.playlist_account().expect("unexpired alias");
+        // The expired root is skipped; the first usable alias supplies the credentials.
+        // The fetch itself still runs under the original input identity.
+        assert_eq!(account.name.as_ref(), "active-alias");
+        assert_eq!(account.username.as_deref(), Some("active"));
+        assert_eq!(account.password.as_deref(), Some("alias-password"));
+        assert_eq!(input.name.as_ref(), "erizadez79");
+
+        let no_alias = ConfigInput { aliases: None, ..input };
+        assert!(no_alias.playlist_account().is_none());
     }
 
     fn options_with_flags(flags: &[ConfigInputFlags]) -> ConfigInputOptions {

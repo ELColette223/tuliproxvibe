@@ -28,8 +28,8 @@ use tuliprox_core::model::{AppConfig, ConfigInput};
 use tuliprox_iptv::{
     error::ProviderErrorKind,
     provider::{
-        BatchContainerProvider, M3uProvider, PlaylistFetchRequest, PlaylistProvider, UnsupportedProvider,
-        XtreamProvider,
+        BatchContainerProvider, M3uProvider, PlaylistFetch, PlaylistFetchRequest, PlaylistProvider,
+        UnsupportedProvider, XtreamProvider,
     },
     xtream,
 };
@@ -140,45 +140,59 @@ async fn playlist_download_from_input<E: EventSink>(
         Vec::new()
     };
 
-    let request = PlaylistFetchRequest {
-        app_config,
-        config: &app_config.config.load(),
-        client,
-        input,
-        xtream_clusters: Some(xtream_clusters_to_download.as_slice()),
-        update_quality: refresh_policy.quality,
+    // A per-input proxy only applies to Xtream inputs; other types share the caller's client.
+    let input_client = if download_input_type.is_xtream() {
+        if let Some(proxy) = input.proxy.as_ref() {
+            log::info!("Downloading playlist for input '{}' via proxy: {}", input.name, proxy.display_for_log());
+        }
+        tuliprox_core::utils::request::create_input_http_client(app_config, client, input.proxy.as_ref())
+    } else {
+        Ok(client.clone())
     };
 
     // Each arm builds the provider its input type needs and awaits it in place: the
     // provider types share no supertype, and building one is free, so this stays a match
     // and stays statically dispatched. What changed is the result - one named
     // `PlaylistFetch` instead of a six-element tuple assembled by position.
-    let fetch = match download_input_type {
-        InputType::M3u => {
-            super::super::m3u_quality::effective_m3u_fetch(
+    let fetch = match input_client {
+        Err(err) => PlaylistFetch::failed(err),
+        Ok(input_client) => {
+            let request = PlaylistFetchRequest {
                 app_config,
+                config: &app_config.config.load(),
+                client: &input_client,
                 input,
-                refresh_policy.quality,
-                M3uProvider.fetch(&request).await,
-            )
-            .await
-        }
-        InputType::Xtream => XtreamProvider::new(events).fetch(&request).await,
-        InputType::M3uBatch | InputType::XtreamBatch | InputType::StalkerBatch => {
-            BatchContainerProvider.fetch(&request).await
-        }
-        InputType::Stalker => {
-            StalkerProvider::new(stalker_refresh_mode, !config.disk_based_processing).fetch(&request).await
-        }
-        InputType::Library => LibraryProvider.fetch(&request).await,
-        InputType::Plex | InputType::Emby | InputType::Jellyfin => MediaServerProvider.fetch(&request).await,
-        InputType::Staged => {
-            UnsupportedProvider::new(
-                "staged",
-                format!("staged input '{}' was not resolved against a parent input", input.name),
-            )
-            .fetch(&request)
-            .await
+                xtream_clusters: Some(xtream_clusters_to_download.as_slice()),
+                update_quality: refresh_policy.quality,
+            };
+            match download_input_type {
+                InputType::M3u => {
+                    super::super::m3u_quality::effective_m3u_fetch(
+                        app_config,
+                        input,
+                        refresh_policy.quality,
+                        M3uProvider.fetch(&request).await,
+                    )
+                    .await
+                }
+                InputType::Xtream => XtreamProvider::new(events).fetch(&request).await,
+                InputType::M3uBatch | InputType::XtreamBatch | InputType::StalkerBatch => {
+                    BatchContainerProvider.fetch(&request).await
+                }
+                InputType::Stalker => {
+                    StalkerProvider::new(stalker_refresh_mode, !config.disk_based_processing).fetch(&request).await
+                }
+                InputType::Library => LibraryProvider.fetch(&request).await,
+                InputType::Plex | InputType::Emby | InputType::Jellyfin => MediaServerProvider.fetch(&request).await,
+                InputType::Staged => {
+                    UnsupportedProvider::new(
+                        "staged",
+                        format!("staged input '{}' was not resolved against a parent input", input.name),
+                    )
+                    .fetch(&request)
+                    .await
+                }
+            }
         }
     };
     // `ProviderErrorKind` has always been able to answer "is this worth
@@ -269,6 +283,61 @@ pub(crate) async fn download_input<E: EventSink + Clone + 'static, M: MetadataUp
             errors: Vec::new(),
             source: MemoryPlaylistSource::default().into_source(),
             storage_error: None,
+            partial: false,
+            quality_rejections: Vec::new(),
+            accepted_empty_clusters: ClusterFlags::empty(),
+            input_telemetry: None,
+        };
+    }
+
+    if ctx.offline_target_reprocess {
+        // Rebuild from persisted input playlists only. Provider, EPG, staged and alias
+        // downloads never run, even when the cache metadata looks stale.
+        let _input_lock = ctx.get_input_lock(&input.name).await;
+        let storage_dir = ctx.config.config.load().storage_dir.clone();
+        let storage_path = tuliprox_repository::build_input_storage_path(&input.name, &storage_dir);
+        let cache = if input.get_download_input_type().is_xtream() {
+            let clusters: Vec<_> = PIPELINE_TRANSPARENCY_CLUSTERS
+                .into_iter()
+                .filter(|cluster| cluster_is_configured(input, *cluster))
+                .collect();
+            if clusters
+                .iter()
+                .all(|cluster| !tuliprox_repository::xtream_get_file_path(&storage_path, *cluster).is_file())
+            {
+                Err(TuliproxError::RepositoryPlaylist(format!(
+                    "No persisted Xtream playlist cache for input '{}'",
+                    input.name
+                )))
+            } else {
+                tuliprox_repository::load_input_xtream_playlist(&ctx.config, &storage_path, &clusters)
+                    .await
+                    .map(|groups| MemoryPlaylistSource::new(groups).into_source())
+            }
+        } else {
+            load_input_playlist(&ctx.config, input, None).await
+        };
+        let (source, storage_error) = match cache {
+            Ok(mut source) => {
+                if source.is_empty() {
+                    (
+                        MemoryPlaylistSource::default().into_source(),
+                        Some(TuliproxError::RepositoryPlaylist(format!(
+                            "Persisted playlist cache for input '{}' is empty",
+                            input.name
+                        ))),
+                    )
+                } else {
+                    (filter_skipped_clusters_from_source(source, input), None)
+                }
+            }
+            Err(error) => (MemoryPlaylistSource::default().into_source(), Some(error)),
+        };
+        return InputDownloadResult {
+            authoritative_library: false,
+            errors: Vec::new(),
+            source,
+            storage_error,
             partial: false,
             quality_rejections: Vec::new(),
             accepted_empty_clusters: ClusterFlags::empty(),

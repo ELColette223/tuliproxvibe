@@ -4,7 +4,7 @@ use super::{
     get_stream_throttle, hls_resource_failure_status, is_media_server_playback_url, is_media_server_stream_ref_url,
     is_socket_bound_playback_session, is_stream_metrics_enabled, is_throttled_stream, mark_response_as_uncompressed,
     open_media_server_stream_for_input, prepare_stream_metering, re_resolve_stalker_url_singleflight,
-    resolve_streaming_strategy_with_provider_handle, session_reacquire_cleanup_addrs,
+    resolve_streaming_strategy_with_provider_handle, select_provider_stream_url, session_reacquire_cleanup_addrs,
     should_defer_provider_open_for_grace_hold, should_refresh_stalker_playback, split_provider_stream_open,
     stalker_stream_kind, stream_admission_rejected_response, stream_response_with_provider_handle, try_unwrap_body,
     ConnectFailedAttempt, CurrentSessionGuard, ForceStreamRequestContext, PlaybackRequestClass, RedirectParams,
@@ -14,10 +14,12 @@ use crate::{
     api::{
         model::{
             create_active_client_stream, create_channel_unavailable_stream, get_custom_stream_response_error_status,
-            get_stream_response_with_headers, is_custom_video_stream_enabled, open_provider_stream_with_lifecycle,
-            AppState, CustomVideoStreamType, ProviderStreamCustomReason, ProviderStreamFactoryOptions,
-            ProviderStreamOpenLifecycle, ProviderStreamState, SharedStreamCtx, SharedStreamManager, StreamDetails,
-            StreamError, ThrottledStream, UserSession,
+            get_stream_response_with_headers, is_custom_video_stream_enabled,
+            open_provider_stream_outcome_with_lifecycle, open_provider_stream_with_lifecycle, AppState,
+            BoxedProviderStream, CustomVideoStreamType, PlaybackLeaseRef, ProviderStreamCustomReason,
+            ProviderStreamFactoryOptions, ProviderStreamInfo, ProviderStreamOpenLifecycle, ProviderStreamOpenOutcome,
+            ProviderStreamState, SharedStreamCtx, SharedStreamManager, StreamDetails, StreamError, StreamingStrategy,
+            ThrottledStream, UserSession,
         },
         panel_api::{can_provision_on_exhausted, create_panel_api_provisioning_stream_details},
     },
@@ -44,7 +46,13 @@ use shared::{
         trim_slash, Internable,
     },
 };
-use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
+use tokio_util::sync::CancellationToken;
 use tuliprox_session::{ProviderSessionHeaders, SessionProviderHeaders};
 use url::Url;
 
@@ -136,6 +144,169 @@ pub(crate) async fn resolve_stream_user_agent_index(
     } else {
         None
     }
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+async fn open_provider_stream_with_optional_rotation(
+    app_state: &Arc<AppState>,
+    input: &Arc<ConfigInput>,
+    fingerprint: &Fingerprint,
+    stream_url: &str,
+    username: &str,
+    req_headers: &HeaderMap,
+    streaming_strategy: &mut StreamingStrategy,
+    stream_channel: &StreamChannel,
+    item_type: PlaylistItemType,
+    content_representation: crate::api::model::ProviderContentRepresentationMode,
+    share_stream: bool,
+    stream_options: &StreamOptions,
+    session_headers: Option<&HashMap<String, String>>,
+    user_agent_stream_index: Option<u64>,
+    accept_requested_stream_url: bool,
+    allow_provider_grace: bool,
+    user_priority: i8,
+    connection_kind: crate::api::model::ConnectionKind,
+    session_owner: Option<&str>,
+    request_url: &mut Arc<str>,
+) -> (Option<BoxedProviderStream>, ProviderStreamInfo, ProviderSessionHeaders, Option<CancellationToken>) {
+    let build_options = |url: &Url| {
+        let default_user_agent = app_state.app_config.config.load().default_user_agent.clone();
+        let disabled_headers = app_state.get_disabled_headers();
+        let mut options = ProviderStreamFactoryOptions::new(&crate::api::model::ProviderStreamFactoryParams {
+            addr: fingerprint.addr,
+            item_type,
+            share_stream,
+            stream_options,
+            stream_url: url,
+            req_headers,
+            input_headers: streaming_strategy.input_headers.as_ref(),
+            session_headers,
+            disabled_headers: disabled_headers.as_ref(),
+            default_user_agent: default_user_agent.as_deref(),
+            username: Some(username),
+            client_ip: Some(&fingerprint.client_ip),
+            stream_channel: Some(stream_channel),
+            connect_failure_stage: Some(FailureStage::ProviderOpen),
+            content_representation,
+            proxy: input.proxy.as_ref(),
+        });
+        if let Some(stream_index) = user_agent_stream_index {
+            options.apply_user_agent_stream_index(stream_index);
+        }
+        options.set_provider(input.get_resolve_provider(url.as_str()));
+        options.set_proxy(input.proxy.clone());
+        options.apply_input_options(input);
+        if input.input_type.is_stalker() {
+            options.require_public_destination();
+        }
+        options
+    };
+
+    let mut excluded_providers = HashSet::new();
+    let max_attempts = if input.rotate_on_connection_full() {
+        app_state.active_provider.provider_names_for_input(&input.name).len().max(1)
+    } else {
+        1
+    };
+
+    let mut last_account_full: Option<(StatusCode, &'static str)> = None;
+    for attempt in 0..max_attempts {
+        let Ok(parsed_url) = Url::parse(request_url.as_ref()) else {
+            return (None, None, ProviderSessionHeaders::default(), None);
+        };
+        let options = build_options(&parsed_url);
+        let reconnect_flag = options.get_reconnect_flag_clone();
+        let lifecycle = streaming_strategy.provider_handle.as_ref().and_then(ProviderStreamOpenLifecycle::from_managed);
+        match open_provider_stream_outcome_with_lifecycle(
+            &app_state.provider_stream_ctx(),
+            &app_state.http_clients.default.load(),
+            options,
+            lifecycle,
+        )
+        .await
+        {
+            ProviderStreamOpenOutcome::Opened(response) => {
+                return (Some(response.stream), response.info, response.provider_session_headers, Some(reconnect_flag));
+            }
+            ProviderStreamOpenOutcome::AccountFull { status, provider_error_class } => {
+                last_account_full = Some((status, provider_error_class));
+                if !input.rotate_on_connection_full() {
+                    break;
+                }
+                let failed_provider = streaming_strategy
+                    .provider_handle
+                    .as_ref()
+                    .and_then(|managed| managed.handle())
+                    .and_then(|handle| handle.allocation.get_provider_name());
+                let Some(failed_provider) = failed_provider else {
+                    break;
+                };
+                excluded_providers.insert(failed_provider);
+                drop(streaming_strategy.provider_handle.take());
+
+                let lease = session_owner.map(|owner| {
+                    PlaybackLeaseRef::new(
+                        owner,
+                        PlaybackKind::classify(item_type, extract_extension_from_url(stream_url)),
+                    )
+                });
+                let Some(next_handle) = app_state
+                    .active_provider
+                    .acquire_connection_with_lease_for_session_await_excluding(
+                        &input.name,
+                        &fingerprint.addr,
+                        allow_provider_grace,
+                        user_priority,
+                        connection_kind,
+                        lease,
+                        &excluded_providers,
+                    )
+                    .await
+                else {
+                    break;
+                };
+                let managed =
+                    tuliprox_session::ManagedProviderHandle::new(Arc::clone(&app_state.active_provider), next_handle);
+                let Some(provider_cfg) = managed.handle().and_then(|handle| handle.allocation.provider()) else {
+                    drop(managed);
+                    break;
+                };
+                let Some((_provider_name, rewritten_url)) = select_provider_stream_url(
+                    stream_url,
+                    input,
+                    provider_cfg,
+                    accept_requested_stream_url,
+                    &app_state.app_config,
+                )
+                .await
+                else {
+                    drop(managed);
+                    break;
+                };
+                *request_url = Arc::<str>::from(rewritten_url);
+                streaming_strategy.provider_handle = Some(managed);
+                warn!(
+                    "rotate_on_full: attempt {} failed with {} (status {}); retrying with next provider",
+                    attempt + 1,
+                    provider_error_class,
+                    status
+                );
+            }
+            ProviderStreamOpenOutcome::UpstreamStatus { status, headers } => {
+                // HLS resources never rotate: the upstream status and its retry headers are the
+                // response, so pass them through instead of synthesizing a channel-unavailable body.
+                return (None, Some((headers, status, None, None)), ProviderSessionHeaders::default(), None);
+            }
+            ProviderStreamOpenOutcome::Failed => return (None, None, ProviderSessionHeaders::default(), None),
+        }
+    }
+
+    if last_account_full.is_some() {
+        if let (Some(stream), info) = create_channel_unavailable_stream(&app_state.app_config, &[], StatusCode::OK) {
+            return (Some(stream), info, ProviderSessionHeaders::default(), None);
+        }
+    }
+    (None, None, ProviderSessionHeaders::default(), None)
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines, clippy::fn_params_excessive_bools)]
@@ -289,9 +460,9 @@ pub(super) async fn create_stream_response_details(
                 session_registration: None,
             })
         }
-        ProviderStreamState::Available(_provider_name, request_url)
-        | ProviderStreamState::GracePeriod(_provider_name, request_url) => {
-            let mut request_url = request_url;
+        ProviderStreamState::Available(ref _provider_name, ref request_url)
+        | ProviderStreamState::GracePeriod(ref _provider_name, ref request_url) => {
+            let mut request_url = request_url.clone();
             debug_if_enabled!(
                 "Provider stream selection: allocated_provider={} actual_request_url={}",
                 sanitize_sensitive_info(guard_provider_name.as_deref().unwrap_or("?")),
@@ -333,61 +504,34 @@ pub(super) async fn create_stream_response_details(
                         }
                     }
                 } else {
-                    let parsed_url = Url::parse(&request_url);
-                    let request_url_valid = parsed_url.is_ok();
-                    let ((mut stream, mut stream_info, mut provider_session_headers), mut reconnect_flag) =
-                        if let Ok(url) = parsed_url {
-                            let default_user_agent = app_state.app_config.config.load().default_user_agent.clone();
-                            let disabled_headers = app_state.get_disabled_headers();
-                            let mut provider_stream_factory_options =
-                                ProviderStreamFactoryOptions::new(&crate::api::model::ProviderStreamFactoryParams {
-                                    addr: fingerprint.addr,
-                                    item_type,
-                                    share_stream,
-                                    stream_options,
-                                    stream_url: &url,
-                                    req_headers,
-                                    input_headers: streaming_strategy.input_headers.as_ref(),
-                                    session_headers,
-                                    disabled_headers: disabled_headers.as_ref(),
-                                    default_user_agent: default_user_agent.as_deref(),
-                                    username: Some(username),
-                                    client_ip: Some(&fingerprint.client_ip),
-                                    stream_channel: Some(stream_channel),
-                                    connect_failure_stage: Some(FailureStage::ProviderOpen),
-                                    content_representation,
-                                });
-
-                            if let Some(stream_index) = user_agent_stream_index {
-                                provider_stream_factory_options.apply_user_agent_stream_index(stream_index);
-                            }
-
-                            let provider_config = input.get_resolve_provider(url.as_ref());
-                            provider_stream_factory_options.set_provider(provider_config);
-                            provider_stream_factory_options.apply_input_options(input);
-                            if input.input_type.is_stalker() {
-                                provider_stream_factory_options.require_public_destination();
-                            }
-
-                            let reconnect_flag = provider_stream_factory_options.get_reconnect_flag_clone();
-                            let lifecycle = streaming_strategy
-                                .provider_handle
-                                .as_ref()
-                                .and_then(ProviderStreamOpenLifecycle::from_managed);
-                            let provider_stream = match open_provider_stream_with_lifecycle(
-                                &app_state.provider_stream_ctx(),
-                                &app_state.http_clients.default.load(),
-                                provider_stream_factory_options,
-                                lifecycle,
+                    let request_url_valid = Url::parse(&request_url).is_ok();
+                    let (mut stream, mut stream_info, mut provider_session_headers, mut reconnect_flag) =
+                        if request_url_valid {
+                            open_provider_stream_with_optional_rotation(
+                                app_state,
+                                input,
+                                fingerprint,
+                                stream_url,
+                                username,
+                                req_headers,
+                                &mut streaming_strategy,
+                                stream_channel,
+                                item_type,
+                                content_representation,
+                                share_stream,
+                                stream_options,
+                                session_headers,
+                                user_agent_stream_index,
+                                accept_requested_stream_url,
+                                allow_provider_grace,
+                                user_priority,
+                                connection_kind,
+                                session_owner,
+                                &mut request_url,
                             )
                             .await
-                            {
-                                None => (None, None, ProviderSessionHeaders::default()),
-                                Some(open) => split_provider_stream_open(open),
-                            };
-                            (provider_stream, Some(reconnect_flag))
                         } else {
-                            ((None, None, ProviderSessionHeaders::default()), None)
+                            (None, None, ProviderSessionHeaders::default(), None)
                         };
                     let should_refresh_stalker = should_refresh_stalker_playback(
                         input.input_type,
@@ -429,12 +573,14 @@ pub(super) async fn create_stream_response_details(
                                             stream_channel: Some(stream_channel),
                                             connect_failure_stage: Some(FailureStage::ProviderOpen),
                                             content_representation,
+                                            proxy: input.proxy.as_ref(),
                                         },
                                     );
                                     if let Some(stream_index) = user_agent_stream_index {
                                         options.apply_user_agent_stream_index(stream_index);
                                     }
                                     options.set_provider(input.get_resolve_provider(url.as_ref()));
+                                    options.set_proxy(input.proxy.clone());
                                     options.apply_input_options(input);
                                     options.require_public_destination();
                                     if let Some(m) = streaming_strategy.provider_handle.as_mut() {
@@ -984,6 +1130,7 @@ pub(super) async fn force_stream_response(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) async fn stream_response(
     fingerprint: &Fingerprint,
     app_state: &Arc<AppState>,
@@ -1044,6 +1191,7 @@ pub(super) async fn try_shared_stream_response_if_any(
     session_token: &str,
     req_headers: &HeaderMap,
     placeholder_transition_version: Option<u64>,
+    shared_key: &str,
 ) -> Option<impl IntoResponse> {
     let subscriber_id =
         tuliprox_core::model::SharedSubscriberId::from_stream_uid(app_state.connection_manager.next_stream_uid());
@@ -1054,7 +1202,7 @@ pub(super) async fn try_shared_stream_response_if_any(
             active_provider: &app_state.active_provider,
             connection_manager: &app_state.connection_manager,
         },
-        stream_url,
+        shared_key,
         &fingerprint.addr,
         subscriber_id,
         connection_priority_for_kind(user, connection_kind),
@@ -1077,8 +1225,8 @@ pub(super) async fn try_shared_stream_response_if_any(
             return Some(stream_admission_rejected_response(reason.into(), &user.username));
         }
     };
-    debug_if_enabled!("Using shared stream {}", sanitize_sensitive_info(stream_url));
-    if let Some(headers) = app_state.shared_stream_manager.get_shared_state_headers(stream_url).await {
+    debug_if_enabled!("Using shared stream {}", sanitize_sensitive_info(shared_key));
+    if let Some(headers) = app_state.shared_stream_manager.get_shared_state_headers(shared_key).await {
         let (status_code, header_map) = get_stream_response_with_headers(Some((headers.clone(), StatusCode::OK)));
         let mut grace_period_options = app_state.get_grace_options();
         if connect_permission != UserConnectionPermission::GracePeriod {
@@ -1170,6 +1318,22 @@ pub(super) async fn try_shared_stream_response_if_any(
     None
 }
 
+/// Stable shared-origin key for live MPEG-TS.
+///
+/// The provider stream id namespaces the input so two inputs never collide, and the
+/// target/virtual id is the fallback when the upstream item has no stream id.
+pub fn shared_live_mpeg_ts_key(
+    target_id: u16,
+    input_name: &str,
+    input_stream_id: Option<&str>,
+    virtual_id: u32,
+) -> String {
+    match input_stream_id.filter(|id| !id.trim().is_empty()) {
+        Some(input_stream_id) => format!("mpegts:origin:{}:{input_name}{input_stream_id}", input_name.len()),
+        None => format!("mpegts:fallback:{target_id}:{virtual_id}"),
+    }
+}
+
 pub fn is_stream_share_enabled(item_type: PlaylistItemType, target: &ConfigTarget) -> bool {
     (item_type == PlaylistItemType::Live/* || item_type == PlaylistItemType::LiveHls */)
         && target.options.as_ref().is_some_and(ConfigTargetOptions::share_live_mpeg_ts_enabled)
@@ -1221,12 +1385,12 @@ pub(crate) fn should_allow_exhausted_shared_reconnect(
     share_stream: bool,
     user_session: Option<&UserSession>,
     requested_virtual_id: u32,
-    requested_stream_url: &str,
+    shared_key: &str,
 ) -> bool {
     share_stream
         && user_session.is_some_and(|session| {
             session.permission != UserConnectionPermission::Exhausted
                 && session.virtual_id == requested_virtual_id
-                && session.stream_url.as_ref() == requested_stream_url
+                && session.shared_stream_key.as_deref() == Some(shared_key)
         })
 }

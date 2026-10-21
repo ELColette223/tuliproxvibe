@@ -23,7 +23,7 @@ async fn old_origin_cannot_unregister_replacement() {
     let old = Arc::new(SharedStreamState::new(Vec::new(), CHANNEL_SIZE, None, 1024, None));
     let current = Arc::new(SharedStreamState::new(Vec::new(), CHANNEL_SIZE, None, 1024, None));
     manager.shared_streams.write().await.by_key.insert(Arc::from(url), Arc::clone(&current));
-    manager.unregister(url, &old).await;
+    manager.unregister(url, &old, false).await;
     assert!(manager.get_shared_state(url).await.is_some_and(|state| Arc::ptr_eq(&state, &current)));
     assert!(!current.stop_token.is_cancelled());
 }

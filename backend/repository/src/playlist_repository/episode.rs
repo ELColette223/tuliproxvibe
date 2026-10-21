@@ -43,6 +43,7 @@ pub(super) fn prepare_target_playlist_for_persistence(
     target_id_mapping: &mut TargetIdMapping,
 ) {
     let mut source_ordinal: u32 = 0;
+    let preserve_stream_ids = target.options.as_ref().is_some_and(ConfigTargetOptions::preserve_stream_ids);
     for group in playlist.iter_mut() {
         for channel in &mut group.channels {
             let header = &mut channel.header;
@@ -63,15 +64,37 @@ pub(super) fn prepare_target_playlist_for_persistence(
                 };
             }
 
-            let uuid = header.get_uuid();
             let item_type = header.item_type;
-            let parent_virtual_id = if item_type.is_series() {
-                target_id_mapping.get_parent_virtual_id_by_uuid(uuid).unwrap_or_default()
+            if preserve_stream_ids {
+                // Identity-derived ids survive upstream provider id changes, so a client's
+                // saved channel keeps resolving after a source update.
+                header.uuid = shared::utils::generate_stable_channel_uuid(
+                    &target.name,
+                    &header.group,
+                    &header.get_name(),
+                    item_type,
+                );
+                let parent_virtual_id = if item_type.is_series() {
+                    target_id_mapping.get_parent_virtual_id_by_uuid(&header.uuid).unwrap_or_default()
+                } else {
+                    VirtualId::default()
+                };
+                header.virtual_id = target_id_mapping.get_and_update_virtual_id_with_reconciliation(
+                    &header.uuid,
+                    provider_id,
+                    item_type,
+                    parent_virtual_id,
+                );
             } else {
-                VirtualId::default()
-            };
-            header.virtual_id =
-                target_id_mapping.get_and_update_virtual_id(uuid, provider_id, item_type, parent_virtual_id);
+                let uuid = header.get_uuid();
+                let parent_virtual_id = if item_type.is_series() {
+                    target_id_mapping.get_parent_virtual_id_by_uuid(uuid).unwrap_or_default()
+                } else {
+                    VirtualId::default()
+                };
+                header.virtual_id =
+                    target_id_mapping.get_and_update_virtual_id(uuid, provider_id, item_type, parent_virtual_id);
+            }
         }
     }
 

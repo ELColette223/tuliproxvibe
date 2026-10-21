@@ -118,6 +118,7 @@ pub struct UserSession {
     pub virtual_id: u32,
     pub provider: Arc<str>,
     pub stream_url: Arc<str>,
+    pub shared_stream_key: Option<Arc<str>>,
     pub provider_session_headers: HashMap<String, String>,
     /// Origin (`scheme://host:port`) whose response set `provider_session_headers`; `None` when unknown.
     pub provider_session_headers_host: Option<String>,

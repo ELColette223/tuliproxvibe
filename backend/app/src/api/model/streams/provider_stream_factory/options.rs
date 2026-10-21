@@ -4,7 +4,7 @@ use super::{
     ProviderStreamFactoryOptions,
 };
 use crate::{
-    api::model::{get_header_filter_for_item_type, ProviderContentRepresentationMode},
+    api::model::{get_header_filter_for_item_type, ProviderContentRepresentationMode, ProviderStreamInfo},
     model::{ConfigProvider, ReverseProxyDisabledHeaderConfig},
     utils::request::{get_request_headers, preview_request_target_for_logging},
 };
@@ -40,9 +40,12 @@ pub(crate) struct ProviderStreamFactoryParams<'a> {
     pub stream_channel: Option<&'a StreamChannel>,
     pub connect_failure_stage: Option<FailureStage>,
     pub content_representation: ProviderContentRepresentationMode,
+    /// Per-input outbound proxy; `None` means the shared/global client.
+    pub proxy: Option<&'a crate::model::ProxyConfig>,
 }
 
 impl ProviderStreamFactoryOptions {
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn new(request: &ProviderStreamFactoryParams<'_>) -> Self {
         let ProviderStreamFactoryParams {
             addr,
@@ -60,6 +63,7 @@ impl ProviderStreamFactoryOptions {
             stream_channel,
             connect_failure_stage,
             content_representation,
+            proxy,
         } = request;
         let buffer_size = if stream_options.buffer_enabled { stream_options.buffer_size } else { 0 };
         let buffer_max_bytes = stream_options.buffer_max_bytes;
@@ -147,6 +151,7 @@ impl ProviderStreamFactoryOptions {
             completion_token: None,
             close_reason: None,
             account: None,
+            proxy: proxy.cloned(),
         }
     }
 
@@ -168,6 +173,10 @@ impl ProviderStreamFactoryOptions {
     pub fn get_close_reason(&self) -> Option<Arc<AtomicU8>> { self.close_reason.clone() }
 
     pub fn set_provider(&mut self, provider: Option<Arc<ConfigProvider>>) { self.provider = provider; }
+
+    pub fn set_proxy(&mut self, proxy: Option<crate::model::ProxyConfig>) { self.proxy = proxy; }
+
+    pub(crate) fn proxy(&self) -> Option<&crate::model::ProxyConfig> { self.proxy.as_ref() }
 
     pub fn apply_user_agent_stream_index(&mut self, stream_index: u64) {
         crate::utils::request::append_user_agent_stream_index(&mut self.headers, stream_index);
@@ -238,6 +247,37 @@ impl ProviderStreamFactoryOptions {
 
     #[inline]
     pub fn was_range_requested(&self) -> bool { self.flags.contains(ProviderStreamFactoryFlags::RangeRequested) }
+
+    /// Shared live MPEG-TS bodies get continuity enforcement only when the response is an
+    /// unencoded, complete 200 with `video/mp2t`: only then can a mid-body reopen not be
+    /// mistaken for a continuation of the same transport stream.
+    pub(super) fn shared_mpegts_recovery_enabled(&self, info: &ProviderStreamInfo) -> bool {
+        self.should_retry_provider_request() && self.shared_mpegts_compatible_response(info)
+    }
+
+    fn shared_mpegts_compatible_response(&self, info: &ProviderStreamInfo) -> bool {
+        self.flags.contains(ProviderStreamFactoryFlags::ShareStream)
+            && self.item_type == shared::model::PlaylistItemType::Live
+            && !self.was_range_requested()
+            && matches!(
+                self.content_representation,
+                crate::api::model::ProviderContentRepresentationMode::PreserveOrigin
+            )
+            && info.as_ref().is_some_and(|(headers, status, _, custom)| {
+                *status == reqwest::StatusCode::OK
+                    && custom.is_none()
+                    && headers.iter().any(|(name, value)| {
+                        name.eq_ignore_ascii_case("content-type")
+                            && value.to_ascii_lowercase().starts_with("video/mp2t")
+                    })
+                    && !headers.iter().any(|(name, value)| {
+                        name.eq_ignore_ascii_case("content-length")
+                            || name.eq_ignore_ascii_case("content-range")
+                            || (name.eq_ignore_ascii_case("content-encoding")
+                                && !value.eq_ignore_ascii_case("identity"))
+                    })
+            })
+    }
 
     pub(super) fn get_log_url(&self) -> std::borrow::Cow<'_, str> {
         if is_sanitize_sensitive_info_enabled() {

@@ -1,12 +1,12 @@
 use super::{
     buffer::{send_burst_buffer, send_client_chunk, SendOutcome, SubscriberId},
     BudgetedChunk, BurstBuffer, PendingJoinGuard, PendingSharedSubscriberCleanup, ReceiverStreamWrapper,
-    SharedStreamState, SharedSubscriber, DEFAULT_SUBSCRIBER_IDLE_TIMEOUT_SECS, MAX_SUBSCRIBER_LIVE_BATCH_CHUNKS,
-    SHARED_BURST_BYTES_PER_BUFFER_SLOT,
+    SharedStreamState, SharedSubscriber, TerminalOutcome, DEFAULT_SUBSCRIBER_IDLE_TIMEOUT_SECS,
+    MAX_SUBSCRIBER_LIVE_BATCH_CHUNKS, SHARED_BURST_BYTES_PER_BUFFER_SLOT,
 };
 use crate::{
     streams::buffered_stream::CHANNEL_SIZE, BoxedProviderStream, CleanupEvent, ConnectionManager,
-    SharedCleanupCapability,
+    SharedCleanupCapability, PROVIDER_END_NOT_SET,
 };
 use futures::StreamExt;
 use log::{debug, warn};
@@ -26,7 +26,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 use tuliprox_core::{
-    model::ProviderHandle,
+    model::{ProviderHandle, StreamError},
     utils::{debug_if_enabled, trace_if_enabled},
 };
 
@@ -51,6 +51,7 @@ impl SharedStreamState {
             stop_token: CancellationToken::new(),
             burst_buffer: Arc::new(Mutex::new(BurstBuffer::new(burst_buffer_size_in_bytes))),
             live_notification: Arc::new(Notify::new()),
+            terminal_outcome: Arc::new(std::sync::Mutex::new(None)),
             task_handles: std::sync::Mutex::new(Vec::new()),
             subscriber_idle_timeout_secs: DEFAULT_SUBSCRIBER_IDLE_TIMEOUT_SECS,
             subscriber_max_duration: None,
@@ -70,6 +71,21 @@ impl SharedStreamState {
     pub(super) fn decrement_pending_joins(&self) { self.pending_joins.fetch_sub(1, Ordering::AcqRel); }
 
     pub(super) fn has_pending_joins(&self) -> bool { self.pending_joins.load(Ordering::Acquire) > 0 }
+
+    pub(super) fn lock_terminal_outcome(&self) -> std::sync::MutexGuard<'_, Option<TerminalOutcome>> {
+        self.terminal_outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(super) fn set_terminal_outcome(&self, outcome: TerminalOutcome) {
+        let mut guard = self.lock_terminal_outcome();
+        if guard.is_none() {
+            *guard = Some(outcome);
+        }
+    }
+
+    pub(super) fn terminal_is_failure(&self) -> bool {
+        self.lock_terminal_outcome().as_ref().is_some_and(TerminalOutcome::is_failure)
+    }
 
     pub(super) fn lock_task_handles(&self) -> std::sync::MutexGuard<'_, Vec<tokio::task::JoinHandle<()>>> {
         self.task_handles.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -118,10 +134,14 @@ impl SharedStreamState {
         let burst_buffer = Arc::clone(&self.burst_buffer);
         let burst_buffer_for_log = Arc::clone(&self.burst_buffer);
         let live_notification = Arc::clone(&self.live_notification);
+        // Subscriber-local terminal error (e.g. lag) shared with the response wrapper so
+        // the client receives the error before the reserved cleanup is classified.
+        let subscriber_terminal_error = Arc::new(std::sync::Mutex::new(None::<StreamError>));
+        let forwarder_terminal_error_slot = Arc::clone(&subscriber_terminal_error);
+        let forwarder_cancel_token = cancel_token.clone();
+        let origin_state = Arc::clone(self);
         let timeout_duration = Duration::from_secs(self.subscriber_idle_timeout_secs);
         let idle_check_interval = Duration::from_secs(1);
-        let mut last_lag_log = Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now);
-        let mut consecutive_lag_count: u32 = 0;
         let subscriber_buf_size = self.buf_size;
         let preempted_token = self.preempted_token.clone();
         let low_priority_preempted = self.low_priority_preempted.clone();
@@ -165,11 +185,14 @@ impl SharedStreamState {
                         "Shared stream subscriber {} burst replay failed ({outcome:?}); terminating",
                         sanitize_sensitive_info(&address.to_string())
                     );
+                    cancel_token.cancel();
                     cleanup_manager.send_cleanup(CleanupEvent::ReleaseSharedSubscriber {
                         addr: address,
                         subscriber_id,
                         request_id: None,
                         owner: None,
+                        provider_end_reason: PROVIDER_END_NOT_SET,
+                        provider_error_class: None,
                     });
                     return;
                 }
@@ -194,21 +217,28 @@ impl SharedStreamState {
                 };
                 next_sequence = read.next_sequence;
                 if read.skipped > 0 {
-                    consecutive_lag_count = consecutive_lag_count.saturating_add(1);
-                    if last_lag_log.elapsed() > Duration::from_secs(5) {
-                        let buffered_bytes = {
-                            let buffer = burst_buffer_for_log.lock().await;
-                            buffer.current_bytes
-                        };
-                        warn!(
-                            "Shared stream client lagged behind {address}. Skipped {} messages \
-                             (buffered {buffered_bytes} bytes, consecutive lags={consecutive_lag_count})",
-                            read.skipped
-                        );
-                        last_lag_log = Instant::now();
-                    }
-                } else if !read_chunks.is_empty() {
-                    consecutive_lag_count = 0;
+                    // Subscriber fell behind the burst buffer - fail closed.
+                    // Only this subscriber stops; the origin and the other subscribers continue.
+                    // The lag error is recorded in the shared slot so the response wrapper can
+                    // deliver `SubscriberLagged` to the client and only then classify its
+                    // reserved cleanup. The cancel token must stay uncancelled for that.
+                    let (ring_chunks, buffered_bytes) = {
+                        let buffer = burst_buffer_for_log.lock().await;
+                        (buffer.buffer.len(), buffer.current_bytes)
+                    };
+                    warn!(
+                        "Shared stream subscriber {} lagged behind burst buffer \
+                         (skipped={} chunks, ring_occupancy={} chunks/{} bytes); terminating subscriber only",
+                        sanitize_sensitive_info(&address.to_string()),
+                        read.skipped,
+                        ring_chunks,
+                        buffered_bytes,
+                    );
+                    *forwarder_terminal_error_slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+                        Some(StreamError::SubscriberLagged);
+                    // Returning drops client_tx, which closes the client queue and surfaces the
+                    // recorded error on the subscriber's next poll.
+                    return;
                 }
 
                 trace_if_enabled!(
@@ -234,11 +264,14 @@ impl SharedStreamState {
                             SendOutcome::Sent => {}
                             outcome => {
                                 debug!("Shared stream client send error ({outcome:?}): {address}");
+                                cancel_token.cancel();
                                 cleanup_manager.send_cleanup(CleanupEvent::ReleaseSharedSubscriber {
                                     addr: address,
                                     subscriber_id,
                                     request_id: None,
                                     owner: None,
+                                    provider_end_reason: PROVIDER_END_NOT_SET,
+                                    provider_error_class: None,
                                 });
                                 return;
                             }
@@ -331,12 +364,18 @@ impl SharedStreamState {
                 }
             }
 
-            cleanup_manager.send_cleanup(CleanupEvent::ReleaseSharedSubscriber {
-                addr: address,
-                subscriber_id,
-                request_id: None,
-                owner: None,
-            });
+            // A failing origin is classified by the response wrapper after it drains the
+            // final burst; an unclassified release here would preempt that classification.
+            if !origin_state.terminal_is_failure() || cancel_token.is_cancelled() || preempted_token.is_cancelled() {
+                cleanup_manager.send_cleanup(CleanupEvent::ReleaseSharedSubscriber {
+                    addr: address,
+                    subscriber_id,
+                    request_id: None,
+                    owner: None,
+                    provider_end_reason: PROVIDER_END_NOT_SET,
+                    provider_error_class: None,
+                });
+            }
         });
 
         self.lock_task_handles().push(handle);
@@ -354,6 +393,11 @@ impl SharedStreamState {
                 owner,
                 deadline: self.subscriber_max_duration.map(|duration| Box::pin(sleep(duration))),
                 released: false,
+                terminal_outcome: Arc::clone(&self.terminal_outcome),
+                terminal_observed: false,
+                subscriber_terminal_error,
+                cancel_token: forwarder_cancel_token,
+                preempted_token: self.preempted_token.clone(),
             }
             .boxed(),
             provider,

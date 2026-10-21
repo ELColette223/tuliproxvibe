@@ -291,11 +291,13 @@ fn template_lookup_keeps_last_duplicate_value() {
         PatternTemplate {
             name: "label".to_string(),
             value: TemplateValue::Single("first".to_string()),
+            filter_rule: None,
             placeholder: "!label!".to_string(),
         },
         PatternTemplate {
             name: "label".to_string(),
             value: TemplateValue::Single("second".to_string()),
+            filter_rule: None,
             placeholder: "!label!".to_string(),
         },
     ];

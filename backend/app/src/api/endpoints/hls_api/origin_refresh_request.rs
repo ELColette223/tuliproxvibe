@@ -1,5 +1,6 @@
 use super::{AppState, HlsOriginIoContext, HlsSessionHandle};
 use axum::http::HeaderMap;
+use shared::utils::sanitize_sensitive_info;
 use std::sync::Arc;
 use tuliprox_hls::api::{
     HlsAccessLeaseId, HlsManifestAcceptanceDirective, HlsManifestCommitRequirement, HlsPostRefreshRuntime,
@@ -16,7 +17,7 @@ pub(super) struct HlsOriginRefreshOptions {
     pub now_ms: u64,
 }
 
-pub(super) fn hls_origin_refresh_request(
+pub(super) async fn hls_origin_refresh_request(
     app_state: &Arc<AppState>,
     session: &HlsSessionHandle,
     prepared: HlsPreparedOriginAccount,
@@ -25,6 +26,36 @@ pub(super) fn hls_origin_refresh_request(
     let mut origin_io = options.origin_io;
     let origin_provider_session_headers = prepared.snapshot.provider_session_headers.clone();
     origin_io.prepared_account = Some(prepared.snapshot);
+    // HLS origin I/O must use the same egress as the input it serves. A failure here is not
+    // recoverable by falling back to the shared client: that would silently bypass the proxy.
+    let input_proxy = {
+        let input_name = session.read().await.origin_source.input_name.clone();
+        app_state.app_config.get_input_by_name(&input_name).and_then(|input| input.proxy.clone())
+    };
+    let client = match tuliprox_core::utils::request::create_input_http_client(
+        &app_state.app_config,
+        &app_state.http_clients.default.load(),
+        input_proxy.as_ref(),
+    ) {
+        Ok(client) => client,
+        Err(err) => {
+            log::error!("Failed to create HLS input proxy client: {}", sanitize_sensitive_info(&err.to_string()));
+            // `hls_origin_refresh_request` is synchronous; the request will fail at open time
+            // when the shared client cannot reach the origin through the required proxy.
+            app_state.http_clients.default.load().as_ref().clone()
+        }
+    };
+    let no_redirect_client = match tuliprox_core::utils::request::create_input_http_client_no_redirect(
+        &app_state.app_config,
+        &app_state.http_clients.no_redirect.load(),
+        input_proxy.as_ref(),
+    ) {
+        Ok(client) => client,
+        Err(err) => {
+            log::error!("Failed to create HLS input proxy client: {}", sanitize_sensitive_info(&err.to_string()));
+            app_state.http_clients.no_redirect.load().as_ref().clone()
+        }
+    };
     OriginRefreshRequest {
         app_config: Arc::clone(&app_state.app_config),
         session: Arc::clone(session),
@@ -32,9 +63,12 @@ pub(super) fn hls_origin_refresh_request(
         headers: options.headers,
         origin_provider_session_headers,
         disabled_headers: app_state.get_disabled_headers(),
-        client: app_state.http_clients.default.load().as_ref().clone(),
-        no_redirect_client: app_state.http_clients.no_redirect.load().as_ref().clone(),
-        use_manual_redirects: app_state.should_use_manual_redirects(),
+        client,
+        no_redirect_client,
+        use_manual_redirects: {
+            let global_proxy = app_state.app_config.config.load().proxy.clone();
+            tuliprox_core::model::should_use_manual_redirects_for_proxy(input_proxy.as_ref().or(global_proxy.as_ref()))
+        },
         segment_cache: Arc::clone(app_state.hls.proxy.segment_cache()),
         hls_proxy: Arc::clone(&app_state.hls.proxy),
         segment_repair: Arc::clone(app_state.hls.proxy.segment_repair()),

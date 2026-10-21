@@ -1,11 +1,14 @@
-use super::{SharedStreamManager, SharedStreamState, YIELD_COUNTER};
+use super::{SharedStreamManager, SharedStreamState, TerminalOutcome, YIELD_COUNTER};
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use log::warn;
 use shared::utils::sanitize_sensitive_info;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration, Instant};
-use tuliprox_core::utils::{debug_if_enabled, network::request::STREAM_IDLE_TIMEOUT, trace_if_enabled};
+use tuliprox_core::{
+    model::StreamError,
+    utils::{debug_if_enabled, network::request::STREAM_IDLE_TIMEOUT, trace_if_enabled},
+};
 
 impl SharedStreamState {
     #[allow(clippy::too_many_lines)]
@@ -16,7 +19,7 @@ impl SharedStreamState {
         shared_streams: Arc<SharedStreamManager>,
     ) where
         S: Stream<Item = Result<Bytes, E>> + Unpin + 'static + Send,
-        E: std::fmt::Debug + Send,
+        E: std::fmt::Debug + Send + 'static,
     {
         let streaming_url = stream_url.to_string();
         let origin_state = Arc::clone(self);
@@ -60,17 +63,27 @@ impl SharedStreamState {
                             STREAM_IDLE_TIMEOUT,
                             sanitize_sensitive_info(&streaming_url)
                         );
-                        stop_token.cancel();
+                        // Classify a genuinely idle origin as a provider timeout so subscriber
+                        // cleanup records a terminal cause instead of falling back to ClientClosed.
+                        if !stop_token.is_cancelled() && !origin_state.preempted_token.is_cancelled() {
+                            origin_state.set_terminal_outcome(TerminalOutcome::ProviderError(
+                                StreamError::ProviderIdleTimeout,
+                            ));
+                            live_notification.notify_waiters();
+                        } else {
+                            stop_token.cancel();
+                        }
                         break;
                     }
 
                     chunk = source_stream.next() => {
-                        // Only successful chunks count as liveness; resetting on Err would let an
-                        // error-spinning source dodge the idle timeout forever
-                        if matches!(chunk, Some(Ok(_))) {
+                        // Only successful non-empty chunks count as liveness; resetting on Err or
+                        // on an empty chunk would let a spinning source dodge the idle timeout.
+                        if matches!(chunk, Some(Ok(ref bytes)) if !bytes.is_empty()) {
                             idle.as_mut().reset(Instant::now() + idle_timeout);
                         }
                         match chunk {
+                            Some(Ok(data)) if data.is_empty() => continue,
                             Some(Ok(data)) => {
                                 let chunk_len = data.len();
                                 let push_seq = {
@@ -124,6 +137,19 @@ impl SharedStreamState {
                                     sanitize_sensitive_info(&streaming_url),
                                     e
                                 );
+                                // A terminal StreamError ends the origin: subscribers must see the
+                                // cause instead of a silently truncated body.
+                                if let Some(stream_err) = (&e as &dyn std::any::Any).downcast_ref::<StreamError>() {
+                                    if stream_err.is_terminal_origin_error() {
+                                        if !stop_token.is_cancelled() && !origin_state.preempted_token.is_cancelled() {
+                                            origin_state.set_terminal_outcome(TerminalOutcome::ProviderError(
+                                                stream_err.clone(),
+                                            ));
+                                            live_notification.notify_waiters();
+                                        }
+                                        break;
+                                    }
+                                }
                                 tokio::task::yield_now().await;
                             }
                             None => {
@@ -131,6 +157,10 @@ impl SharedStreamState {
                                     "Shared stream source stream ended for {}",
                                     sanitize_sensitive_info(&streaming_url)
                                 );
+                                if !stop_token.is_cancelled() && !origin_state.preempted_token.is_cancelled() {
+                                    origin_state.set_terminal_outcome(TerminalOutcome::ProviderEof);
+                                    live_notification.notify_waiters();
+                                }
                                 break;
                             }
                         }
@@ -161,7 +191,7 @@ impl SharedStreamState {
                 sanitize_sensitive_info(&streaming_url),
                 last_push_at.map_or(0, |t| t.elapsed().as_secs())
             );
-            shared_streams.unregister(&streaming_url, &origin_state).await;
+            shared_streams.unregister(&streaming_url, &origin_state, origin_state.terminal_is_failure()).await;
         });
 
         // Keep the broadcast handle so shutdown can join it instead of leaving a detached task.

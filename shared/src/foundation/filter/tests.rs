@@ -360,11 +360,13 @@ fn prepare_templates_does_not_duplicate_unrelated_multi_entries() {
         PatternTemplate {
             name: "A".to_string(),
             value: TemplateValue::Multi(vec!["a1".to_string(), "a2".to_string()]),
+            filter_rule: None,
             placeholder: String::new(),
         },
         PatternTemplate {
             name: "SEQ".to_string(),
             value: TemplateValue::Multi(vec!["!A!".to_string(), "literal".to_string()]),
+            filter_rule: None,
             placeholder: String::new(),
         },
     ];
@@ -381,16 +383,19 @@ fn prepare_templates_concatenates_sequence_templates_without_cartesian_blowup() 
         PatternTemplate {
             name: "UK".to_string(),
             value: TemplateValue::Multi(vec!["uk1".to_string(), "uk2".to_string()]),
+            filter_rule: None,
             placeholder: String::new(),
         },
         PatternTemplate {
             name: "US".to_string(),
             value: TemplateValue::Multi(vec!["us1".to_string(), "us2".to_string(), "us3".to_string()]),
+            filter_rule: None,
             placeholder: String::new(),
         },
         PatternTemplate {
             name: "SEQ".to_string(),
             value: TemplateValue::Multi(vec!["!UK!".to_string(), "!US!".to_string(), "adult".to_string()]),
+            filter_rule: None,
             placeholder: String::new(),
         },
     ];
@@ -417,11 +422,13 @@ fn prepare_templates_promotes_single_template_to_multi_for_multi_dependency() {
         PatternTemplate {
             name: "BASE".to_string(),
             value: TemplateValue::Multi(vec!["a".to_string(), "b".to_string()]),
+            filter_rule: None,
             placeholder: String::new(),
         },
         PatternTemplate {
             name: "URL".to_string(),
             value: TemplateValue::Single("!BASE!/stream".to_string()),
+            filter_rule: None,
             placeholder: String::new(),
         },
     ];

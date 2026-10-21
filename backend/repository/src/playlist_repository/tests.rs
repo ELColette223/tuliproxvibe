@@ -2,6 +2,7 @@ use super::{
     assign_local_series_info_episode_key, assign_media_server_series_info_episode,
     get_input_media_server_playlist_file_path, materialize_media_server_series_info_episodes,
     normalize_target_playlist_epg_ids, persist_playlist_views, persist_playlist_with_mode,
+    prepare_target_playlist_for_persistence,
     publication::{playlist_has_items, validate_target_playlist_persistence, TargetPersistenceMode},
     rewrite_local_series_info_episode_virtual_id, rewrite_series_episode_parent_virtual_ids,
     rewrite_series_info_episode_virtual_id, skipped_clusters, LocalEpisodeKey, PlaylistPublicationPlan,

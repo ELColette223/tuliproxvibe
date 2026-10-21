@@ -149,7 +149,7 @@ impl SharedStreamManager {
         }
     }
 
-    pub(super) async fn unregister(&self, stream_url: &str, expected: &Arc<SharedStreamState>) {
+    pub(super) async fn unregister(&self, stream_url: &str, expected: &Arc<SharedStreamState>, terminal_failure: bool) {
         let mut register = self.shared_streams.write().await;
         let state = {
             if !register.by_key.get(stream_url).is_some_and(|state| Arc::ptr_eq(state, expected)) {
@@ -159,7 +159,19 @@ impl SharedStreamManager {
             register.by_key.remove(stream_url)
         };
         drop(register);
-        if let Some(state) = state {
+        let Some(state) = state else { return };
+        if terminal_failure && !state.stop_token.is_cancelled() && !state.preempted_token.is_cancelled() {
+            // Do not cancel active forwarders before they have drained the final burst and
+            // closed their queues. Their reserved response cleanup permits then carry the
+            // terminal classification after the error is observed.
+            self.remove_meter_uid_if_owned_by(
+                stream_url,
+                state.provider_guard.as_ref().map(|handle| handle.allocation_id),
+            );
+            if let Some(handle) = &state.provider_guard {
+                self.provider_manager.release_handle(handle);
+            }
+        } else {
             self.finish_unregister(stream_url, &state).await;
         }
     }
@@ -330,7 +342,7 @@ impl SharedStreamManager {
     ) -> Option<(BoxedProviderStream, Option<Arc<str>>, SharedCleanupCapability)>
     where
         S: Stream<Item = Result<Bytes, E>> + Unpin + 'static + Send,
-        E: std::fmt::Debug + Send,
+        E: std::fmt::Debug + Send + 'static,
     {
         let _admission = ctx.connection_manager.begin_admission().await?;
         let registration_started_at = Instant::now();

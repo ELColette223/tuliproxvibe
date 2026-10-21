@@ -1,9 +1,10 @@
 use crate::{
     app::{
         components::{
-            convert_bool_to_chip_style, make_translated_header_callback, menu_item::MenuItem, popup_menu::PopupMenu,
-            AppIcon, Chip, FilterView, PlaylistMappings, PlaylistProcessing, RevealContent, Table, TableDefinition,
-            TargetOptions, TargetOutput, TargetRename, TargetSort, TargetWatch, ToggleSwitch,
+            bouquet_editor::VisualTargetFilter, convert_bool_to_chip_style, make_translated_header_callback,
+            menu_item::MenuItem, popup_menu::PopupMenu, AppIcon, Chip, FilterView, PlaylistMappings,
+            PlaylistProcessing, RevealContent, Table, TableDefinition, TargetOptions, TargetOutput, TargetRename,
+            TargetSort, TargetWatch, ToggleSwitch,
         },
         ConfigContext,
     },
@@ -13,7 +14,7 @@ use crate::{
     model::DialogResult,
     services::DialogService,
 };
-use shared::model::{ConfigTargetDto, SortOrder};
+use shared::model::{permission::Permission, ConfigTargetDto, SortOrder};
 use std::{rc::Rc, str::FromStr};
 use yew::{platform::spawn_local, prelude::*};
 
@@ -53,6 +54,7 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
     let popup_anchor_ref = use_state(|| None::<web_sys::Element>);
     let popup_is_open = use_state(|| false);
     let selected_dto = use_state(|| None::<Rc<ConfigTargetDto>>);
+    let visual_filter_target = use_state(|| None::<String>);
 
     let handle_popup_close = {
         let set_is_open = popup_is_open.clone();
@@ -81,6 +83,8 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
     let render_data_cell = {
         let translator = translate.clone();
         let popup_onclick = handle_popup_onclick.clone();
+        let visual_filter_target = visual_filter_target.clone();
+        let can_read_visual_filter = services.auth.has_permission(Permission::PlaylistRead);
         Callback::<(usize, usize, Rc<ConfigTargetDto>), Html>::from(
             move |(row, col, dto): (usize, usize, Rc<ConfigTargetDto>)| match TargetColumn::from_index(col) {
                 Some(TargetColumn::Actions) => {
@@ -120,7 +124,22 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
                             }
                         })
                     });
-                    html! { <RevealContent>{ for rendered }</RevealContent> }
+                    let summary = html! { <RevealContent>{ for rendered }</RevealContent> };
+                    if can_read_visual_filter {
+                        let visual_filter_target = visual_filter_target.clone();
+                        let target_name = dto.name.clone();
+                        html! {
+                            <button type="button" class="tp__filter-summary" onclick={Callback::from(move |event: MouseEvent| {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                visual_filter_target.set(Some(target_name.clone()));
+                            })}>
+                                { summary }
+                            </button>
+                        }
+                    } else {
+                        summary
+                    }
                 }
                 Some(TargetColumn::Rename) => dto.rename.as_ref().map_or_else(
                     || html! {},
@@ -226,7 +245,16 @@ pub fn TargetTable(props: &TargetTableProps) -> Html {
 
     html! {
         <div class="tp__target-table">
-            <Table::<ConfigTargetDto> definition={(*table_definition).clone()} />
+            if let Some(target_name) = visual_filter_target.as_ref() {
+                <div class="tp__target-table__visual-filter">
+                    <VisualTargetFilter target_name={target_name.clone()} on_back={{
+                        let visual_filter_target = visual_filter_target.clone();
+                        Callback::from(move |()| visual_filter_target.set(None))
+                    }} />
+                </div>
+            } else {
+                <Table::<ConfigTargetDto> definition={(*table_definition).clone()} />
+            }
             <PopupMenu is_open={*popup_is_open} anchor_ref={(*popup_anchor_ref).clone()} on_close={handle_popup_close}>
                 <MenuItem icon="Refresh" name={TargetTableAction::Refresh.to_string()} label={translate.t("LABEL.REFRESH")} onclick={&handle_menu_click} class="tp__update_action"/>
                 <hr/>

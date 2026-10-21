@@ -141,6 +141,17 @@ async fn process_immediate_vod_info<E: EventSink + Clone + 'static, M: MetadataU
 ) {
     let input = fpl.input;
     let storage_dir = &ctx.config.config.load().storage_dir;
+    if let Some(proxy) = input.proxy.as_ref() {
+        log::info!("Resolving VOD info for input '{}' via proxy: {}", input.name, proxy.display_for_log());
+    }
+    let input_client =
+        match tuliprox_core::utils::request::create_input_http_client(&ctx.config, &ctx.client, input.proxy.as_ref()) {
+            Ok(client) => client,
+            Err(err) => {
+                error!("Failed to create Xtream client for input '{}': {err}", input.name);
+                return;
+            }
+        };
 
     let storage_path = resolve_input_storage_path(storage_dir, &input.name).await;
 
@@ -208,8 +219,17 @@ async fn process_immediate_vod_info<E: EventSink + Clone + 'static, M: MetadataU
                 // Pass the optional reference to the query
                 let db_query_ref = db_query_holder.as_ref().map(Arc::clone);
 
-                match update_vod_info_immediate(ctx, prov_mgr, input, pli, provider_id.clone(), &reasons, db_query_ref)
-                    .await
+                match update_vod_info_immediate(
+                    ctx,
+                    &input_client,
+                    prov_mgr,
+                    input,
+                    pli,
+                    provider_id.clone(),
+                    &reasons,
+                    db_query_ref,
+                )
+                .await
                 {
                     Ok(Some(updated_props)) => {
                         // Update the current item in fpl
@@ -298,6 +318,7 @@ async fn process_immediate_vod_info<E: EventSink + Clone + 'static, M: MetadataU
             reasons: |retry_pli| check_resolve_reasons(&resolve_options, do_probe, resolve_tmdb_enabled, retry_pli),
             update: |active_provider, retry_pli, provider_id, reasons, db_query_ref| update_vod_info_immediate(
                 ctx,
+                &input_client,
                 active_provider,
                 input,
                 retry_pli,
@@ -505,8 +526,10 @@ fn queue_background_vod_info<E: EventSink + Clone + 'static, M: MetadataUpdateSi
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn update_vod_info_immediate<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
     ctx: &PlaylistProcessingContext<E, M>,
+    client: &reqwest::Client,
     active_provider: &Arc<ActiveProviderManager>,
     input: &ConfigInput,
     pli: &PlaylistItem,
@@ -520,7 +543,7 @@ async fn update_vod_info_immediate<E: EventSink + Clone + 'static, M: MetadataUp
 
     update_vod_metadata(
         &ctx.config,
-        &ctx.client,
+        client,
         input,
         id,
         None, // No active handle, function will acquire one if needed
@@ -877,7 +900,11 @@ pub async fn update_vod_metadata(
                             .await
                     } else {
                         FfmpegExecutor::new()
-                            .probe_url_with_cancel(&probe_params, config.proxy.as_ref(), cancel_token)
+                            .probe_url_with_cancel(
+                                &probe_params,
+                                input.proxy.as_ref().or(config.proxy.as_ref()),
+                                cancel_token,
+                            )
                             .await
                     };
                     match probe_result {

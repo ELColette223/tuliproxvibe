@@ -1,6 +1,6 @@
 use super::{get_request_headers, log_proxy_diagnostics};
-use crate::model::{AppConfig, Config, ReverseProxyDisabledHeaderConfig};
-use log::error;
+use crate::model::{AppConfig, Config, ProxyConfig, ReverseProxyDisabledHeaderConfig};
+use log::{error, info};
 use reqwest::redirect::Policy;
 use shared::{error::TuliproxError, model::InputFetchMethod};
 use std::{collections::HashMap, time::Duration};
@@ -32,10 +32,57 @@ pub fn get_client_request<S: ::std::hash::BuildHasher + Default>(
 }
 
 pub fn create_client_with_redirect(cfg: &AppConfig, redirect_policy: Policy) -> reqwest::ClientBuilder {
-    configured_client(&cfg.config.load(), redirect_policy)
+    let config = cfg.config.load();
+    match configured_client_with_proxy(&config, redirect_policy, config.proxy.as_ref()) {
+        Ok(builder) => builder,
+        Err(err) => {
+            // The global proxy is validated at config load; a failure here is a startup bug.
+            error!("Failed to apply prepared global proxy configuration: {err}");
+            reqwest::Client::builder()
+        }
+    }
 }
 
-fn configured_client(config: &Config, redirect_policy: Policy) -> reqwest::ClientBuilder {
+/// Applies one prepared proxy configuration to a client builder.
+///
+/// Fails closed: an unusable proxy must not silently degrade into a direct connection.
+fn apply_proxy_config(
+    client: reqwest::ClientBuilder,
+    proxy_cfg: &ProxyConfig,
+) -> Result<reqwest::ClientBuilder, TuliproxError> {
+    let mut url =
+        Url::parse(&proxy_cfg.url).map_err(|err| TuliproxError::ConfigProxy(format!("Invalid proxy URL: {err}")))?;
+    let scheme = url.scheme().to_ascii_lowercase();
+
+    let proxy = match scheme.as_str() {
+        "socks5" | "socks5h" => {
+            if let Some(user) = &proxy_cfg.username {
+                let _ = url.set_username(user);
+            }
+            if let Some(pass) = &proxy_cfg.password {
+                let _ = url.set_password(Some(pass));
+            }
+            reqwest::Proxy::all(url.as_str())
+        }
+        "http" | "https" => reqwest::Proxy::all(url.as_str()).map(|proxy| {
+            if let (Some(username), Some(password)) = (&proxy_cfg.username, &proxy_cfg.password) {
+                proxy.basic_auth(username, password)
+            } else {
+                proxy
+            }
+        }),
+        _ => return Err(TuliproxError::ConfigProxy(format!("Unsupported proxy scheme: {scheme}"))),
+    }
+    .map_err(|err| TuliproxError::ConfigProxy(format!("Failed to create proxy: {err}")))?;
+
+    Ok(client.proxy(proxy))
+}
+
+fn configured_client_with_proxy(
+    config: &Config,
+    redirect_policy: Policy,
+    proxy: Option<&ProxyConfig>,
+) -> Result<reqwest::ClientBuilder, TuliproxError> {
     log_proxy_diagnostics(config);
     let mut client = reqwest::Client::builder()
         .redirect(redirect_policy)
@@ -43,45 +90,8 @@ fn configured_client(config: &Config, redirect_policy: Policy) -> reqwest::Clien
         .pool_max_idle_per_host(10)
         .danger_accept_invalid_certs(config.accept_insecure_ssl_certificates);
 
-    if let Some(proxy_cfg) = config.proxy.as_ref() {
-        match Url::parse(&proxy_cfg.url) {
-            Ok(mut url) => {
-                let scheme = url.scheme().to_ascii_lowercase();
-
-                match scheme.as_str() {
-                    "socks5" | "socks5h" => {
-                        if let Some(user) = &proxy_cfg.username {
-                            let _ = url.set_username(user);
-                        }
-                        if let Some(pass) = &proxy_cfg.password {
-                            let _ = url.set_password(Some(pass));
-                        }
-                        match reqwest::Proxy::all(url.as_str()) {
-                            Ok(p) => {
-                                client = client.proxy(p);
-                            }
-                            Err(err) => error!("Failed to create SOCKS proxy {url}: {err}"),
-                        }
-                    }
-                    "http" | "https" => match reqwest::Proxy::all(url.as_str()) {
-                        Ok(p) => {
-                            if let (Some(username), Some(password)) = (&proxy_cfg.username, &proxy_cfg.password) {
-                                client = client.proxy(p.basic_auth(username, password));
-                            } else {
-                                client = client.proxy(p);
-                            }
-                        }
-                        Err(err) => error!("Failed to create HTTP proxy {url}: {err}"),
-                    },
-                    _ => {
-                        error!("Unsupported proxy scheme '{scheme}' in URL: {url}");
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Invalid proxy URL '{}': {e}", proxy_cfg.url);
-            }
-        }
+    if let Some(proxy_cfg) = proxy {
+        client = apply_proxy_config(client, proxy_cfg)?;
     }
 
     if let Some(rp_config) = config.reverse_proxy.as_ref() {
@@ -90,7 +100,7 @@ fn configured_client(config: &Config, redirect_policy: Policy) -> reqwest::Clien
         }
     }
 
-    client
+    Ok(client)
 }
 
 pub fn create_client(cfg: &AppConfig) -> reqwest::ClientBuilder {
@@ -122,7 +132,8 @@ pub fn create_tmdb_client(cfg: &AppConfig) -> Result<reqwest::ClientBuilder, Tul
     }
     // Discovery carries its own Bearer credential: never inherit the generic TLS bypass.
     // Keep configured proxy/auth and trusted roots, including hostname verification.
-    let mut builder = configured_client(&config, Policy::none())
+    let mut builder = configured_client_with_proxy(&config, Policy::none(), config.proxy.as_ref())
+        .map_err(|_| invalid_proxy())?
         .danger_accept_invalid_certs(false)
         .retry(reqwest::retry::never())
         .http1_only();
@@ -130,4 +141,41 @@ pub fn create_tmdb_client(cfg: &AppConfig) -> Result<reqwest::ClientBuilder, Tul
         builder = builder.connect_timeout(Duration::from_secs(u64::from(config.connect_timeout_secs)));
     }
     Ok(builder)
+}
+
+/// Builds a dedicated HTTP client for one input's own proxy.
+///
+/// `fallback` is returned unchanged when the input has no proxy.
+pub fn create_input_http_client_with_redirect(
+    cfg: &AppConfig,
+    fallback: &reqwest::Client,
+    proxy: Option<&ProxyConfig>,
+    redirect_policy: Policy,
+) -> Result<reqwest::Client, TuliproxError> {
+    let Some(proxy) = proxy else { return Ok(fallback.clone()) };
+    info!("Creating HTTP client with input proxy: {}", proxy.display_for_log());
+    let config = cfg.config.load();
+    let mut builder = configured_client_with_proxy(&config, redirect_policy, Some(proxy))?.http1_only();
+    if config.connect_timeout_secs > 0 {
+        builder = builder.connect_timeout(Duration::from_secs(u64::from(config.connect_timeout_secs)));
+    }
+    builder
+        .build()
+        .map_err(|err| TuliproxError::ConfigProxy(format!("Failed to create HTTP client for input proxy: {err}")))
+}
+
+pub fn create_input_http_client(
+    cfg: &AppConfig,
+    fallback: &reqwest::Client,
+    proxy: Option<&ProxyConfig>,
+) -> Result<reqwest::Client, TuliproxError> {
+    create_input_http_client_with_redirect(cfg, fallback, proxy, Policy::limited(10))
+}
+
+pub fn create_input_http_client_no_redirect(
+    cfg: &AppConfig,
+    fallback: &reqwest::Client,
+    proxy: Option<&ProxyConfig>,
+) -> Result<reqwest::Client, TuliproxError> {
+    create_input_http_client_with_redirect(cfg, fallback, proxy, Policy::none())
 }

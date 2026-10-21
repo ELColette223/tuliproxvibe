@@ -217,10 +217,34 @@ impl ActiveProviderManager {
         allow_grace: bool,
         params: &AcquireProviderParams<'_>,
     ) -> Option<ProviderHandle> {
+        self.acquire_connection_inner_no_preempt_excluding(provider_or_input_name, allow_grace, params, &HashSet::new())
+    }
+
+    /// Same as [`Self::acquire_connection_inner_no_preempt`], but skips accounts that
+    /// already failed for this request. Rotate-on-full uses this to walk the pool.
+    pub(super) fn acquire_connection_inner_no_preempt_excluding(
+        &self,
+        provider_or_input_name: &Arc<str>,
+        allow_grace: bool,
+        params: &AcquireProviderParams<'_>,
+        excluded_providers: &HashSet<Arc<str>>,
+    ) -> Option<ProviderHandle> {
         if let Some(owner) = params.session_owner() {
             match self.owner_provider_pin(provider_or_input_name, owner) {
                 Some(OwnerProviderPin::Reserved(reserved_provider)) => {
-                    return self.acquire_exact_connection_inner_no_preempt(&reserved_provider, allow_grace, params);
+                    if !excluded_providers.contains(&reserved_provider) {
+                        if let Some(handle) =
+                            self.acquire_exact_connection_inner_no_preempt(&reserved_provider, allow_grace, params)
+                        {
+                            return Some(handle);
+                        }
+                    }
+                    // An unavailable or excluded reserved account must not block the rest of the pool.
+                    debug_if_enabled!(
+                        "Reserved provider {} unavailable for owner {}; falling back to pool allocation",
+                        sanitize_sensitive_info(&reserved_provider),
+                        sanitize_sensitive_info(owner)
+                    );
                 }
                 // A continuing playback whose reconnect lease lapsed during a request gap
                 // returns to its provider before priority selection, but only into free
@@ -250,7 +274,7 @@ impl ActiveProviderManager {
 
         let candidate_count = self.providers.provider_names_for_input(provider_or_input_name).len();
         let attempts = candidate_count.max(1);
-        let mut skipped_reserved = HashSet::new();
+        let mut skipped_reserved = excluded_providers.clone();
         for _ in 0..attempts {
             let allocation =
                 ProviderAllocationGuard::new(self.providers.acquire_connection_with_grace_override_excluding(

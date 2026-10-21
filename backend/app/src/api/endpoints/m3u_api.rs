@@ -7,8 +7,8 @@ use crate::{
             is_seekable_media_request, is_session_based_playback, is_stream_share_enabled, local_stream_response,
             maintenance_rejection_response, redirect_response, reentry_suppressed_response,
             resolve_initial_stalker_playback_url, resource_proxy_response, resource_redirect_or_proxy,
-            separate_number_and_remainder, should_allow_exhausted_shared_reconnect,
-            stream_response_with_provider_handle, try_option_bad_request, try_result_bad_request, try_result_not_found,
+            separate_number_and_remainder, shared_live_mpeg_ts_key, should_allow_exhausted_shared_reconnect,
+            stream_response_with_shared_key, try_option_bad_request, try_result_bad_request, try_result_not_found,
             try_unwrap_body, RedirectParams,
         },
         endpoints::{
@@ -304,6 +304,16 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
         crate::api::api_utils::EvictionReentryGuard::SocketPlayback { virtual_id: pli.virtual_id }
     };
     let user_session = app_state.active_users.get_and_update_user_session(&user.username, &session_key).await;
+    let share_stream = is_stream_share_enabled(pli.item_type, &target);
+    let shared_key = shared_live_mpeg_ts_key(
+        target.id,
+        pli.input_name.as_ref(),
+        pli.get_input_stream_id().as_deref(),
+        pli.virtual_id.get(),
+    );
+    let session_matches_shared_key =
+        user_session.as_ref().is_some_and(|session| session.shared_stream_key.as_deref() == Some(shared_key.as_str()))
+            && user_session.as_ref().is_some_and(|session| session.virtual_id == virtual_id.get());
 
     let session_url = if let Some(session) = &user_session {
         if session.permission == UserConnectionPermission::Exhausted {
@@ -330,7 +340,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
             );
         }
 
-        if app_state.active_provider.is_over_limit(&session.provider) {
+        if pli.item_type.requires_provider_affinity() && app_state.active_provider.is_over_limit(&session.provider) {
             if extension == HLS_EXT {
                 return hls_admission_failure_manifest_response(
                     app_state,
@@ -373,7 +383,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
             .await
             .into_response();
         }
-        if pli.item_type == PlaylistItemType::Catchup {
+        if pli.item_type == PlaylistItemType::Catchup || session_matches_shared_key {
             pli.url.clone()
         } else {
             session.stream_url.clone()
@@ -412,12 +422,8 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
         .kind()
         .or(user_session.as_ref().and_then(|session| session.connection_kind))
         .unwrap_or(crate::api::model::ConnectionKind::Normal);
-    let allow_exhausted_shared_reconnect = should_allow_exhausted_shared_reconnect(
-        is_stream_share_enabled(pli.item_type, &target),
-        user_session.as_ref(),
-        virtual_id.get(),
-        session_url.as_ref(),
-    );
+    let allow_exhausted_shared_reconnect =
+        should_allow_exhausted_shared_reconnect(share_stream, user_session.as_ref(), virtual_id.get(), &shared_key);
     if connection_permission == UserConnectionPermission::Exhausted && !allow_exhausted_shared_reconnect {
         if connection_admission.is_reentry_suppressed() {
             return reentry_suppressed_response();
@@ -527,7 +533,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
         None
     };
 
-    stream_response_with_provider_handle(
+    stream_response_with_shared_key(
         fingerprint,
         app_state,
         &session_key,
@@ -544,6 +550,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
         allow_exhausted_shared_reconnect,
         grace_mode,
         preacquired_provider_handle,
+        Some(&shared_key),
     )
     .await
     .into_response()
@@ -1373,5 +1380,14 @@ mod tests {
             assert!(archive.as_ref().is_some_and(|value| native_archive_matches_mode("flussonic-ts", value)));
             assert!(!archive.as_ref().is_some_and(|value| native_archive_matches_mode("flussonic", value)));
         }
+    }
+
+    #[test]
+    fn live_stream_does_not_require_provider_affinity() {
+        assert!(!PlaylistItemType::Live.requires_provider_affinity());
+        assert!(!PlaylistItemType::LiveUnknown.requires_provider_affinity());
+        assert!(PlaylistItemType::Video.requires_provider_affinity());
+        assert!(PlaylistItemType::Series.requires_provider_affinity());
+        assert!(PlaylistItemType::Catchup.requires_provider_affinity());
     }
 }

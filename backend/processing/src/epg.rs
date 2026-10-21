@@ -87,6 +87,7 @@ fn epg_source_cache_extension(source_type: EpgSourceType) -> &'static str {
 async fn download_epg_file<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
     epg_source: &EpgSource,
     ctx: &PlaylistProcessingContext<E, M>,
+    client: &reqwest::Client,
     input: &ConfigInput,
     headers: Option<&reqwest::header::HeaderMap>,
     storage_dir: &str,
@@ -124,7 +125,7 @@ async fn download_epg_file<E: EventSink + Clone + 'static, M: MetadataUpdateSink
     let max_bytes = epg_download_limit(epg_source);
     match request::get_input_epg_content_as_file(
         &ctx.config,
-        &ctx.client,
+        client,
         input,
         request::InputEpgFileRequest {
             headers,
@@ -198,9 +199,20 @@ pub async fn get_xmltv<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
             let mut errors = vec![];
             let mut file_paths = vec![];
             let mut stored_file_paths = vec![];
+            if let Some(proxy) = input.proxy.as_ref() {
+                log::info!("Downloading EPG for input '{}' via proxy: {}", input.name, proxy.display_for_log());
+            }
+            let client = match tuliprox_core::utils::request::create_input_http_client(
+                &ctx.config,
+                &ctx.client,
+                input.proxy.as_ref(),
+            ) {
+                Ok(client) => client,
+                Err(err) => return (None, vec![err]),
+            };
 
             for epg_source in &epg_config.sources {
-                match download_epg_file(epg_source, ctx, input, headers, storage_dir).await {
+                match download_epg_file(epg_source, ctx, &client, input, headers, storage_dir).await {
                     Ok(file_path) => {
                         stored_file_paths.push(file_path.clone());
                         match persisted_source_from_config(epg_source, file_path) {

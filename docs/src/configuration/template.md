@@ -107,6 +107,35 @@ template_path: ./config/template.d
 
 *Important: The names of the templates (`name`) must be globally unique across all files!*
 
+---
+
+## 🧱 Managed Filter Rules (Web UI)
+
+The Web UI's visual filter builder stores its shared rules as regular templates with an additional
+`filter_rule` metadata block. They are namespaced under the reserved `TP_FILTER_RULE_*` prefix.
+
+```yaml
+templates:
+  - name: TP_FILTER_RULE_AB12CD34EF56
+    value: 'Group = "Sports"'
+    filter_rule:
+      version: 1
+      id: "ab12cd34ef56"
+      name: "Sports only"
+      root:
+        kind: string
+        field: group
+        operator: eq
+        value: "Sports"
+```
+
+These entries are fully compatible with the runtime: the `value` is the compiled filter expression and can
+be referenced manually like any other template. Editing, renaming or removing shared rules through the Web UI
+preserves unrelated templates in the same file. When `template_path` is a directory, the visual builder writes
+its managed catalog to a dedicated `tuliprox-filter-rules.yml` file inside that directory; templates defined in
+other files of the directory are left untouched. Avoid creating unmanaged templates whose name starts with the
+`TP_FILTER_RULE_` prefix.
+
 ### CLI Overrides
 
 You can override template loading via CLI:

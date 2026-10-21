@@ -30,11 +30,21 @@ pub fn LogConsole(props: &LogConsoleProps) -> Html {
 
     let auto_scroll = use_state(|| true);
     let search_query = use_state(String::new);
-    let selected_level = use_state(|| None::<LogLevel>);
+    // Default Info: TRACE server config must not flood the browser unless the user picks ALL/TRACE.
+    let selected_level = use_state(|| Some(LogLevel::Info));
 
     let log_stream = use_log_stream(UseLogStreamOptions { active: props.active, max_lines: 2000 });
 
     let console_ref = use_node_ref();
+
+    // Keep the websocket server-side filter aligned with the toolbar selection.
+    {
+        let set_min_level = log_stream.set_min_level.clone();
+        use_effect_with(*selected_level, move |lvl| {
+            set_min_level.emit(*lvl);
+            || ()
+        });
+    }
 
     // Auto-scroll effect
     {
@@ -77,8 +87,9 @@ pub fn LogConsole(props: &LogConsoleProps) -> Html {
             .logs
             .iter()
             .filter(|entry| {
+                // Same semantics as the WS `min_level` filter: selected level and above.
                 if let Some(lvl) = level_filter {
-                    if entry.level != lvl {
+                    if !entry.level.matches(lvl) {
                         return false;
                     }
                 }

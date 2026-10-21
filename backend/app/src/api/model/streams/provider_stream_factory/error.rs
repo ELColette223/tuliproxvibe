@@ -47,6 +47,47 @@ pub(super) fn classify_provider_status_error(status: StatusCode) -> &'static str
     }
 }
 
+/// Provider statuses that mean "this account is at its connection limit".
+fn bandwidth_limit_exceeded_status() -> StatusCode {
+    StatusCode::from_u16(509).unwrap_or(StatusCode::SERVICE_UNAVAILABLE)
+}
+
+pub(super) fn is_account_full_status(status: StatusCode) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS
+        || status == StatusCode::SERVICE_UNAVAILABLE
+        || status == bandwidth_limit_exceeded_status()
+}
+
+/// Some panels answer a full account with an HTTP 200 and a human-readable
+/// "max connections" page. The body text is the only signal in that case.
+pub(super) fn looks_like_connection_limit_message(text: &str) -> bool {
+    const MARKERS: [&str; 8] = [
+        "max connections",
+        "maximum connections",
+        "connection limit",
+        "connections limit",
+        "too many connections",
+        "active_cons",
+        "no connections available",
+        "device limit",
+    ];
+    let lower = text.to_ascii_lowercase();
+    MARKERS.iter().any(|marker| lower.contains(marker))
+}
+
+/// The low-level HTTP helpers turn non-success statuses into `io::Error`
+/// (`Request failed (429 Too Many Requests): ...`). Recover the status so
+/// `rotate_on_full` can treat account-full responses as `AccountFull`
+/// instead of a generic channel-unavailable failure.
+pub(super) fn account_full_status_from_io_error(err: &std::io::Error) -> Option<StatusCode> {
+    let message = err.to_string();
+    let rest = message.strip_prefix("Request failed (")?;
+    let code_token = rest.split([' ', ')']).next()?;
+    let code = code_token.parse::<u16>().ok()?;
+    let status = StatusCode::from_u16(code).ok()?;
+    is_account_full_status(status).then_some(status)
+}
+
 fn provider_content_type_looks_like_html(headers: &HeaderMap) -> bool {
     headers
         .get(reqwest::header::CONTENT_TYPE)
@@ -60,8 +101,22 @@ pub(super) fn should_reject_success_response_content_type(item_type: PlaylistIte
 
 #[derive(Debug)]
 pub(super) enum ProviderStreamRequestFailure {
-    HlsStatus { status: StatusCode, headers: Vec<(String, String)> },
-    Status { status: StatusCode, provider_error_class: &'static str, serve_channel_unavailable: bool },
+    HlsStatus {
+        status: StatusCode,
+        headers: Vec<(String, String)>,
+    },
+    Status {
+        status: StatusCode,
+        provider_error_class: &'static str,
+        serve_channel_unavailable: bool,
+    },
+    /// The provider rejected the open because the account is at its connection limit.
+    /// Kept distinct so `rotate_on_full` can retry on another account instead of
+    /// serving a channel-unavailable response.
+    AccountFull {
+        status: StatusCode,
+        provider_error_class: &'static str,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -94,13 +149,15 @@ impl ProviderStreamPreparationError {
 impl ProviderStreamRequestFailure {
     pub(super) fn status(&self) -> StatusCode {
         match self {
-            Self::Status { status, .. } | Self::HlsStatus { status, .. } => *status,
+            Self::Status { status, .. } | Self::HlsStatus { status, .. } | Self::AccountFull { status, .. } => *status,
         }
     }
 
     pub(super) fn provider_error_class(&self) -> &'static str {
         match self {
-            Self::Status { provider_error_class, .. } => provider_error_class,
+            Self::Status { provider_error_class, .. } | Self::AccountFull { provider_error_class, .. } => {
+                provider_error_class
+            }
             Self::HlsStatus { status, .. } => classify_provider_status_error(*status),
         }
     }
@@ -108,9 +165,12 @@ impl ProviderStreamRequestFailure {
     pub(super) fn should_serve_channel_unavailable(&self) -> bool {
         match self {
             Self::Status { serve_channel_unavailable, .. } => *serve_channel_unavailable,
+            Self::AccountFull { .. } => true,
             Self::HlsStatus { .. } => false,
         }
     }
+
+    pub(super) fn is_account_full(&self) -> bool { matches!(self, Self::AccountFull { .. }) }
 }
 
 pub(super) fn classify_provider_io_error(err: &std::io::Error) -> &'static str {

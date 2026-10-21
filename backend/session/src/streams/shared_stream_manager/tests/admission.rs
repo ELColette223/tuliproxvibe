@@ -74,6 +74,8 @@ async fn shared_clients_on_same_socket_keep_independent_streams_and_capacity() -
         subscriber_id: first_id,
         request_id: None,
         owner: None,
+        provider_end_reason: crate::PROVIDER_END_NOT_SET,
+        provider_error_class: None,
     });
     tx.send(Ok(Bytes::from_static(b"second chunk"))).await?;
     assert_eq!(

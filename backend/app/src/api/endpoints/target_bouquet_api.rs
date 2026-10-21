@@ -9,10 +9,12 @@ use axum::{
     routing::{delete, get, put},
     Json, Router,
 };
+use futures::StreamExt;
 use shared::{
     error::TuliproxError,
     model::{
-        permission::Permission, TargetBouquetDto, TargetBouquetStatusDto, TargetBouquetStreamEventDto, XtreamCluster,
+        permission::Permission, PlaylistItem, TargetBouquetDto, TargetBouquetStatusDto, TargetBouquetStreamEventDto,
+        XtreamCluster,
     },
 };
 use std::sync::Arc;
@@ -22,6 +24,8 @@ pub fn target_bouquet_api_register_with_permissions(app_state: &Arc<AppState>) -
     let read_routes = Router::new()
         .route("/target-bouquets/status", get(get_target_bouquet_status))
         .route("/target-bouquets/groups", get(get_target_bouquet_groups))
+        .route("/target-bouquets/channels", get(get_target_bouquet_channels))
+        .route("/target-bouquets/inventory", get(get_target_bouquet_inventory))
         .layer(permission_layer!(app_state, Permission::PlaylistRead));
 
     let write_routes = Router::new()
@@ -36,6 +40,8 @@ pub fn target_bouquet_api_register_unprotected() -> Router<Arc<AppState>> {
     Router::new()
         .route("/target-bouquets/status", get(get_target_bouquet_status))
         .route("/target-bouquets/groups", get(get_target_bouquet_groups))
+        .route("/target-bouquets/channels", get(get_target_bouquet_channels))
+        .route("/target-bouquets/inventory", get(get_target_bouquet_inventory))
         .route("/target-bouquets/selection", put(save_target_bouquet_handler))
         .route("/target-bouquets/selection", delete(delete_target_bouquet_handler))
 }
@@ -43,6 +49,158 @@ pub fn target_bouquet_api_register_unprotected() -> Router<Arc<AppState>> {
 #[derive(serde::Deserialize)]
 struct TargetBouquetQuery {
     target: String,
+}
+
+#[derive(serde::Deserialize)]
+struct TargetChannelQuery {
+    target: String,
+    cluster: String,
+    group: String,
+    cursor: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(serde::Serialize)]
+struct TargetChannelInventoryItemDto {
+    id: String,
+    input: String,
+    name: String,
+    group: String,
+    logo: String,
+}
+
+#[derive(serde::Serialize)]
+struct TargetChannelInventoryPageDto {
+    channels: Vec<TargetChannelInventoryItemDto>,
+    next_cursor: Option<String>,
+    unavailable_inputs: Vec<String>,
+    status: &'static str,
+}
+
+fn inventory_item(item: &PlaylistItem) -> TargetChannelInventoryItemDto {
+    TargetChannelInventoryItemDto {
+        id: item.header.uuid.to_string(),
+        input: item.header.input_name.to_string(),
+        name: item.header.name.to_string(),
+        group: item.header.group.to_string(),
+        logo: item.header.logo.to_string(),
+    }
+}
+
+/// Cursor counts matching raw items (not B+Tree keys); no target-transformed playlist is consulted.
+#[allow(clippy::too_many_lines)]
+async fn get_target_bouquet_channels(
+    State(app_state): State<Arc<AppState>>,
+    Query(query): Query<TargetChannelQuery>,
+) -> Response {
+    let respond = |status, body: serde_json::Value| {
+        let mut response = (status, Json(body)).into_response();
+        response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        response
+    };
+    let cluster = match query.cluster.as_str() {
+        "live" => XtreamCluster::Live,
+        "video" => XtreamCluster::Video,
+        "series" => XtreamCluster::Series,
+        _ => return respond(StatusCode::BAD_REQUEST, serde_json::json!({"error": "Invalid cluster"})),
+    };
+    let limit = query.limit.unwrap_or(100);
+    if !(1..=500).contains(&limit) {
+        return respond(StatusCode::BAD_REQUEST, serde_json::json!({"error": "Limit must be between 1 and 500"}));
+    }
+    let Ok(offset) = query.cursor.as_deref().unwrap_or("0").parse::<usize>() else {
+        return respond(StatusCode::BAD_REQUEST, serde_json::json!({"error": "Invalid cursor"}));
+    };
+    let sources = app_state.app_config.sources.load();
+    let Some((_, inputs)) = resolve_target_with_inputs(&sources, &query.target) else {
+        return respond(StatusCode::NOT_FOUND, serde_json::json!({"error": "Target not found"}));
+    };
+    drop(sources);
+
+    let mut channels = Vec::with_capacity(limit);
+    let mut unavailable_inputs = Vec::new();
+    let mut available = 0;
+    let mut matched = 0usize;
+    let mut has_more = false;
+    for input in inputs {
+        if (cluster == XtreamCluster::Live && input.has_flag(ConfigInputFlags::SkipLive))
+            || (cluster == XtreamCluster::Video && input.has_flag(ConfigInputFlags::SkipVod))
+            || (cluster == XtreamCluster::Series && input.has_flag(ConfigInputFlags::SkipSeries))
+        {
+            continue;
+        }
+        if input.input_type.is_xtream() {
+            let Some(mut stream) =
+                tuliprox_repository::iter_raw_xtream_input_playlist(&app_state.app_config, &input, cluster).await
+            else {
+                unavailable_inputs.push(input.name.to_string());
+                continue;
+            };
+            available += 1;
+            while let Some(result) = stream.next().await {
+                let item = match result {
+                    Ok(item) => item,
+                    Err(err) => {
+                        return respond(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            serde_json::json!({"error": format!("Failed to read raw input '{}': {err}", input.name)}),
+                        )
+                    }
+                };
+                if item.group.as_ref() != query.group {
+                    continue;
+                }
+                if matched >= offset && channels.len() < limit {
+                    channels.push(inventory_item(&PlaylistItem::from(&item)));
+                } else if matched >= offset {
+                    has_more = true;
+                }
+                matched += 1;
+            }
+        } else if input.input_type.is_m3u() {
+            let Some(mut stream) =
+                tuliprox_repository::iter_raw_m3u_input_playlist(&app_state.app_config, &input, Some(cluster)).await
+            else {
+                unavailable_inputs.push(input.name.to_string());
+                continue;
+            };
+            available += 1;
+            while let Some(result) = stream.next().await {
+                let item = match result {
+                    Ok(item) => item,
+                    Err(err) => {
+                        return respond(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            serde_json::json!({"error": format!("Failed to read raw input '{}': {err}", input.name)}),
+                        )
+                    }
+                };
+                if item.group.as_ref() != query.group {
+                    continue;
+                }
+                if matched >= offset && channels.len() < limit {
+                    channels.push(inventory_item(&PlaylistItem::from(&item)));
+                } else if matched >= offset {
+                    has_more = true;
+                }
+                matched += 1;
+            }
+        } else {
+            // Stalker and remote-only inputs have no persisted raw playlist usable here.
+            unavailable_inputs.push(input.name.to_string());
+        }
+    }
+    let status = if available == 0 {
+        "unavailable"
+    } else if channels.is_empty() {
+        "empty"
+    } else {
+        "ready"
+    };
+    let next_cursor = has_more.then(|| (offset + channels.len()).to_string());
+    let page = TargetChannelInventoryPageDto { channels, next_cursor, unavailable_inputs, status };
+    let body = serde_json::to_value(page).unwrap_or_else(|_| serde_json::json!({"error": "serialization failed"}));
+    respond(StatusCode::OK, body)
 }
 
 async fn send_stream_event(
@@ -79,11 +237,18 @@ async fn target_summary(state: &AppState, target_name: &str) -> Result<Option<Ta
         name: target.name.clone(),
         mode: active_bouquet.map(|value| value.bouquet.mode),
         group_count: active_bouquet.map_or(0, |value| {
-            [&value.bouquet.groups.live, &value.bouquet.groups.vod, &value.bouquet.groups.series]
-                .into_iter()
-                .flatten()
-                .map(Vec::len)
-                .sum()
+            value.bouquet.selection.as_ref().map_or_else(
+                || {
+                    [&value.bouquet.groups.live, &value.bouquet.groups.vod, &value.bouquet.groups.series]
+                        .into_iter()
+                        .flatten()
+                        .map(Vec::len)
+                        .sum()
+                },
+                |selection| {
+                    selection.categories.iter().filter(|category| !category.included_channel_ids.is_empty()).count()
+                },
+            )
         }),
     }))
 }
@@ -267,6 +432,181 @@ async fn get_target_bouquet_groups(
     response
 }
 
+/// Streams the complete channel inventory (every cluster/group of every input
+/// connected to the target) in ONE pass over the raw persisted playlists, so
+/// the visual filter can save without scanning the inputs once per category.
+struct InventoryEntry {
+    group: String,
+    id: String,
+    name: String,
+}
+
+type InventoryStream =
+    std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<InventoryEntry, TuliproxError>> + Send>>;
+
+const INVENTORY_CHUNK_SIZE: usize = 500;
+
+#[allow(clippy::too_many_lines)]
+async fn stream_input_inventory(
+    tx: &tokio::sync::mpsc::Sender<TargetBouquetStreamEventDto>,
+    app_config: &tuliprox_core::model::AppConfig,
+    input: &ConfigInput,
+    storage_dir: &str,
+    target_name: Option<Arc<str>>,
+) -> bool {
+    let _input_storage = tuliprox_repository::build_input_storage_path(&input.name, storage_dir);
+    let clusters = [
+        (XtreamCluster::Live, !input.has_flag(ConfigInputFlags::SkipLive)),
+        (XtreamCluster::Video, !input.has_flag(ConfigInputFlags::SkipVod)),
+        (XtreamCluster::Series, !input.has_flag(ConfigInputFlags::SkipSeries)),
+    ];
+
+    for (cluster, enabled) in clusters {
+        if !enabled {
+            continue;
+        }
+        let target_name_clone = target_name.clone();
+        let entries: Option<InventoryStream> = if input.input_type.is_xtream() {
+            tuliprox_repository::iter_raw_xtream_input_playlist(app_config, input, cluster).await.map(|stream| {
+                let target_name = target_name_clone;
+                Box::pin(stream.map(move |item| {
+                    let target_name = target_name.as_deref();
+                    item.map(|item| {
+                        let item = PlaylistItem::from(&item);
+                        let id = match target_name {
+                            Some(target) => shared::utils::generate_stable_channel_uuid(
+                                target,
+                                &item.header.group,
+                                &item.header.name,
+                                item.header.item_type,
+                            )
+                            .to_string(),
+                            None => item.header.uuid.to_string(),
+                        };
+                        InventoryEntry { group: item.header.group.to_string(), id, name: item.header.name.to_string() }
+                    })
+                })) as _
+            })
+        } else if input.input_type.is_m3u() {
+            tuliprox_repository::iter_raw_m3u_input_playlist(app_config, input, Some(cluster)).await.map(|stream| {
+                let target_name = target_name_clone;
+                Box::pin(stream.map(move |item| {
+                    let target_name = target_name.as_deref();
+                    item.map(|item| {
+                        let item = PlaylistItem::from(&item);
+                        let id = match target_name {
+                            Some(target) => shared::utils::generate_stable_channel_uuid(
+                                target,
+                                &item.header.group,
+                                &item.header.name,
+                                item.header.item_type,
+                            )
+                            .to_string(),
+                            None => item.header.uuid.to_string(),
+                        };
+                        InventoryEntry { group: item.header.group.to_string(), id, name: item.header.name.to_string() }
+                    })
+                })) as _
+            })
+        } else {
+            // Stalker and remote-only inputs have no persisted raw playlist here.
+            let warning = TargetBouquetStreamEventDto::InputWarning {
+                input: input.name.to_string(),
+                message: format!(
+                    "Input '{}' ({}) has no persisted raw inventory for {cluster}; trigger a playlist update.",
+                    input.name, input.input_type,
+                ),
+            };
+            if !send_stream_event(tx, warning).await {
+                return false;
+            }
+            None
+        };
+        let Some(mut entries) = entries else {
+            let warning = TargetBouquetStreamEventDto::InputWarning {
+                input: input.name.to_string(),
+                message: format!(
+                    "Raw playlist for input '{}' ({cluster}) is not available. Please trigger a playlist update.",
+                    input.name
+                ),
+            };
+            if !send_stream_event(tx, warning).await {
+                return false;
+            }
+            continue;
+        };
+
+        let mut buffers: std::collections::HashMap<String, Vec<shared::model::TargetInventoryChannelDto>> =
+            std::collections::HashMap::new();
+        while let Some(item) = entries.next().await {
+            let Ok(item) = item else { continue };
+            let group_name = item.group.clone();
+            let entry = buffers.entry(group_name.clone()).or_default();
+            entry.push(shared::model::TargetInventoryChannelDto { id: item.id, name: item.name });
+            if entry.len() >= INVENTORY_CHUNK_SIZE {
+                let channels = std::mem::take(entry);
+                let event = TargetBouquetStreamEventDto::InventoryChunk {
+                    input: input.name.to_string(),
+                    cluster,
+                    group: group_name,
+                    channels,
+                };
+                if !send_stream_event(tx, event).await {
+                    return false;
+                }
+            }
+        }
+        for (group, channels) in buffers {
+            if channels.is_empty() {
+                continue;
+            }
+            let event =
+                TargetBouquetStreamEventDto::InventoryChunk { input: input.name.to_string(), cluster, group, channels };
+            if !send_stream_event(tx, event).await {
+                return false;
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+    true
+}
+
+async fn get_target_bouquet_inventory(
+    State(app_state): State<Arc<AppState>>,
+    Query(query): Query<TargetBouquetQuery>,
+    ExtractAcceptHeader(accept): ExtractAcceptHeader,
+) -> Response {
+    let sources = app_state.app_config.sources.load();
+    let Some((target, inputs)) = resolve_target_with_inputs(&sources, &query.target) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("Target '{}' not found", query.target) })),
+        )
+            .into_response();
+    };
+    drop(sources);
+
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    let state = Arc::clone(&app_state);
+    let preserve_stream_ids =
+        target.options.as_ref().is_some_and(shared::model::ConfigTargetOptions::preserve_stream_ids);
+    let target_name_opt = preserve_stream_ids.then(|| Arc::from(target.name.as_str()));
+    tokio::spawn(async move {
+        let storage_dir = state.app_config.config.load().storage_dir.clone();
+        for input in inputs {
+            if !stream_input_inventory(&tx, &state.app_config, &input, &storage_dir, target_name_opt.clone()).await {
+                return;
+            }
+        }
+        let _ = send_stream_event(&tx, TargetBouquetStreamEventDto::Complete).await;
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let mut response = stream_json_or_bin_response_stream(accept.as_deref(), stream);
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
 async fn save_target_bouquet_handler(
     State(app_state): State<Arc<AppState>>,
     Query(query): Query<TargetBouquetQuery>,
@@ -376,6 +716,90 @@ mod tests {
             custom_stream_response_path: None,
         }));
         app_state
+    }
+
+    #[tokio::test]
+    async fn inventory_distinguishes_missing_cache_from_empty_results_and_validates_queries() {
+        let temp_dir = TempDir::new().unwrap();
+        let app_state = setup_test_app_state(&temp_dir);
+        let router = target_bouquet_api_register_unprotected().with_state(app_state);
+        for (uri, expected) in [
+            ("/target-bouquets/channels?target=living_room&cluster=live&group=News", StatusCode::OK),
+            ("/target-bouquets/channels?target=missing&cluster=live&group=News", StatusCode::NOT_FOUND),
+            ("/target-bouquets/channels?target=living_room&cluster=bogus&group=News", StatusCode::BAD_REQUEST),
+            (
+                "/target-bouquets/channels?target=living_room&cluster=live&group=News&cursor=abc",
+                StatusCode::BAD_REQUEST,
+            ),
+            ("/target-bouquets/channels?target=living_room&cluster=live&group=News&limit=501", StatusCode::BAD_REQUEST),
+        ] {
+            let response =
+                router.clone().oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(response.status(), expected, "{uri}");
+            assert_eq!(response.headers().get(header::CACHE_CONTROL).unwrap(), "no-store");
+            if expected == StatusCode::OK {
+                let body = response.into_body().collect().await.unwrap().to_bytes();
+                let page: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(page["status"], "unavailable");
+                assert_eq!(page["unavailable_inputs"], serde_json::json!(["provider1"]));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn inventory_reads_only_target_raw_input_and_pages_stable_ids() {
+        use shared::model::{PlaylistGroup, PlaylistItemHeader, PlaylistItemType};
+        let temp_dir = TempDir::new().unwrap();
+        let app_state = setup_test_app_state(&temp_dir);
+        let input_storage =
+            tuliprox_repository::build_input_storage_path("provider1", temp_dir.path().to_str().unwrap());
+        tokio::fs::create_dir_all(&input_storage).await.unwrap();
+        let path = tuliprox_repository::get_input_m3u_playlist_file_path(&input_storage, &"provider1".into());
+        let playlist = vec![PlaylistGroup {
+            id: 1,
+            title: "News".into(),
+            xtream_cluster: XtreamCluster::Live,
+            channels: (0..3)
+                .map(|index| PlaylistItem {
+                    header: PlaylistItemHeader {
+                        id: format!("provider-{index}").into(),
+                        input_stream_id: format!("provider-{index}").into(),
+                        name: format!("Channel {index}").into(),
+                        group: "News".into(),
+                        input_name: "provider1".into(),
+                        url: format!("http://localhost/{index}").into(),
+                        item_type: PlaylistItemType::Live,
+                        xtream_cluster: XtreamCluster::Live,
+                        ..PlaylistItemHeader::default()
+                    },
+                })
+                .collect(),
+        }];
+        tuliprox_repository::persist_input_m3u_playlist(&app_state.app_config, &path, &playlist).await.unwrap();
+        let router = target_bouquet_api_register_unprotected().with_state(app_state);
+        let read = |uri: &'static str, router: Router| async move {
+            let response = router.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            serde_json::from_slice::<serde_json::Value>(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap()
+        };
+        let first =
+            read("/target-bouquets/channels?target=living_room&cluster=live&group=News&limit=2", router.clone()).await;
+        assert_eq!(first["status"], "ready");
+        assert_eq!(first["channels"].as_array().unwrap().len(), 2);
+        assert_eq!(first["next_cursor"], "2");
+        let id = first["channels"][0]["id"].as_str().unwrap();
+        assert_eq!(id.len(), 64);
+        assert!(id.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+        let second = read(
+            "/target-bouquets/channels?target=living_room&cluster=live&group=News&limit=2&cursor=2",
+            router.clone(),
+        )
+        .await;
+        assert_eq!(second["channels"].as_array().unwrap().len(), 1);
+        assert!(second["next_cursor"].is_null());
+        let empty = read("/target-bouquets/channels?target=living_room&cluster=live&group=Sports", router).await;
+        assert_eq!(empty["status"], "empty");
     }
 
     #[tokio::test]

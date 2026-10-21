@@ -500,3 +500,19 @@ fn fnv1a_32_parts_matches_joined_string() {
     // Single part produces no separator byte.
     assert_eq!(fnv1a_32_parts(&["only"]), fnv1a_32("only"));
 }
+
+#[test]
+fn generate_stable_channel_uuid_is_deterministic_and_ignores_provider_id() {
+    let a = generate_stable_channel_uuid("target1", "News", "Channel 1", PlaylistItemType::Live);
+    let b = generate_stable_channel_uuid("target1", "News", "Channel 1", PlaylistItemType::Live);
+    assert_eq!(a, b);
+
+    let diff_target = generate_stable_channel_uuid("target2", "News", "Channel 1", PlaylistItemType::Live);
+    assert_ne!(a, diff_target);
+
+    let diff_group = generate_stable_channel_uuid("target1", "Sports", "Channel 1", PlaylistItemType::Live);
+    assert_ne!(a, diff_group);
+
+    let diff_name = generate_stable_channel_uuid("target1", "News", "Channel 2", PlaylistItemType::Live);
+    assert_ne!(a, diff_name);
+}

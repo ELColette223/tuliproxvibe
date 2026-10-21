@@ -195,6 +195,71 @@ impl TargetIdMapping {
         }
     }
 
+    /// Retrieves or allocates a virtual ID with reconciliation support.
+    /// When switching to stable UUIDs, this reconciles legacy records matching `provider_id`
+    /// to seamlessly adopt the new stable UUID without changing the allocated `virtual_id`.
+    pub fn get_and_update_virtual_id_with_reconciliation(
+        &mut self,
+        uuid: &UUIDType,
+        provider_id: u32,
+        item_type: PlaylistItemType,
+        parent_virtual_id: VirtualId,
+    ) -> VirtualId {
+        // 1. Direct lookup by stable UUID
+        if let Some(virtual_id) = self.mem_by_uuid.get(uuid).copied() {
+            let needs_update = match self.mem_by_virtual_id.get(&virtual_id) {
+                Some(record) => {
+                    record.provider_id != provider_id
+                        || record.item_type != item_type
+                        || record.parent_virtual_id != parent_virtual_id
+                }
+                None => false,
+            };
+
+            if needs_update {
+                let new_record = VirtualIdRecord::new(provider_id, virtual_id, item_type, parent_virtual_id, *uuid);
+                self.pending_virtual_id_upserts.insert(virtual_id, new_record.clone());
+                self.mem_by_virtual_id.insert(virtual_id, new_record);
+            }
+
+            return virtual_id;
+        }
+
+        // 2. Migration reconciliation: check if an existing record has this provider_id (legacy uuid migration)
+        if provider_id > 0 {
+            let candidate = self
+                .mem_by_virtual_id
+                .values()
+                .find(|record| record.provider_id == provider_id && record.item_type == item_type)
+                .map(|record| (record.virtual_id, record.uuid));
+
+            if let Some((virtual_id, old_uuid)) = candidate {
+                // Re-bind to the new stable uuid
+                self.mem_by_uuid.remove(&old_uuid);
+                self.pending_uuid_upserts.remove(&old_uuid);
+
+                let new_record = VirtualIdRecord::new(provider_id, virtual_id, item_type, parent_virtual_id, *uuid);
+                self.pending_virtual_id_upserts.insert(virtual_id, new_record.clone());
+                self.pending_uuid_upserts.insert(*uuid, virtual_id.get());
+                self.mem_by_uuid.insert(*uuid, virtual_id);
+                self.mem_by_virtual_id.insert(virtual_id, new_record);
+                return virtual_id;
+            }
+        }
+
+        // 3. New entry: allocate new virtual_id
+        self.virtual_id_counter += 1;
+        let virtual_id = self.virtual_id_counter;
+        let record = VirtualIdRecord::new(provider_id, VirtualId::new(virtual_id), item_type, parent_virtual_id, *uuid);
+
+        self.pending_virtual_id_upserts.insert(VirtualId::new(virtual_id), record.clone());
+        self.pending_uuid_upserts.insert(*uuid, virtual_id);
+        self.mem_by_uuid.insert(*uuid, VirtualId::new(virtual_id));
+        self.mem_by_virtual_id.insert(VirtualId::new(virtual_id), record);
+
+        VirtualId::new(virtual_id)
+    }
+
     pub fn persist(&mut self) -> Result<(), Error> {
         if self.has_pending_changes() {
             // Flush pending virtual_id upserts
@@ -356,6 +421,96 @@ mod tests {
             let vid1_again =
                 mapping.get_and_update_virtual_id(&uuid1, 100, PlaylistItemType::Video, VirtualId::default());
             assert_eq!(vid1_again, VirtualId::new(1));
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_stable_stream_id_reconciliation() -> Result<(), TuliproxError> {
+        let dir = tempdir().map_err(|_| TuliproxError::Config("Failed to create temp dir".to_string()))?;
+        let path = dir.path().join("id_mapping_stable.db");
+
+        let stable_uuid_globo = shared::utils::generate_stable_channel_uuid(
+            "erizadez79",
+            "Canais ⫸ Globo Sudeste",
+            "Globo SP FHD",
+            PlaylistItemType::Live,
+        );
+
+        // 1. Initial assignment: Globo SP FHD has upstream provider_id 38839 and gets virtual_id 1
+        {
+            let mut mapping = TargetIdMapping::new(&path, false)?;
+            let vid = mapping.get_and_update_virtual_id_with_reconciliation(
+                &stable_uuid_globo,
+                38839,
+                PlaylistItemType::Live,
+                VirtualId::default(),
+            );
+            assert_eq!(vid, VirtualId::new(1));
+            mapping.persist().map_err(|err| TuliproxError::Config(err.to_string()))?;
+        }
+
+        // 2. Upstream provider updates playlist: provider_id changes from 38839 to 50123!
+        // The stable UUID stays identical. TargetIdMapping MUST return the exact same virtual_id 1.
+        {
+            let mut mapping = TargetIdMapping::new(&path, false)?;
+            let vid_after_update = mapping.get_and_update_virtual_id_with_reconciliation(
+                &stable_uuid_globo,
+                50123,
+                PlaylistItemType::Live,
+                VirtualId::default(),
+            );
+            assert_eq!(
+                vid_after_update,
+                VirtualId::new(1),
+                "Stream ID must be preserved when upstream provider_id changes!"
+            );
+
+            // Verify that provider_id was updated to 50123
+            let record = mapping.mem_by_virtual_id.get(&VirtualId::new(1)).unwrap();
+            assert_eq!(record.provider_id, 50123);
+            mapping.persist().map_err(|err| TuliproxError::Config(err.to_string()))?;
+        }
+
+        // 3. Test legacy UUID migration to stable UUID
+        // Suppose channel "Record SP SD" had provider_id 20000 and legacy UUID
+        let legacy_uuid_record =
+            shared::utils::generate_provider_playlist_uuid("erizadez79", "20000", PlaylistItemType::Live);
+        let stable_uuid_record = shared::utils::generate_stable_channel_uuid(
+            "erizadez79",
+            "Canais ⫸ Rede Record",
+            "RECORD SP SD",
+            PlaylistItemType::Live,
+        );
+        {
+            let mut mapping = TargetIdMapping::new(&path, false)?;
+            // Previously stored under legacy UUID
+            let vid_record = mapping.get_and_update_virtual_id(
+                &legacy_uuid_record,
+                20000,
+                PlaylistItemType::Live,
+                VirtualId::default(),
+            );
+            assert_eq!(vid_record, VirtualId::new(2));
+            mapping.persist().map_err(|err| TuliproxError::Config(err.to_string()))?;
+        }
+
+        // Now preserve_stream_ids is turned on -> reconciles legacy record to stable UUID, keeping virtual_id 2!
+        {
+            let mut mapping = TargetIdMapping::new(&path, false)?;
+            let vid_reconciled = mapping.get_and_update_virtual_id_with_reconciliation(
+                &stable_uuid_record,
+                20000,
+                PlaylistItemType::Live,
+                VirtualId::default(),
+            );
+            assert_eq!(
+                vid_reconciled,
+                VirtualId::new(2),
+                "Legacy virtual_id must be preserved across migration to stable UUID!"
+            );
+            mapping.persist().map_err(|err| TuliproxError::Config(err.to_string()))?;
         }
 
         Ok(())

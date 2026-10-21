@@ -347,7 +347,8 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
             rewrite_secret: rewrite_secret.to_vec(),
             now_ms,
         },
-    );
+    )
+    .await;
     let refresh_ordering = if session_outcome == HlsSessionStoreOutcome::Reused {
         refresh_ordering
     } else {

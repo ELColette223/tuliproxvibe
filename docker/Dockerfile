@@ -11,7 +11,7 @@
 FROM mwader/static-ffmpeg:7.1 AS ffmpeg-static
 
 # Workspace skeleton shared by the backend and frontend dependency builds.
-FROM rust:1.95 AS workspace-skeleton
+FROM rust:1.98 AS workspace-skeleton
 
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./

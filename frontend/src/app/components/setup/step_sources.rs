@@ -1,5 +1,5 @@
 use super::setup_helpers::{
-    build_setup_app_config, collect_setup_warnings, format_setup_error_message, move_to_next_step,
+    build_setup_app_config_with_filter_rules, collect_setup_warnings, format_setup_error_message, move_to_next_step,
     move_to_previous_step, prepare_config_and_api_proxy, prepare_sources,
 };
 use crate::{
@@ -20,8 +20,15 @@ pub fn SourcesStep() -> Html {
     let services = use_service_context();
 
     let local_app_config = use_memo(
-        (config_ctx.clone(), (*setup_ctx.config_forms).clone(), (*setup_ctx.sources).clone()),
-        |(config_ctx, form_state, sources)| build_setup_app_config(config_ctx, form_state, sources.clone()),
+        (
+            config_ctx.clone(),
+            (*setup_ctx.config_forms).clone(),
+            (*setup_ctx.sources).clone(),
+            (*setup_ctx.filter_rules).clone(),
+        ),
+        |(config_ctx, form_state, sources, filter_rules)| {
+            build_setup_app_config_with_filter_rules(config_ctx, form_state, sources.clone(), Some(filter_rules))
+        },
     );
 
     let local_config_context = ConfigContext {
@@ -34,8 +41,9 @@ pub fn SourcesStep() -> Html {
 
     let handle_sources_change = {
         let setup_ctx = setup_ctx.clone();
-        Callback::from(move |sources: SourcesConfigDto| {
+        Callback::from(move |(sources, filter_rules): (SourcesConfigDto, Vec<shared::model::ManagedFilterRule>)| {
             setup_ctx.sources.set(sources);
+            setup_ctx.filter_rules.set(filter_rules);
         })
     };
 
@@ -49,8 +57,12 @@ pub fn SourcesStep() -> Html {
         let config_ctx = config_ctx.clone();
         let services = services.clone();
         Callback::from(move |_| {
-            let mut app_config =
-                build_setup_app_config(&config_ctx, &setup_ctx.config_forms, (*setup_ctx.sources).clone());
+            let mut app_config = build_setup_app_config_with_filter_rules(
+                &config_ctx,
+                &setup_ctx.config_forms,
+                (*setup_ctx.sources).clone(),
+                Some(&setup_ctx.filter_rules),
+            );
             for warning in collect_setup_warnings(&app_config) {
                 services.toastr.warning(warning);
             }

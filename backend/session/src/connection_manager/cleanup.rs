@@ -4,7 +4,7 @@ use super::{
         emit_disconnect_record, playback_outcome_for_reason, resolve_disconnect_reason,
         resolve_disconnect_reason_from_provider_end,
     },
-    CleanupWorkerDeps, ConnectionManager, PREEMPT_REENTRY_BLOCK_SECS, PROVIDER_END_NOT_SET,
+    CleanupWorkerDeps, ConnectionManager, PREEMPT_REENTRY_BLOCK_SECS,
 };
 use crate::{ActiveProviderManager, ActiveUserManager, EventManager, SharedStreamManager};
 use arc_swap::ArcSwapOption;
@@ -32,6 +32,10 @@ pub enum CleanupEvent {
         subscriber_id: SharedSubscriberId,
         request_id: Option<tuliprox_core::model::PlaybackRequestId>,
         owner: Option<Arc<str>>,
+        /// Terminal cause recorded by the subscriber wrapper, so history does not fall
+        /// back to `ClientClosed` for provider-side ends.
+        provider_end_reason: u8,
+        provider_error_class: Option<&'static str>,
     },
     ReleaseStream {
         request_id: Option<tuliprox_core::model::PlaybackRequestId>,
@@ -388,15 +392,22 @@ impl ConnectionManager {
                 };
                 let Some(event) = event else { break };
                 match event {
-                    CleanupEvent::ReleaseSharedSubscriber { addr, subscriber_id, request_id, owner } => {
+                    CleanupEvent::ReleaseSharedSubscriber {
+                        addr,
+                        subscriber_id,
+                        request_id,
+                        owner,
+                        provider_end_reason,
+                        provider_error_class,
+                    } => {
                         deps.shared_stream_manager.release_subscriber(subscriber_id).await;
                         handle_release_stream(
                             &deps,
                             addr,
                             Some(subscriber_id.stream_uid()),
-                            PROVIDER_END_NOT_SET,
+                            provider_end_reason,
                             0,
-                            None,
+                            provider_error_class,
                             None,
                             request_id,
                             owner,

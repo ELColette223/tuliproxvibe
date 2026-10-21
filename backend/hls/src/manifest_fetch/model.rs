@@ -61,6 +61,7 @@ impl LiveHlsOriginEntry {
             provider: self.url_failover_provider.clone(),
             username: user_info.as_ref().map(|info| info.username.clone()),
             password: user_info.map(|info| info.password),
+            proxy: None,
             method: InputFetchMethod::GET,
             headers: HashMap::new(),
         }

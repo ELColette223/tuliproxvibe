@@ -1,8 +1,10 @@
 use super::{
     PendingJoinGuard, PendingSharedMeterRegistration, PendingSharedSubscriberCleanup, ReceiverStreamWrapper,
-    SharedStreamState, DEFAULT_SHARED_BUFFER_SIZE_BYTES,
+    SharedStreamState, TerminalOutcome, DEFAULT_SHARED_BUFFER_SIZE_BYTES,
 };
-use crate::{CleanupEvent, SharedCleanupCapability};
+use crate::{
+    CleanupEvent, SharedCleanupCapability, PROVIDER_END_ERROR, PROVIDER_END_NOT_SET, PROVIDER_END_SUBSCRIBER_LAGGED,
+};
 use bytes::Bytes;
 use futures::Stream;
 use std::{
@@ -85,21 +87,51 @@ impl Drop for PendingSharedSubscriberCleanup {
                 subscriber_id: self.subscriber_id,
                 request_id: self.request_id,
                 owner: self.owner.take(),
+                provider_end_reason: PROVIDER_END_NOT_SET,
+                provider_error_class: None,
             });
         }
     }
 }
 
 impl<S> ReceiverStreamWrapper<S> {
+    fn peek_subscriber_terminal_error(&self) -> Option<StreamError> {
+        self.subscriber_terminal_error.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
     pub(super) fn release(&mut self) {
         if !self.released {
             self.released = true;
             if let Some(permit) = self.permit.take() {
+                let (provider_end_reason, provider_error_class) = if self.terminal_observed
+                    && !self.cancel_token.is_cancelled()
+                    && !self.preempted_token.is_cancelled()
+                {
+                    // A subscriber-local terminal error (e.g. lag) wins over the origin's
+                    // outcome: it is what this response actually delivered.
+                    if let Some(local_err) = self.peek_subscriber_terminal_error() {
+                        if matches!(local_err, StreamError::SubscriberLagged) {
+                            (PROVIDER_END_SUBSCRIBER_LAGGED, Some(local_err.provider_error_class()))
+                        } else {
+                            (PROVIDER_END_ERROR, Some(local_err.provider_error_class()))
+                        }
+                    } else {
+                        self.terminal_outcome
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .as_ref()
+                            .map_or((PROVIDER_END_NOT_SET, None), TerminalOutcome::cleanup_classification)
+                    }
+                } else {
+                    (PROVIDER_END_NOT_SET, None)
+                };
                 permit.send(CleanupEvent::ReleaseSharedSubscriber {
                     addr: self.addr,
                     subscriber_id: self.subscriber_id,
                     request_id: self.request_id,
                     owner: self.owner.take(),
+                    provider_end_reason,
+                    provider_error_class,
                 });
             }
         }
@@ -122,7 +154,30 @@ where
         }
         match Pin::new(&mut self.stream).poll_next(cx) {
             Poll::Ready(Some(bytes)) => Poll::Ready(Some(Ok(bytes))),
-            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Ready(None) => {
+                // Inner queue closed. A subscriber-local error (lag) takes precedence, then
+                // the origin's terminal outcome. Either way the client sees the cause before
+                // the reserved cleanup is classified.
+                if !self.terminal_observed && !self.cancel_token.is_cancelled() && !self.preempted_token.is_cancelled()
+                {
+                    if let Some(local_err) = self.peek_subscriber_terminal_error() {
+                        self.terminal_observed = true;
+                        return Poll::Ready(Some(Err(local_err)));
+                    }
+                    let terminal_err = self
+                        .terminal_outcome
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .as_ref()
+                        .and_then(TerminalOutcome::as_stream_error);
+                    if let Some(err) = terminal_err {
+                        self.terminal_observed = true;
+                        return Poll::Ready(Some(Err(err)));
+                    }
+                }
+                self.release();
+                Poll::Ready(None)
+            }
             Poll::Pending => Poll::Pending,
         }
     }

@@ -2,7 +2,9 @@ use super::PanelApiConfigDto;
 use crate::{
     defaults::{default_as_true, is_true, is_zero_i16, is_zero_u16},
     error::TuliproxError,
-    model::{config::media_server_catalog::MediaServerInputConfigDto, EpgConfigDto, StalkerInputConfigDto},
+    model::{
+        config::media_server_catalog::MediaServerInputConfigDto, EpgConfigDto, ProxyConfigDto, StalkerInputConfigDto,
+    },
     utils::{arc_str_serde, deserialize_timestamp, is_blank_optional_string, Internable},
 };
 use std::{collections::HashMap, sync::Arc};
@@ -84,6 +86,8 @@ pub struct ConfigInputDto {
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "is_blank_optional_string")]
     pub password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyConfigDto>,
     #[serde(default, skip_serializing_if = "is_blank_optional_string")]
     pub persist: Option<String>,
     #[serde(default = "default_as_true", skip_serializing_if = "is_true")]
@@ -136,6 +140,7 @@ impl Default for ConfigInputDto {
             epg: None,
             username: None,
             password: None,
+            proxy: None,
             persist: None,
             enabled: default_as_true(),
             account_disabled: false,
@@ -200,7 +205,9 @@ pub use aliases::ConfigInputAliasDto;
 pub use kind::{
     ConfigInputStagedDto, InputCapabilities, InputFetchMethod, InputPersistence, InputType, StagedInputType,
 };
-pub use options::{default_flussonic_hls_catchup_max_duration_secs, ConfigInputOptionsDto, FlussonicHlsCatchup};
+pub use options::{
+    default_flussonic_hls_catchup_max_duration_secs, ConfigInputOptionsDto, ConnectionLimitPolicy, FlussonicHlsCatchup,
+};
 pub use provider::{
     default_provider_dns_refresh_secs, is_default_dns_prefer, is_default_on_connect_error, is_default_on_resolve_error,
     is_default_provider_dns_refresh_secs, is_default_provider_url_selection_policy, ConfigProviderDto, DnsPrefer,

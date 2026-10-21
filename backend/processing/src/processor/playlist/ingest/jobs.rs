@@ -148,7 +148,8 @@ pub(crate) async fn process_input_job_inner<E: EventSink + Clone + 'static, M: M
         error!("Failed to persist input playlist {}", input.name);
         download.errors.push(err);
     }
-    let epg = if input_type == InputType::Library || download.partial || storage_failed {
+    let epg = if ctx.offline_target_reprocess || input_type == InputType::Library || download.partial || storage_failed
+    {
         None
     } else {
         download_input_epg(ctx, input, &mut download.errors).await
@@ -268,7 +269,7 @@ pub(crate) async fn process_source<E: EventSink + Clone + 'static, M: MetadataUp
                 error!("Input {input_name} referenced by source {source_idx} does not exist");
                 continue;
             };
-            if is_input_enabled(input, &ctx.user_targets) {
+            if is_input_enabled(input, &ctx.user_targets, ctx.offline_target_reprocess) {
                 enabled_inputs.push((index, input));
             } else {
                 disabled_inputs.push(input.name.clone());
@@ -467,6 +468,7 @@ impl<E: EventSink + Clone, M: MetadataUpdateSink> Clone for PlaylistProcessingCo
             input_refresh: self.input_refresh,
             library_update_mode: self.library_update_mode,
             maintenance: self.maintenance.clone(),
+            offline_target_reprocess: self.offline_target_reprocess,
         }
     }
 }

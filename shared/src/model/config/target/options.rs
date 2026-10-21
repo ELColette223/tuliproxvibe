@@ -122,6 +122,9 @@ pub struct ConfigTargetOptions {
     pub epg_output: EpgOutputOptions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub force_redirect: Option<ClusterFlags>,
+    /// Keeps channel ids stable across source updates by deriving them from the channel identity.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub preserve_stream_ids: bool,
 }
 
 impl ConfigTargetOptions {
@@ -132,6 +135,7 @@ impl ConfigTargetOptions {
             && self.deduplicate.is_none()
             && self.epg_output.is_empty()
             && self.force_redirect.is_none_or(|f| f.has_full_flags() || f.is_empty())
+            && !self.preserve_stream_ids
     }
 
     pub const fn lowercase_epg_ids(&self) -> bool { self.epg_output.lowercase_ids }
@@ -145,6 +149,8 @@ impl ConfigTargetOptions {
     pub fn share_live_hls_enabled(&self) -> bool { self.share_live_streams.hls }
 
     pub fn share_live_mpeg_ts_enabled(&self) -> bool { self.share_live_streams.mpeg_ts }
+
+    pub const fn preserve_stream_ids(&self) -> bool { self.preserve_stream_ids }
 
     pub fn share_live_any_enabled(&self) -> bool { self.share_live_hls_enabled() || self.share_live_mpeg_ts_enabled() }
 }
