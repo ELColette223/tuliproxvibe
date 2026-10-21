@@ -6,7 +6,8 @@ use crate::{
             select::Select,
             selection_first_owned, selection_parse_first,
             userlist::{page::UserlistPage, proxy_type_input::ProxyTypeInput, ProxyTypeView},
-            ClusterFlagsInput, ClusterFlagsInputMode, DropDownOption, DropDownSelection, Tag, TextButton, UserStatus,
+            ClusterFlagsInput, ClusterFlagsInputMode, DropDownOption, DropDownSelection, FilterInput, NoSubmitForm,
+            Tag, TextButton, UserStatus,
         },
         TargetUser,
     },
@@ -180,6 +181,8 @@ pub struct ProxyUserCredentialsFormProps {
     pub plans: Rc<Vec<UserPlanDto>>,
     #[prop_or_default]
     pub active_page: Option<UserlistPage>,
+    #[prop_or_default]
+    pub local_mode: bool,
     pub on_save: Callback<(bool, String, ProxyUserCredentialsDto)>,
     pub on_cancel: Callback<()>,
 }
@@ -419,6 +422,7 @@ pub fn ProxyUserCredentialsForm(props: &ProxyUserCredentialsFormProps) -> Html {
     let plan_list = props.plans.clone();
     let plan_is_update = update.clone();
     let instance_output_clusters = form_state.clone();
+    let instance_filter = form_state.clone();
     let active_plan = form_state.data().plan.as_ref().and_then(|name| props.plans.iter().find(|p| &p.name == name));
     let country_services = service_ctx.clone();
     let country_translate = translate.clone();
@@ -502,6 +506,7 @@ pub fn ProxyUserCredentialsForm(props: &ProxyUserCredentialsFormProps) -> Html {
                     options={proxy_user_status.clone()}
                 />
             }})}
+            <NoSubmitForm>
             { if *update {
                   config_field_custom!(translate.t("LABEL.USERNAME"), form_state.data().username.clone())
                 } else {
@@ -542,6 +547,7 @@ pub fn ProxyUserCredentialsForm(props: &ProxyUserCredentialsFormProps) -> Html {
                     </div>
                 }
             }
+            </NoSubmitForm>
             { edit_field_text_option!(form_state,  translate.t("LABEL.TOKEN"), token, UserFormAction::Token, true) }
             { config_field_child!(translate.t("LABEL.PROXY"), "PROXY_USER_CREDENTIALS.PROXY", {
                html! {
@@ -679,7 +685,14 @@ pub fn ProxyUserCredentialsForm(props: &ProxyUserCredentialsFormProps) -> Html {
             } else {
                 html! {}
             } }
-            { edit_field_text_option!(form_state,  translate.t("LABEL.FILTER"), filter, UserFormAction::Filter) }
+            { config_field_child!(translate.t("LABEL.FILTER"), "PROXY_USER_CREDENTIALS.FILTER", {
+                html! {
+                    <FilterInput filter={instance_filter.data().filter.clone()} validate_on_server={!props.local_mode}
+                        on_change={Callback::from(move |filter: Option<String>| {
+                            instance_filter.dispatch(UserFormAction::Filter(filter));
+                        })} />
+                }
+            }) }
             { if let Some(plan) = active_plan {
                 if let Some(plan_filter) = &plan.filter {
                     html! {

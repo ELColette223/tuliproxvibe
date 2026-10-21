@@ -1,5 +1,5 @@
 mod app_state;
-mod app_state_view;
+mod hls_playlist_handoff;
 mod hls_provisioning;
 mod proxy;
 mod stalker_resolve_coordinator;
@@ -15,7 +15,9 @@ pub(in crate::api) use self::hls_provisioning::{
     parse_hls_panel_provisioning_segment_route_name, start_hls_panel_provisioning_once,
     try_hls_panel_provisioning_manifest_response, HlsPanelProvisioningRedirectPaths, HlsProvisioningStatus,
 };
-pub use self::{app_state::*, app_state_view::*, hls_provisioning::HlsProvisioningState, proxy::*};
+pub use self::{
+    app_state::*, hls_playlist_handoff::HlsPlaylistHandoffCache, hls_provisioning::HlsProvisioningState, proxy::*,
+};
 pub(crate) use self::{stalker_resolve_coordinator::StalkerResolveCoordinator, streams::*};
 // Provider value types moved to `model`; re-exported so `api` keeps its names.
 pub use crate::model::provider::*;
@@ -41,8 +43,8 @@ pub use tuliprox_core::model::{batch_result_collector::*, user_api_request::*, x
 pub use tuliprox_core::utils::byte_range::{resolve_single_byte_range, SingleByteRange};
 // The recording queue and the DVR moved to `tuliprox-dvr`; re-exported so `api`
 // call sites keep their names, module paths included.
-pub use tuliprox_dvr::{download, recording};
-pub use tuliprox_dvr::{download::*, recording::*};
+pub use tuliprox_dvr::recording;
+pub use tuliprox_dvr::recording::*;
 // Keep the crate alias while call sites migrate to its explicit `api` facade.
 pub use tuliprox_hls as hls_cache;
 // The HLS proxy symbols this crate's own tests reach through `api::model`.
@@ -96,3 +98,5 @@ pub use tuliprox_session::{
     event_manager::*, meter, meter::*, provider_dns_manager::*, provider_lineup_manager, provider_lineup_manager::*,
     qos_aggregation_manager::*, response_headers::*, stream, stream::*, streams::*,
 };
+
+pub mod recording_runtime;

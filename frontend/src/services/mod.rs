@@ -1,9 +1,9 @@
 mod auth_service;
 mod config_service;
 mod dialog_service;
-mod downloads_service;
 mod event_service;
 mod flags_service;
+mod maintenance_service;
 mod playlist_service;
 mod rbac_service;
 mod recording_service;
@@ -18,8 +18,11 @@ mod user_service;
 mod websocket_service;
 
 pub use self::{
-    auth_service::*, config_service::*, dialog_service::*, downloads_service::*, event_service::*, flags_service::*,
+    auth_service::*, config_service::*, dialog_service::*, event_service::*, flags_service::*, maintenance_service::*,
     playlist_service::*, rbac_service::*, recording_service::*, requests::*, status_service::*,
     stream_history_service::*, streams_service::*, target_bouquet_service::*, toastr_service::*, user_api_service::*,
     user_service::*, websocket_service::*,
 };
+
+mod user_settings_service;
+pub use user_settings_service::*;

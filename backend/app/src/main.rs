@@ -418,6 +418,28 @@ async fn print_info(app_config: &AppConfig, loaded_env: Option<&Path>) {
     if let Some(metadata_update) = config.metadata_update.as_ref() {
         info!("Metadata path: {}", metadata_update.cache_path);
     }
+    if let Some(recording) = config.recording() {
+        // Nothing bounds recording disk use unless at least one of the three
+        // policies is set. Worth a warning, not an error: a dedicated
+        // filesystem is a legitimate reason to run without any of them.
+        let has_policy_retention = recording.retention.as_ref().is_some_and(|retention| {
+            retention.keep_last_per_channel.is_some() || retention.delete_after_days.is_some()
+        });
+        let has_watermarks = recording
+            .disk
+            .as_ref()
+            .is_some_and(|disk| disk.high_water_percent.is_some() && disk.low_water_percent.is_some());
+        let has_quota = recording.quota.as_ref().is_some_and(|quota| {
+            quota.default_private_bytes.is_some() || quota.shared_bytes.is_some() || !quota.per_user_bytes.is_empty()
+        });
+        if recording.enabled && !has_policy_retention && !has_watermarks && !has_quota {
+            warn!(
+                "recording is enabled with no retention, no disk watermarks, and no quota; \
+                 recording disk usage is unbounded"
+            );
+        }
+    }
+
     config_loader::runtime_config_report::log_runtime_config_report(app_config).await;
 }
 
@@ -526,8 +548,14 @@ async fn start_in_cli_mode(cfg: Arc<AppConfig>, targets: Arc<ProcessTargets>) {
         error!("Failed to build client {err}");
         reqwest::Client::new()
     });
-    // In CLI mode, we don't start background managers for events or providers
-    exec_processing(ProcessingRun::new(client, cfg, targets, shared::model::NoopSink)).await;
+    // In CLI mode, we don't start background managers for events or providers. Maintenance
+    // still applies: an input taken out of service is not fetched by a one-shot run either.
+    // Read-only: a one-shot run may share the storage directory with a running server.
+    let storage_dir = arc_swap::ArcSwapAny::load(cfg.config.as_ref()).storage_dir.clone();
+    let maintenance_path = std::path::PathBuf::from(storage_dir).join(tuliprox_core::model::MAINTENANCE_FILE);
+    let maintenance = Arc::new(tuliprox_core::model::MaintenanceRegistry::load_read_only(maintenance_path).await);
+    exec_processing(ProcessingRun::new(client, cfg, targets, shared::model::NoopSink).with_maintenance(maintenance))
+        .await;
 }
 
 async fn start_in_server_mode(cfg: Arc<AppConfig>, targets: Arc<ProcessTargets>) {

@@ -100,6 +100,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Stora
 vergen = { version = "10.0.3", features = ["build"] }
 
 [dev-dependencies]
+tokio-tungstenite = "0.29.0"
 tuliprox-processing = { workspace = true, features = ["test-support"] }
 tuliprox-hls = { workspace = true, features = ["test-support"] }
 # The migration and playlist-stream tests build legacy v2 databases and
@@ -111,11 +112,8 @@ tuliprox-mpegts = { workspace = true, features = ["test-support"] }
 tuliprox-repository = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 rcgen = "0.14.9"
-rustls = "0.23.43"
-tokio-rustls = "0.26.4"
-
-[features]
-proxy-auth-regression = []
+rustls = "0.23.45"
+tokio-rustls = "0.26.6"
 
 
 [[bin]]

@@ -19,7 +19,7 @@ async fn scan_library(
 ) -> axum::response::Response {
     debug!("Library scan requested (force_rescan: {})", request.force_rescan);
 
-    let Some(permit) = app_state.update_guard.try_library() else {
+    let Some(permit) = app_state.playlist_updates.update_guard.try_library() else {
         warn!("Library update already in progress; update skipped.");
         return (
             axum::http::StatusCode::BAD_REQUEST,
@@ -42,7 +42,7 @@ async fn scan_library(
             }
         }
     };
-    let client = app_state.http_client.load_full().as_ref().clone();
+    let client = app_state.http_clients.default.load_full().as_ref().clone();
     let event_manager = Arc::clone(&app_state.event_manager);
     spawn_library_scan(
         event_manager,
@@ -61,7 +61,7 @@ async fn get_library_status(
     axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
 ) -> axum::response::Response {
     let config_snapshot = app_state.app_config.config.load();
-    match read_library_status(&config_snapshot, app_state.http_client.load_full().as_ref().clone()).await {
+    match read_library_status(&config_snapshot, app_state.http_clients.default.load_full().as_ref().clone()).await {
         Ok(status) => axum::Json(status).into_response(),
         Err(err) => {
             log::error!("Failed to read Library catalog status: {err}");
@@ -123,6 +123,55 @@ async fn get_thumbnail(
     serve_thumbnail_hash(&storage, &id, etag, &headers).await
 }
 
+async fn serve_thumbnail_hash(
+    storage: &MetadataStorage,
+    hash: &str,
+    etag: String,
+    headers: &axum::http::HeaderMap,
+) -> axum::response::Response {
+    if let Some(if_none_match) = headers.get(axum::http::header::IF_NONE_MATCH) {
+        if if_none_match.as_bytes() == etag.as_bytes() {
+            return axum::http::StatusCode::NOT_MODIFIED.into_response();
+        }
+    }
+
+    let thumb_path = storage.get_thumbnail_path(hash);
+    match tokio::fs::read(&thumb_path).await {
+        Ok(data) => {
+            let headers = [
+                (axum::http::header::CONTENT_TYPE, "image/jpeg".to_string()),
+                (axum::http::header::CACHE_CONTROL, "max-age=86400, public".to_string()),
+                (axum::http::header::ETAG, etag),
+            ];
+            (headers, data).into_response()
+        }
+        Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Registers Library API routes.
+pub fn library_api_register(
+    router: axum::Router<Arc<AppState>>,
+    app_state: Option<&Arc<AppState>>,
+) -> axum::Router<Arc<AppState>> {
+    match app_state {
+        Some(app_state) => router
+            .route(
+                "/library/status",
+                axum::routing::get(get_library_status).layer(permission_layer!(app_state, Permission::LibraryRead)),
+            )
+            .route(
+                "/library/scan",
+                axum::routing::post(scan_library).layer(permission_layer!(app_state, Permission::LibraryWrite)),
+            )
+            .route("/library/thumbnail/{uuid}", axum::routing::get(get_thumbnail)),
+        None => router
+            .route("/library/scan", axum::routing::post(scan_library))
+            .route("/library/status", axum::routing::get(get_library_status))
+            .route("/library/thumbnail/{uuid}", axum::routing::get(get_thumbnail)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,54 +220,5 @@ mod tests {
             read_library_status(&Config::default(), reqwest::Client::new()).await.unwrap(),
             LibraryStatus::default()
         );
-    }
-}
-
-async fn serve_thumbnail_hash(
-    storage: &MetadataStorage,
-    hash: &str,
-    etag: String,
-    headers: &axum::http::HeaderMap,
-) -> axum::response::Response {
-    if let Some(if_none_match) = headers.get(axum::http::header::IF_NONE_MATCH) {
-        if if_none_match.as_bytes() == etag.as_bytes() {
-            return axum::http::StatusCode::NOT_MODIFIED.into_response();
-        }
-    }
-
-    let thumb_path = storage.get_thumbnail_path(hash);
-    match tokio::fs::read(&thumb_path).await {
-        Ok(data) => {
-            let headers = [
-                (axum::http::header::CONTENT_TYPE, "image/jpeg".to_string()),
-                (axum::http::header::CACHE_CONTROL, "max-age=86400, public".to_string()),
-                (axum::http::header::ETAG, etag),
-            ];
-            (headers, data).into_response()
-        }
-        Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
-    }
-}
-
-/// Registers Library API routes.
-pub fn library_api_register(
-    router: axum::Router<Arc<AppState>>,
-    app_state: Option<&Arc<AppState>>,
-) -> axum::Router<Arc<AppState>> {
-    match app_state {
-        Some(app_state) => router
-            .route(
-                "/library/status",
-                axum::routing::get(get_library_status).layer(permission_layer!(app_state, Permission::LibraryRead)),
-            )
-            .route(
-                "/library/scan",
-                axum::routing::post(scan_library).layer(permission_layer!(app_state, Permission::LibraryWrite)),
-            )
-            .route("/library/thumbnail/{uuid}", axum::routing::get(get_thumbnail)),
-        None => router
-            .route("/library/scan", axum::routing::post(scan_library))
-            .route("/library/status", axum::routing::get(get_library_status))
-            .route("/library/thumbnail/{uuid}", axum::routing::get(get_thumbnail)),
     }
 }

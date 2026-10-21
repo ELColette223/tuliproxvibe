@@ -192,28 +192,11 @@ Typical use:
 - compare `24h`, `7d`, and `30d` quality windows
 - prepare later failover and ranking analysis
 
-## Example 7: Inspect a download target before queueing
+## Example 7: Request a recording
 
-```bash
-#!/bin/bash
-
-BASE_URL="http://localhost:8901"
-TOKEN="PUT_YOUR_TOKEN_HERE"
-URL_TO_DOWNLOAD="https://example.invalid/file.mp4"
-
-curl -s -G "$BASE_URL/api/v1/file/download/info" \
-    --data-urlencode "url=$URL_TO_DOWNLOAD" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Accept: application/json" | jq .
-```
-
-Typical use:
-
-- inspect filename and metadata before queueing
-- verify that the remote file is reachable
-- test `download.read` access
-
-## Example 8: Queue a file download
+Recording requests name server-owned source ids. The client never supplies a
+URL, a filename or a path: the server resolves all three, so a caller cannot
+point a recording at arbitrary storage.
 
 ```bash
 #!/bin/bash
@@ -221,23 +204,67 @@ Typical use:
 BASE_URL="http://localhost:8901"
 TOKEN="PUT_YOUR_TOKEN_HERE"
 
-curl -s -X POST "$BASE_URL/api/v1/file/download" \
+curl -s -i -X POST "$BASE_URL/api/v1/recording/requests" \
     -H "Authorization: Bearer $TOKEN" \
-    -H "Accept: application/json" \
     -H "Content-Type: application/json" \
+    -H "Idempotency-Key: 5f1c0f1e-2b7a-4f5d-9d2e-6c3f0f1b2a44" \
     --data-raw '{
-      "url": "https://example.invalid/file.mp4",
-      "filename": "example.mp4",
-      "input_name": null,
-      "priority": null
-    }' | jq .
+      "source": {
+        "target_id": "1",
+        "virtual_id": "4242",
+        "cluster": "live",
+        "input_name": "provider-a"
+      },
+      "program_title": "Example Programme",
+      "program_start": 1756000000,
+      "program_end": 1756003600,
+      "visibility": "private"
+    }'
 ```
+
+The response is `204 No Content` — a command, not a query. The new entry
+reaches the client on the next recording snapshot over the WebSocket, so
+there is one description of a recording rather than two that can disagree.
+
+`Idempotency-Key` is optional. Repeating the same key with the same body
+returns `204` again without creating a second recording, for 24 hours from
+the first accepted request. The same key with a *different* body returns
+`409 Conflict` rather than quietly answering with the first request's result.
 
 Typical use:
 
-- queue a normal background download
-- confirm that duplicate queue requests return the existing task instead of creating a second one
-- test `download.write` access
+- queue a recording without polling for its state afterwards
+- make a client retry safe across a dropped connection or a server restart
+- test `recording.create` access
+
+## Example 8: Control an existing recording
+
+```bash
+#!/bin/bash
+
+BASE_URL="http://localhost:8901"
+TOKEN="PUT_YOUR_TOKEN_HERE"
+REQUEST_ID="PUT_A_REQUEST_ID_HERE"
+
+# A user acts on their own library entry.
+curl -s -i -X POST "$BASE_URL/api/v1/recording/requests/$REQUEST_ID/cancel" \
+    -H "Authorization: Bearer $TOKEN"
+
+# Removing a finished entry detaches it; the file survives while anyone
+# else still holds it.
+curl -s -i -X DELETE "$BASE_URL/api/v1/recording/requests/$REQUEST_ID" \
+    -H "Authorization: Bearer $TOKEN"
+```
+
+Every command answers `204`. Pause, resume and retry act on the *file*
+rather than one user's entry, so they are administrator routes under
+`/materializations/{id}` and are rejected for Live captures, which cannot be
+paused, resumed or retried.
+
+Typical use:
+
+- leave a shared recording without stopping it for anyone else
+- test `recording.manage` and `recording.delete` access
 
 ## Example 9: Trigger a playlist update
 
@@ -284,12 +311,12 @@ Typical use:
 Notes:
 
 - Replace `"stalker"` with the configured input name.
-- The preview endpoint returns catalog items. Actual playback can still require Stalker `create_link` resolution later, depending
-  on your `stalker_pre_resolve_playback` / `stalker_runtime_resolve_playback` settings.
-- If a Stalker item has not been materialized yet, Tuliprox no longer exposes the raw portal `cmd` as the playlist URL. Runtime
+- The preview endpoint returns catalog items. Actual playback resolves the Stalker `create_link` URL when the request reaches
+  the stream endpoint.
+- If a Stalker item has not been materialized yet, Tuliprox does not expose the raw portal `cmd` as the playlist URL. Runtime
   playback resolves a real media URL later through the reverse-proxy path.
-- Expired temp links are refreshed automatically when `stalker_runtime_resolve_playback` is enabled. Only portal-specific extra
-  header/cookie requirements remain a possible follow-up.
+- Expired temp links are refreshed automatically, including one re-handshake when the portal rejects the session. Only
+  portal-specific extra header/cookie requirements remain a possible follow-up.
 - Runtime refresh only produces `http`/`https` playback URLs; Stalker `rtmp://` / `rtsp://` commands are rejected explicitly rather
   than proxied half-supported.
 
@@ -322,6 +349,58 @@ Notes:
   are `null` for semantic errors without a source position (e.g. an invalid regex value).
 - The preview reads the target's already-processed playlist; it never contacts providers or triggers an update.
 
+## Maintenance mode
+
+An input can be taken out of service while its provider is down. While an input is in maintenance:
+
+- every **new** stream request for it (live, VOD, series, catch-up, HLS entry, redirect mode) gets the
+  `maintenance.ts` custom video instead of a provider connection,
+- playlist and EPG updates keep serving the last persisted playlist and EPG without contacting the provider,
+- probes, metadata resolution and Stalker refreshes for the input are paused,
+- DVR recordings that would start fail with `Input is in maintenance mode`; use **Retry** afterwards.
+
+Running streams, seeks within them, and running recordings continue. The state is stored in
+`<storage_dir>/maintenance.json` and survives restarts. A corrupt file is moved aside as
+`maintenance.json.corrupt` and the server starts with no input in maintenance. A file that cannot be read at all
+(for example because of its permissions) stays in place; changes are then refused with `500` instead of overwriting
+it. A one-shot CLI update reads the file but never changes it. Entries for inputs that are removed
+from `source.yml` are dropped on the next source reload.
+
+The dashboard shows a **Maintenance** card that turns red while any input is in maintenance.
+
+```bash
+#!/bin/bash
+
+BASE_URL="http://localhost:8901"
+TOKEN="PUT_YOUR_TOKEN_HERE"
+
+# Put one input into maintenance, with an optional remark
+curl -s -X PUT "$BASE_URL/api/v1/maintenance/provider_a" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    --data-raw '{"reason":"Provider down"}'
+
+# Take every input out of maintenance (`*`, URL-encoded as %2A)
+curl -s -X DELETE "$BASE_URL/api/v1/maintenance/%2A" -H "Authorization: Bearer $TOKEN"
+
+# Current state
+curl -s "$BASE_URL/api/v1/maintenance" -H "Authorization: Bearer $TOKEN"
+```
+
+Every call answers with the complete state:
+
+```json
+{
+  "entries": { "provider_a": { "since": 1760350000, "reason": "Provider down" } },
+  "inputs": ["provider_a", "provider_b"]
+}
+```
+
+- `*` addresses all inputs known at the time of the call; an input literally named `*` cannot be addressed alone.
+- Putting an input that is already in maintenance updates its remark and keeps `since`.
+- Unknown inputs answer `404`, remarks longer than 500 characters `400`.
+- Without Web UI authentication the endpoints are as open as the other `/api/v1` routes.
+
 ## Available `/api/v1` Endpoints
 
 This is a compact operator-oriented overview of the `/api/v1` REST API groups currently registered by the backend.
@@ -342,44 +421,84 @@ This is a compact operator-oriented overview of the `/api/v1` REST API groups cu
 | `GET` | `/api/v1/qos-snapshots/{stream_identity_key}` | QoS detail for one stream |
 | `GET` | `/api/v1/geoip/update` | Trigger GeoIP DB update |
 
-### Downloads and recordings
+### Maintenance mode
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/maintenance` | Inputs in maintenance and all known input names (`maintenance.read`) |
+| `PUT` | `/api/v1/maintenance/{input}` | Put an input (or `*` for all) into maintenance, optional `{"reason": "..."}` body (`maintenance.write`) |
+| `DELETE` | `/api/v1/maintenance/{input}` | Take an input (or `*` for all) out of maintenance (`maintenance.write`) |
+
+### Recordings
+
+Recording REST is **commands only**. There is no list, task, status or quota
+endpoint to poll: every successful command answers `204 No Content`, and all
+list, progress, quota and availability data reaches a client on the recording
+WebSocket snapshot. That way a recording has one description rather than two
+that can disagree.
+
+Requests are addressed by the caller's own library-entry id. The three
+materialization routes act on the shared *file* and are administrator-only;
+the id for them appears solely in the administrator block of a snapshot, so
+a regular user's DTO can never be used to reach one.
 
 | Method   | Path                                                 | Purpose                                                                         |
 | -------- |------------------------------------------------------|---------------------------------------------------------------------------------|
-| `GET`    | `/api/v1/file/download/info`                         | Inspect remote file/download info                                               |
-| `POST`   | `/api/v1/file/download`                              | Queue a file download                                                           |
-| `POST`   | `/api/v1/file/record`                                | Queue a live recording                                                          |
-| `POST`   | `/api/v1/file/download/pause`                        | Pause a queued or active download                                               |
-| `POST`   | `/api/v1/file/download/resume`                       | Resume a paused download                                                        |
-| `POST`   | `/api/v1/file/download/cancel`                       | Cancel a queued or active download                                              |
-| `POST`   | `/api/v1/file/download/remove`                       | Remove a task from the download database                                        |
-| `POST`   | `/api/v1/file/download/retry`                        | Retry a failed download                                                         |
-| `GET`    | `/api/v1/recording/tasks`                            | List visible DVR tasks                                                          |
-| `POST`   | `/api/v1/recording/tasks`                            | Create a DVR recording task from server-owned source ids                        |
-| `PATCH`  | `/api/v1/recording/tasks/{id}`                       | Edit an upcoming DVR recording                                                  |
-| `POST`   | `/api/v1/recording/tasks/{id}/cancel`                | Cancel an active, queued, or scheduled DVR recording                            |
-| `DELETE` | `/api/v1/recording/tasks/{id}`                       | Delete a finished DVR recording through the safe deletion lifecycle             |
+| `POST`   | `/api/v1/recording/requests`                         | Request a recording from server-owned source ids                                |
+| `PATCH`  | `/api/v1/recording/requests/{id}`                    | Edit an upcoming recording                                                      |
+| `POST`   | `/api/v1/recording/requests/{id}/cancel`             | Cancel the caller's recording                                                   |
+| `DELETE` | `/api/v1/recording/requests/{id}`                    | Remove the caller's library entry                                               |
+| `POST`   | `/api/v1/recording/materializations/{id}/pause`      | Pause a transfer (admin; never Live)                                            |
+| `POST`   | `/api/v1/recording/materializations/{id}/resume`     | Resume a paused transfer (admin; never Live)                                    |
+| `POST`   | `/api/v1/recording/materializations/{id}/retry`      | Retry a failed transfer (admin; never Live)                                     |
+| `DELETE` | `/api/v1/recording/materializations/{id}`            | Delete the physical recording (admin; refused while referenced)                 |
 | `POST`   | `/api/v1/recording/conflicts/preview`                | Advisory conflict preview (severity, optional provider scope, overlap segments) |
-| `GET`    | `/api/v1/recording/quota`                            | Read the caller's private quota and shared DVR usage                            |
+| `GET`    | `/api/v1/recording/availability`                     | Whether recording is available to the caller                                    |
+| `GET`    | `/api/v1/recording/health`                           | Supervisor and recovery health (admin)                                          |
 | `GET`    | `/api/v1/recording/rules`                            | List visible recurring recording rules                                          |
 | `POST`   | `/api/v1/recording/rules`                            | Create a weekly recurring recording rule                                        |
 | `PATCH`  | `/api/v1/recording/rules/{id}`                       | Edit a recurring recording rule                                                 |
 | `DELETE` | `/api/v1/recording/rules/{id}?future=retain\|cancel` | Delete a recurring recording rule                                               |
 
+Every route is gated by `recording.enabled`. With recording switched off they
+answer `501 Not Implemented` with the code `recording_disabled`, which
+distinguishes "switched off here" from `403` (not allowed) and `404` (does
+not exist).
+
+#### Idempotent creates
+
+`POST /api/v1/recording/requests` honours an optional `Idempotency-Key`
+header:
+
+- the same principal, key and body returns the original `204` without
+  creating a second recording;
+- the same key with a different body returns `409 Conflict`, because
+  answering it with the first request's result would hide a caller bug;
+- the record is kept for 24 hours from first acceptance and survives a
+  restart, so a client retrying across one cannot duplicate its recording;
+- after that it is forgotten, and the request is treated as new.
+
 #### DVR WebSocket protocol
 
-The DVR layer ships its own scoped protocol messages on the same WebSocket connection as the rest of the
-backend. The frontend sends `ProtocolMessage::RecordingSnapshotRequest` to subscribe and receives:
+The DVR layer ships its own scoped protocol messages on the same WebSocket
+connection as the rest of the backend. The client sends
+`ProtocolMessage::RecordingSnapshotRequest` to subscribe and receives
+`ProtocolMessage::RecordingSnapshotResponse { revision, available, quota, tasks }`
+— the complete filtered list for the caller's session, sent on connect and
+after every change the session is permitted to see.
 
-- `ProtocolMessage::RecordingSnapshotResponse { revision, tasks }` — the full filtered task list for the
-  caller's session, sent on connect and after every mutation the session is permitted to see.
-- `ProtocolMessage::RecordingDeltaResponse { revision, tasks }` — a smaller diff when only a few tasks
-  changed.
+There is no delta message. A snapshot is always complete, so a client that
+misses one loses nothing.
 
-The frontend never polls. After a successful `POST /api/v1/recording/tasks` it relies on the next
-`RecordingSnapshotResponse` to update its view. Rule lists are refreshed by hooking into
-`EventMessage::RecordingSnapshot` and re-calling `GET /api/v1/recording/rules`; a dedicated
-`RecordingRulesChanged` event is a planned follow-up but not currently shipped.
+Revisions are global across the server, so a session sees gaps whenever a
+change touched somebody else. A gap is normal and must be applied; a
+revision that goes *backwards* is a reordered delivery and must be ignored,
+or the list regresses to a state the server has already moved past.
+
+Progress-only updates are coalesced to at most one snapshot per second per
+session. State transitions, command results, quota and availability changes,
+and terminal states bypass that timer and publish immediately — a finished
+recording must never look like it is still running.
 
 #### DVR conflict preview
 
@@ -387,12 +506,6 @@ The frontend never polls. After a successful `POST /api/v1/recording/tasks` it r
 (`none` / `soft` / `hard`) plus optional provider scope and overlap segments, but the server does not
 reject the create call based on it. The frontend renders the preview as a hint next to the recording
 form's scheduled interval, never as a hard block.
-
-#### `POST /api/v1/file/record` (deprecated)
-
-The legacy `POST /api/v1/file/record` endpoint is admin-gated and **scheduled for removal in the next
-major version**. It returns `recording_forbidden` for non-admin principals. New code should call
-`POST /api/v1/recording/tasks` with a `CreateRecordingTaskBody` payload.
 
 ### Playlist and web-player helpers
 
@@ -420,6 +533,141 @@ major version**. It returns `recording_forbidden` for non-admin principals. New 
 | `POST` | `/api/v1/config/sources` | Save `source.yml` |
 | `GET` | `/api/v1/config/apiproxy` | Read `api-proxy.yml` |
 | `PUT` | `/api/v1/config/apiproxy` | Save `api-proxy.yml` |
+
+### Personal settings (`me`)
+
+`me` identifies the caller from the authenticated session. These routes do not accept a username or user ID
+to select another account. Web UI users and API proxy users with Web UI access can manage their own settings;
+administrator privileges are not required. If Web UI authentication is disabled, all callers use the same local
+settings and the response reports `shared: true`.
+
+The examples request JSON with `Accept: application/json`. Responses also support `Accept: application/cbor`,
+and `PUT` accepts CBOR with `Content-Type: application/cbor`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/me/settings` | Read the caller's preferences and per-table version tags |
+| `GET` | `/api/v1/me/settings/tables/{table}` | Read one table layout and its `ETag` header |
+| `PUT` | `/api/v1/me/settings/tables/{table}` | Replace one table layout; requires `If-Match` |
+| `DELETE` | `/api/v1/me/settings/tables/{table}` | Reset one table's layout overrides; requires `If-Match` |
+
+#### Read all preferences
+
+```bash
+BASE_URL="http://localhost:8901"
+TOKEN="PUT_YOUR_TOKEN_HERE"
+
+curl -sS "$BASE_URL/api/v1/me/settings" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/json" | jq .
+```
+
+An account without stored preferences returns:
+
+```json
+{
+  "preferences": {
+    "web_ui": {
+      "tables": {}
+    }
+  },
+  "section_etags": {},
+  "shared": false
+}
+```
+
+Stored layouts appear in `preferences.web_ui.tables`, keyed by table ID. `section_etags` contains the corresponding
+quoted version tags, also keyed by table ID. This endpoint does not return a top-level `ETag` header.
+To obtain a version tag for a table without stored overrides, read that table's endpoint.
+
+#### Read, save, and reset a table layout
+
+`{table}` is the stable table ID used by the Web UI, for example `users` for the API proxy user table.
+Percent-encode the ID when putting it in the URL. Column IDs are stable identifiers such as `username` and `enabled`,
+rather than translated display labels.
+
+A table layout has two fields:
+
+```json
+{
+  "column_order": ["username", "enabled"],
+  "column_visibility": {
+    "enabled": false
+  }
+}
+```
+
+`column_order` specifies the preferred order. `column_visibility` maps column IDs to visibility flags.
+Columns without overrides use the Web UI defaults, and required columns remain visible.
+`PUT` replaces both fields: omitted fields default to an empty list or map. Unknown payload fields and duplicate
+IDs in `column_order` are rejected.
+
+The following sequence reads the layout, saves an override, and then resets it. It uses the token obtained above.
+When authentication is disabled, omit the `Authorization` headers.
+
+```bash
+TABLE_URL="$BASE_URL/api/v1/me/settings/tables/users"
+HEADERS_FILE=$(mktemp)
+trap 'rm -f "$HEADERS_FILE"' EXIT
+
+# Read the layout and capture its quoted ETag, including for an unsaved table.
+curl --fail-with-body -sS -D "$HEADERS_FILE" "$TABLE_URL" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/json" || exit 1
+
+ETAG=$(awk 'tolower($1) == "etag:" {gsub("\r", "", $2); print $2}' "$HEADERS_FILE")
+
+# Save only if this table still matches the version just read.
+curl --fail-with-body -sS -D "$HEADERS_FILE" -X PUT "$TABLE_URL" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/json" \
+    -H "Content-Type: application/json" \
+    -H "If-Match: $ETAG" \
+    --data-raw '{"column_order":["username","enabled"],"column_visibility":{"enabled":false}}' || exit 1
+
+# Use the version returned by the successful save for the next change.
+ETAG=$(awk 'tolower($1) == "etag:" {gsub("\r", "", $2); print $2}' "$HEADERS_FILE")
+
+curl --fail-with-body -sS -i -X DELETE "$TABLE_URL" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Accept: application/json" \
+    -H "If-Match: $ETAG" || exit 1
+```
+
+All three table operations return `200 OK`, the resulting layout, and its `ETag` header.
+An unsaved or reset layout is `{"column_order":[],"column_visibility":{}}`; the Web UI applies its defaults.
+`DELETE` resets only the selected table's layout overrides. It does not delete the account or other tables' settings.
+Successful settings responses use `Cache-Control: private, no-store`.
+
+#### Concurrent changes and errors
+
+Send exactly one `If-Match` header with the quoted tag returned by the server. Tags are scoped to the account and table;
+changes to another table do not invalidate this table's tag. Weak tags, `*`, unquoted tags, and lists of tags are rejected.
+
+If another client changes the same table before your save or reset, the server returns `412 Precondition Failed`
+without applying your change. Read the table again, reconcile your draft with the current layout, and use the fresh
+tag only after deciding to apply the change again.
+
+Settings validation and storage errors return a JSON object such as `{"error":"settings_precondition_failed"}`
+when requesting JSON. Authentication errors return a plain-text error message.
+
+| Status | Error code | Meaning |
+| --- | --- | --- |
+| `400` | `settings_precondition_invalid` | `If-Match` is malformed or supplied more than once |
+| `400` | `settings_payload_invalid` | Invalid layout payload, unknown fields, or duplicate ordered column IDs |
+| `400` | `settings_id_invalid` | Invalid table or column ID |
+| `400` | `settings_limits_exceeded` | The proposed layout or resulting settings exceeds a storage limit |
+| `401` / `403` | Authentication error | Invalid session or caller without Web UI access |
+| `409` | `settings_invalid`, `settings_version_unsupported`, `settings_owner_mismatch`, `settings_file_unsafe`, or `settings_limits_exceeded` | Stored settings cannot be safely read or changed |
+| `412` | `settings_precondition_failed` | The tag no longer matches the table |
+| `413` | `settings_request_too_large` | The `PUT` request body exceeds 64 KiB |
+| `428` | `settings_precondition_required` | `PUT` or `DELETE` is missing `If-Match` |
+| `500` | `settings_io_error` | Settings storage I/O failed |
+
+IDs must be nonempty, contain no control characters, and fit in 128 UTF-8 bytes. Each layout supports at most
+256 distinct column IDs across its order and visibility fields. Each account supports at most 64 stored tables
+and a 256 KiB settings file. Invalid or unsupported stored files are not overwritten.
+For storage locations and backup guidance, see [Personal table layouts](features.md#personal-table-layouts).
 
 ### API proxy users
 
@@ -467,10 +715,12 @@ With Web UI authentication enabled, many endpoints require matching permissions 
 - `user.write`
 - `library.read`
 - `library.write`
-- `download.read`
-- `download.write`
 - `recording.read`
-- `recording.write`
+- `recording.create`
+- `recording.manage`
+- `recording.delete`
+- `maintenance.read`
+- `maintenance.write`
 
 If a request is rejected, verify the logged-in Web UI user's RBAC group assignments first.
 

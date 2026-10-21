@@ -1,0 +1,162 @@
+//! Stable recording stream URLs.
+//!
+//! The recording engine resolves its own execution URL from the persisted
+//! server-owned source identity. The URL is built here rather than in the
+//! HTTP layer so `backend/dvr` does not have to reach back into the app.
+
+use log::warn;
+use shared::model::XtreamCluster;
+use tuliprox_auth::create_access_token;
+use tuliprox_core::model::{AppConfig, Config};
+use url::Url;
+
+/// Access-token lifetime for a recording execution URL, in seconds.
+const RECORDING_URL_TOKEN_TTL_SECS: u16 = 30;
+
+fn build_recording_stream_url(
+    base_url: &str,
+    access_token: &str,
+    target_name: &str,
+    input_name: &str,
+    virtual_id: u32,
+    cluster: XtreamCluster,
+    provider_allocation_id: Option<u64>,
+) -> Option<String> {
+    let mut url = Url::parse(base_url).ok()?;
+    url.path_segments_mut().ok()?.pop_if_empty().extend([
+        "api",
+        "v1",
+        "playlist",
+        "recording",
+        access_token,
+        cluster.as_stream_type(),
+        &virtual_id.to_string(),
+    ]);
+    let mut query = url.query_pairs_mut();
+    query.append_pair("target_name", target_name).append_pair("input_name", input_name);
+    if let Some(allocation_id) = provider_allocation_id {
+        query.append_pair("provider_allocation_id", &allocation_id.to_string());
+    }
+    drop(query);
+    Some(url.into())
+}
+
+/// Reach this process through its API listener rather than a public playback
+/// address, which may require external DNS, TLS or reverse-proxy access.
+fn recording_api_base_url(config: &Config) -> Option<Url> {
+    let base_url = config.api.local_server_info().get_base_url();
+    let mut url = Url::parse(&base_url)
+        .inspect_err(|err| warn!("Recording API listener address {base_url} is not a valid URL: {err}"))
+        .ok()?;
+    url.set_path(config.web_ui.as_ref().and_then(|web_ui| web_ui.path.as_deref()).unwrap_or_default());
+    Some(url)
+}
+
+/// Build the stable recording URL for a server-resolved source. Stable means
+/// it survives a playlist refresh: it carries the target and input names, not
+/// a runtime id.
+pub fn build_stable_recording_url(
+    app_config: &AppConfig,
+    target_name: &str,
+    input_name: &str,
+    virtual_id: u32,
+    cluster: XtreamCluster,
+    provider_allocation_id: Option<u64>,
+) -> Option<String> {
+    let access_token = create_access_token(
+        &app_config.access_token_secret,
+        RECORDING_URL_TOKEN_TTL_SECS,
+        tuliprox_auth::scope::INTERNAL_PLAYER,
+    );
+    let config = app_config.config.load();
+    let base_url = recording_api_base_url(&config)?;
+    build_recording_stream_url(
+        base_url.as_str(),
+        &access_token,
+        target_name,
+        input_name,
+        virtual_id,
+        cluster,
+        provider_allocation_id,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_recording_stream_url, recording_api_base_url};
+    use shared::model::XtreamCluster;
+
+    #[test]
+    fn recording_api_url_uses_the_listener_and_web_ui_prefix() -> Result<(), Box<dyn std::error::Error>> {
+        for (host, authority) in [
+            ("0.0.0.0", "127.0.0.1"),
+            ("::", "[::1]"),
+            ("[::]", "[::1]"),
+            ("127.0.0.2", "127.0.0.2"),
+            ("::1", "[::1]"),
+            ("localhost", "localhost"),
+        ] {
+            for prefix in ["", "/tuliprox", "/tuliprox/"] {
+                let config = tuliprox_core::model::Config {
+                    api: tuliprox_core::model::ConfigApi {
+                        host: host.to_string(),
+                        port: 8901,
+                        web_root: String::new(),
+                    },
+                    web_ui: Some(tuliprox_core::model::WebUiConfig::from(&shared::model::WebUiConfigDto {
+                        path: Some(prefix.to_string()),
+                        player_server: Some("unreachable-public-server".to_string()),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                };
+                let base = recording_api_base_url(&config).ok_or("missing local base URL")?;
+                let url = build_recording_stream_url(
+                    base.as_str(),
+                    "token",
+                    "target",
+                    "input",
+                    42,
+                    XtreamCluster::Live,
+                    Some(77),
+                )
+                .ok_or("missing stream URL")?;
+                let expected_prefix = prefix.trim_end_matches('/');
+                assert!(
+                    url.starts_with(&format!(
+                        "http://{authority}:8901{expected_prefix}/api/v1/playlist/recording/token/live/42?"
+                    )),
+                    "{url}"
+                );
+                assert!(url.contains("provider_allocation_id=77"));
+            }
+        }
+        let mut config = tuliprox_core::model::Config::default();
+        config.api.host = "fe80::1%eth0".to_string();
+        assert!(recording_api_base_url(&config).is_none(), "an unusable listener address must not yield a URL");
+        Ok(())
+    }
+
+    #[test]
+    fn recording_stream_url_encodes_stable_names_without_runtime_id() {
+        let url = build_recording_stream_url(
+            "http://localhost:8901",
+            "token-1",
+            "My Target",
+            "Input A",
+            42,
+            XtreamCluster::Video,
+            Some(77),
+        )
+        .expect("url");
+        assert!(url.starts_with("http://localhost:8901/api/v1/playlist/recording/token-1/movie/42?"), "{url}");
+        assert!(url.contains("target_name=My+Target"), "{url}");
+        assert!(url.contains("input_name=Input+A"), "{url}");
+        assert!(url.contains("provider_allocation_id=77"), "{url}");
+    }
+
+    #[test]
+    fn recording_stream_url_rejects_an_unparsable_base() {
+        assert!(build_recording_stream_url("not a url", "t", "target", "input", 1, XtreamCluster::Live, None).is_none());
+    }
+}

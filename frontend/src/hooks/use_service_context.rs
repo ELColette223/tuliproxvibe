@@ -1,9 +1,8 @@
 use crate::{
     model::WebConfig,
     services::{
-        AuthService, ConfigService, DownloadsService, EventService, FlagsService, PlaylistService, RbacService,
-        StatusService, StreamHistoryService, StreamsService, ToastrService, UserApiService, UserService,
-        WebSocketService,
+        AuthService, ConfigService, EventService, FlagsService, PlaylistService, RbacService, StatusService,
+        StreamHistoryService, StreamsService, ToastrService, UserApiService, UserService, WebSocketService,
     },
 };
 use std::rc::Rc;
@@ -11,19 +10,20 @@ use yew::prelude::*;
 
 pub struct Services {
     pub auth: Rc<AuthService>,
+    pub user_settings: Rc<crate::services::UserSettingsService>,
     pub config: Rc<ConfigService>,
     pub user: Rc<UserService>,
     pub user_api: Rc<UserApiService>,
     pub status: Rc<StatusService>,
     pub stream_history: Rc<StreamHistoryService>,
     pub streams: Rc<StreamsService>,
-    pub downloads: Rc<DownloadsService>,
     pub event: Rc<EventService>,
     pub playlist: Rc<PlaylistService>,
     pub toastr: Rc<ToastrService>,
     pub websocket: Rc<WebSocketService>,
     pub rbac: Rc<RbacService>,
     pub flags: Rc<FlagsService>,
+    pub maintenance: Rc<crate::services::MaintenanceService>,
 }
 
 impl Services {
@@ -34,7 +34,6 @@ impl Services {
         let status = Rc::new(StatusService::new());
         let stream_history = Rc::new(StreamHistoryService::new());
         let streams = Rc::new(StreamsService::new());
-        let downloads = Rc::new(DownloadsService::new());
         let playlist = Rc::new(PlaylistService::new());
         let toastr = Rc::new(ToastrService::new());
         let user = Rc::new(UserService::new(Rc::clone(&event)));
@@ -42,21 +41,24 @@ impl Services {
         let websocket = Rc::new(WebSocketService::new(Rc::clone(&status), Rc::clone(&event)));
         let rbac = Rc::new(RbacService::new());
         let flags = Rc::new(flags_service);
+        let user_settings = Rc::new(crate::services::UserSettingsService::new());
+        let maintenance = Rc::new(crate::services::MaintenanceService::new());
         Self {
             auth,
+            user_settings,
             config,
             user,
             user_api,
             status,
             stream_history,
             streams,
-            downloads,
             event,
             playlist,
             toastr,
             websocket,
             rbac,
             flags,
+            maintenance,
         }
     }
 }

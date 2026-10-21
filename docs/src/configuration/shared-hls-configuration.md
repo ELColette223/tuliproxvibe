@@ -197,6 +197,21 @@ reverse_proxy:
 Use recovery burst levels gradually. Start with `friendly`. Move to stronger levels only when logs show manifest refresh
 instability and the provider can tolerate additional requests.
 
+Shared HLS evaluates a short live origin window (one or two segments) with the complete configured burst before
+allowing it. A suitable candidate with at least three segments takes priority. If only suitable short windows
+remain, the session records permission to publish them and emits one warning referencing RFC 8216 section 6.2.2.
+The `off` level evaluates its single candidate; no additional burst level is required.
+
+All access leases share the qualification and refresh work, including failure backoff. New leases, ordinary
+sequence movement, and later changes such as one → three → one segments do not consume or renew the permission.
+A request that needs a fresher manifest uses the normal shared refresh. A changed origin binding or epoch,
+acceptance conflict, or lifecycle state requiring origin revalidation starts a new shared qualification.
+
+The proxy continues to use larger available cache windows. Strip keeps already short windows intact, and
+startup admission and reserve accounting use their actual media duration. Missing segments, maps or keys,
+replayed media, empty playlists, and invalid leases remain subject to the existing checks. This exception cannot
+create media progress when the origin stops publishing.
+
 ### Problematic MPEG-TS segments
 
 ```yaml
@@ -246,3 +261,91 @@ clear in-memory HLS sessions, access leases, QoS state, and repair state that po
 
 Changing `rewrite_secret` is also disruptive for public HLS identifiers. Existing player URLs may reference old
 `proxy_session_id` or transient resource IDs and should be treated as stale.
+
+## Optional startup modes
+
+`reverse_proxy.hls_cache.startup.mode` defaults to `conservative`. Omitted startup configuration keeps the existing
+READY reserve, cache delivery and repair behavior. `first_ready` lowers initial admission to one processed start
+segment. Every listed successor must already have a successful HTTP 200 response and a nonempty body prefix.
+
+```yaml
+reverse_proxy:
+  hls_cache:
+    startup:
+      mode: first_ready
+      max_progressive_segments: 16
+      max_progressive_bytes_per_segment: 32MB
+      max_progressive_bytes_total: 128MB
+      max_progressive_reader_lifetime_secs: 90
+      max_deferred_repairs: 32
+```
+
+`progressive` lets the first full segment request consume the existing shared origin fill before origin EOF.
+The complete session delivers immutable raw TS revisions, including subsequent requests, retries and ranges.
+Repair and the corruption watchdog continue on the processed cache copy. Raw delivery does not correct source
+timestamp or transport-stream defects; prefer `first_ready` when a source needs repair.
+
+`optimistic` behaves like `progressive` and publishes the initial playlist earlier. The head segment needs a
+body prefix, while listed successors only need an accepted HTTP 200 origin response. Successor fetches start
+together with the head, within the configured per-session concurrency. A client request for a successor waits
+for its complete body. If the origin fails a successor after it was listed, only that segment fails for the
+client; already published media never changes. Replay or disk fallback switches the session to `first_ready`
+exactly like `progressive`.
+
+Fast startup is limited to live, clear MPEG-TS objects without MAP or origin byte ranges. Archive, encrypted,
+fragmented-MP4 and transient sessions use their existing path. Before publication an incompatible source can fall back to that path.
+After a Fast Start manifest is published, a refresh requiring transient delivery is rejected to preserve
+the bound revisions; it cannot silently change the active session representation. A progressive `Range: bytes=0-` request may receive
+a complete HTTP 200 streaming response; other ranges wait for the bound revision to complete.
+
+The replay limits apply across sessions and remain shared during configuration reload. Byte clones stay charged
+until their last reference is released. An absolute reader lifetime prevents a stalled client from retaining a
+revision indefinitely. An origin drop or replay overflow after streaming begins produces a body error; it cannot turn into successful EOF
+or silently change the bytes of an already published URI. Revision and repair peak reservations share the existing
+disk cache limits. Conservative behavior remains the default; existing sessions keep their startup policy after
+reload. Restart after changing to `conservative` when an immediate rollback of running sessions is required.
+
+Existing provider and fetch concurrency limits remain in effect. The initial playlist normally needs at least three
+publishable segments; a session qualified for short origin windows can publish one or two. `optimistic` counts
+successors the origin has accepted. With fewer than three concurrent
+fills, a cold session can still wait for an earlier origin EOF before that window is available. Raising the
+existing per-session concurrency limit to three is an operator choice and must fit the provider's connection
+allowance; startup mode never raises it automatically.
+
+Measure both first data and decoded-picture time before enabling progressive mode in production. Short successful
+response runs do not establish long-term player, origin-failure or resource stability.
+
+## Reproducible startup checks
+
+The testkit has isolated shared-HLS scenarios for `conservative`, `first_ready`, `progressive` and `optimistic`, plus
+missing-head scenarios for every fast mode. Existing scenarios retain their original origin behavior. The new
+`origin.hls_profile` publishes six segments, sends a complete synthetic frame immediately, and delays the second
+frame by `prefix_delay_millis`. `missing_head_segments` returns alternating HTTP 404/410 at the head;
+`abort_segments` injects a body error after the prefix. `unknown_length` omits origin Content-Length.
+These frames test HTTP delivery and cache identity, not MPEG-TS decoding or picture startup.
+
+```bash
+cargo +stable build --package tuliprox --package tuliprox-testkit
+export TULIPROX_TESTKIT_SUT_BINARY="$PWD/target/debug/tuliprox"
+cargo +stable test --package tuliprox-testkit --test hls_fast_start_process -- --ignored --test-threads=1
+
+target/debug/tuliprox-testkit controller \
+  --scenario test/fixtures/testkit/scenarios/m3u-hls-share-progressive-startup.yml \
+  --report-directory /tmp/hls-progressive-report
+```
+
+The process tests check prefix delivery before origin EOF, processed delivery after EOF, 404/410 recovery,
+terminal errors for both known-length and chunked origin drops, byte-identical retries and HTTP 206 ranges.
+They also check that successful retries and ranges do not create another origin segment download. The fixed
+local timing thresholds distinguish the intentionally delayed fixture responses; they are not production SLAs.
+
+For a synthetic HLS playback URL, `hls-probe` emits first-byte/body-end timing and revision checks as JSON:
+
+```bash
+target/debug/tuliprox-testkit hls-probe \
+  --url "$TESTKIT_HLS_URL" --run-id "$TESTKIT_RUN_ID" --expected-marker 17 \
+  --verify-revision --min-prefix-to-eof-millis 500
+```
+
+Use `--expect-body-error` instead of `--verify-revision` for an injected segment-body drop. The probe keeps one
+absolute 30-second deadline and a 1 MiB response bound. It does not print the playback URL in its JSON result.

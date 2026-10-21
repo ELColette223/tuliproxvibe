@@ -120,6 +120,7 @@ pub struct HlsSessionOriginControl {
     host_local_highwater_observation_order: u64,
     pub acceptance_episode: Option<HlsManifestAcceptanceEpisode>,
     pub recovery_samples: HlsBoundedRecoverySamples,
+    pub(crate) qualification: crate::short_manifest::HlsOriginQualification,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +147,7 @@ impl Default for HlsSessionOriginControl {
             host_local_highwater_observation_order: 0,
             acceptance_episode: None,
             recovery_samples: HlsBoundedRecoverySamples::default(),
+            qualification: crate::short_manifest::HlsOriginQualification::default(),
         }
     }
 }
@@ -154,6 +156,18 @@ impl HlsSessionOriginControl {
     const MAX_HOST_LOCAL_HIGHWATERS: usize = 32;
 
     pub fn record_origin_response(&mut self, now_ms: u64) { self.last_origin_response_at_ms = Some(now_ms); }
+
+    /// Includes publication lateness even when the most recent HTTP request has not failed yet.
+    pub(crate) fn path_is_degraded_at(&self, now_ms: u64) -> bool {
+        self.path_condition.is_degraded()
+            || self.last_media_progress_at_ms.zip(self.target_duration_snapshot_ms).is_some_and(
+                |(last_progress_ms, target_duration_ms)| {
+                    target_duration_ms > 0
+                        && now_ms.saturating_sub(last_progress_ms)
+                            >= crate::origin_progress::publication_late_after_ms(target_duration_ms)
+                },
+            )
+    }
 
     pub fn record_media_progress(&mut self, now_ms: u64, target_duration_ms: u64) {
         self.last_origin_response_at_ms = Some(now_ms);
@@ -253,6 +267,9 @@ pub struct HlsSession {
     pub origin_account_binding: Option<HlsOriginAccountBinding>,
     pub origin_account_io_lease: Option<Arc<HlsOriginAccountIoLease>>,
     pub origin_account_rebind: HlsOriginAccountRebindState,
+    pub origin_account_prepare_lock: Arc<tokio::sync::Mutex<()>>,
+    pub origin_account_runtime: Option<Arc<dyn crate::origin_account_runtime::HlsOriginAccountRuntime>>,
+    pub origin_account_manifest_pending: Option<u64>,
     pub effective_origin_acquire_policy: Option<HlsEffectiveOriginAcquirePolicyState>,
     pub mode: HlsSessionMode,
     pub transient: TransientPassthroughState,
@@ -261,10 +278,16 @@ pub struct HlsSession {
     pub origin_refresh: OriginRefreshState,
     pub origin_control: HlsSessionOriginControl,
     pub render_policy: RenderPolicy,
+    pub startup: Option<super::HlsSessionStartup>,
     pub last_rendered_manifest: Option<RenderedManifest>,
     manifest_commit_generation: u64,
+    /// Origin manifests committed into this session.
+    origin_manifest_commits: u64,
+    /// `origin_manifest_commits` when the current committed manifest was stored.
+    committed_manifest_origin_commits: u64,
     last_normal_manifest_commit_identity: Option<HlsManifestCommitIdentity>,
     pub(crate) published_live_origin_baseline: Option<HlsPublishedLiveOriginBaseline>,
+    pub(crate) missing_head_limit: Option<u64>,
     pub longest_rendered_playlist_duration_ms: u64,
     pub initial_prefetch_gap_segments: usize,
     pub segment_prefetch_queue: SegmentPrefetchQueue,
@@ -280,6 +303,8 @@ pub struct HlsSession {
     pub origin_epoch_sequence_base: Option<u64>,
     pub origin_seq_highwater: Option<u64>,
     pub proxy_next_seq: Option<u64>,
+    /// End of all appended media, retained even when every old cache entry is collected.
+    pub next_media_start_ms: u64,
     pub origin_to_proxy: HashMap<OriginSegmentKey, u64>,
     pub published_resource_history: HlsPublishedResourceHistory,
     pub discontinuity_sequence: u64,
@@ -324,6 +349,9 @@ impl HlsSession {
             origin_account_binding: None,
             origin_account_io_lease: None,
             origin_account_rebind: HlsOriginAccountRebindState::default(),
+            origin_account_prepare_lock: Arc::new(tokio::sync::Mutex::new(())),
+            origin_account_runtime: None,
+            origin_account_manifest_pending: None,
             effective_origin_acquire_policy: None,
             mode: HlsSessionMode::NormalCacheTimeline,
             transient: TransientPassthroughState::default(),
@@ -332,10 +360,14 @@ impl HlsSession {
             origin_refresh: OriginRefreshState::default(),
             origin_control: HlsSessionOriginControl::default(),
             render_policy: RenderPolicy::default(),
+            startup: None,
             last_rendered_manifest: None,
             manifest_commit_generation: 0,
+            origin_manifest_commits: 0,
+            committed_manifest_origin_commits: 0,
             last_normal_manifest_commit_identity: None,
             published_live_origin_baseline: None,
+            missing_head_limit: None,
             longest_rendered_playlist_duration_ms: 0,
             initial_prefetch_gap_segments: 0,
             segment_prefetch_queue: SegmentPrefetchQueue::default(),
@@ -350,6 +382,7 @@ impl HlsSession {
             origin_epoch_sequence_base: None,
             origin_seq_highwater: None,
             proxy_next_seq: None,
+            next_media_start_ms: 0,
             origin_to_proxy: HashMap::new(),
             published_resource_history: HlsPublishedResourceHistory::default(),
             discontinuity_sequence: 0,
@@ -386,6 +419,20 @@ impl HlsSession {
         // `next_manifest_commit_identity` and only after a successful manifest commit.
         debug_assert_eq!(identity.commit_generation(), self.manifest_commit_generation.saturating_add(1));
         self.manifest_commit_generation = identity.commit_generation();
+        self.committed_manifest_origin_commits = self.origin_manifest_commits;
+    }
+
+    pub const fn origin_manifest_commits(&self) -> u64 { self.origin_manifest_commits }
+
+    pub(crate) fn record_origin_manifest_commit(&mut self) {
+        self.origin_manifest_commits = self.origin_manifest_commits.saturating_add(1);
+    }
+
+    /// Whether the committed manifest was stored after an origin commit newer
+    /// than `origin_manifest_commits`. Render time alone cannot prove this:
+    /// a segment completion may still re-render the previous origin window.
+    pub const fn committed_manifest_follows_origin_commit(&self, origin_manifest_commits: u64) -> bool {
+        self.committed_manifest_origin_commits > origin_manifest_commits
     }
 
     #[cfg(test)]
@@ -441,6 +488,43 @@ impl HlsSession {
     pub fn clear_gc_removal_mark(&mut self) { self.gc_marked_for_removal = false; }
 
     pub fn is_gc_marked_for_removal(&self) -> bool { self.gc_marked_for_removal }
+
+    /// Invalidates account-dependent work while preserving published media and host/content anchors.
+    pub fn handoff_origin_account(&mut self, binding: HlsOriginAccountBinding) {
+        self.invalidate_queued_origin_work();
+        self.origin_account_io_lease = None;
+        self.origin_provider_session_headers.clear();
+        self.origin_control.manifest_origin_binding = None;
+        self.origin_control.acceptance_episode = None;
+        self.origin_control.acceptance_generation.0 = self.origin_control.acceptance_generation.0.saturating_add(1);
+        self.origin_control.qualification = crate::short_manifest::HlsOriginQualification::default();
+        self.origin_refresh = OriginRefreshState::default();
+        self.origin_account_manifest_pending = Some(binding.generation);
+        self.transient.invalidate_origin_resources();
+        for segment in self.segments.values_mut() {
+            if !matches!(segment.status, SegmentCacheStatus::Ready { .. }) {
+                segment.origin_fetch_ref = None;
+                if !matches!(segment.status, SegmentCacheStatus::Fetching { .. }) {
+                    segment.status = SegmentCacheStatus::Discovered;
+                }
+            }
+        }
+        for map in self.maps.values_mut() {
+            if !matches!(map.status, MapCacheStatus::Ready { .. }) {
+                map.origin_fetch_ref = None;
+                if !matches!(map.status, MapCacheStatus::Fetching { .. }) {
+                    map.status = MapCacheStatus::Discovered;
+                }
+            }
+        }
+        self.replace_origin_account_binding(Some(binding));
+    }
+
+    pub(crate) fn origin_handoff_ready_after(&self, generation: u64) -> bool {
+        self.activity.origin_work_generation != generation
+            && self.origin_account_manifest_pending.is_none()
+            && !self.is_gc_marked_for_removal()
+    }
 
     pub fn replace_origin_account_binding(&mut self, binding: Option<HlsOriginAccountBinding>) {
         let binding_changed = match (&self.origin_account_binding, &binding) {
@@ -754,6 +838,15 @@ impl HlsSession {
         };
     }
 
+    /// Provider lease kind retained across account replacement and subsequent origin I/O.
+    pub const fn origin_playback_kind(&self) -> tuliprox_core::model::PlaybackKind {
+        if self.key.archive_reference.is_some() {
+            tuliprox_core::model::PlaybackKind::Catchup
+        } else {
+            tuliprox_core::model::PlaybackKind::LiveHls
+        }
+    }
+
     pub fn start_origin_work(&mut self) -> u64 {
         self.activity.active_origin_work_count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.activity.origin_work_generation
@@ -804,6 +897,9 @@ impl fmt::Debug for HlsSession {
             .field("origin_account_binding", &self.origin_account_binding)
             .field("origin_account_io_lease", &self.origin_account_io_lease)
             .field("origin_account_rebind", &self.origin_account_rebind)
+            .field("origin_account_prepare_lock", &self.origin_account_prepare_lock)
+            .field("origin_account_runtime", &self.origin_account_runtime)
+            .field("origin_account_manifest_pending", &self.origin_account_manifest_pending)
             .field("effective_origin_acquire_policy", &self.effective_origin_acquire_policy)
             .field("mode", &self.mode)
             .field("transient", &self.transient)
@@ -811,8 +907,12 @@ impl fmt::Debug for HlsSession {
             .field("last_effective_manifest_host", &self.last_effective_manifest_host)
             .field("origin_refresh", &self.origin_refresh)
             .field("render_policy", &self.render_policy)
+            .field("startup", &self.startup)
+            .field("missing_head_limit", &self.missing_head_limit)
             .field("last_rendered_manifest", &self.last_rendered_manifest)
             .field("manifest_commit_generation", &self.manifest_commit_generation)
+            .field("origin_manifest_commits", &self.origin_manifest_commits)
+            .field("committed_manifest_origin_commits", &self.committed_manifest_origin_commits)
             .field("last_normal_manifest_commit_identity", &self.last_normal_manifest_commit_identity)
             .field("published_live_origin_baseline", &self.published_live_origin_baseline)
             .field("longest_rendered_playlist_duration_ms", &self.longest_rendered_playlist_duration_ms)
@@ -830,6 +930,7 @@ impl fmt::Debug for HlsSession {
             .field("origin_epoch_sequence_base", &self.origin_epoch_sequence_base)
             .field("origin_seq_highwater", &self.origin_seq_highwater)
             .field("proxy_next_seq", &self.proxy_next_seq)
+            .field("next_media_start_ms", &self.next_media_start_ms)
             .field("origin_to_proxy_len", &self.origin_to_proxy.len())
             .field("published_resource_history", &self.published_resource_history.generation())
             .field("discontinuity_sequence", &self.discontinuity_sequence)
@@ -906,6 +1007,7 @@ mod tests {
                 host_local_index: u32::try_from(proxy_seq).unwrap_or(u32::MAX),
             },
             proxy_seq,
+            media_start_ms: proxy_seq * duration_ms,
             duration_ms,
             proxy_file_ext: "ts".to_string(),
             content_type: "video/mp2t".to_string(),
@@ -1684,5 +1786,45 @@ mod tests {
         let fallback = session.effective_origin_acquire_policy_or_default();
         assert_eq!(fallback.connection_kind, ConnectionKind::Normal);
         assert_eq!(fallback.priority, 0);
+    }
+    #[test]
+    fn account_handoff_invalidates_work_and_recovery_but_preserves_timeline_and_archive() {
+        let mut session = recovery_eligible_session();
+        session.key = session.key.with_archive_reference(123).with_archive_identity("archive-identity");
+        session.origin_source = crate::HlsOriginSource::from_session_key(&session.key);
+        let source = session.origin_source.clone();
+        let entry = ready_segment(&session, 10, 0, 4_000, 32);
+        session.segments.insert(10, entry);
+        session.activity.active_access_lease_count = 2;
+        let key = session.key.clone();
+        let proxy_id = session.proxy_session_id.clone();
+        let rendered = session.last_rendered_manifest.clone();
+        let pinned_host = session.origin_control.pinned_host.clone();
+        session
+            .origin_provider_session_headers
+            .insert(axum::http::header::COOKIE, axum::http::HeaderValue::from_static("old=secret"));
+        let old_work = session.start_origin_work();
+        let binding = crate::origin::HlsOriginAccountBinding::rebound(
+            Arc::from("input"),
+            Arc::from("replacement"),
+            "owner".to_string(),
+            3,
+            10,
+        );
+        session.handoff_origin_account(binding);
+        assert!(!session.finish_origin_work(old_work));
+        assert_eq!(session.activity.active_origin_work_count.load(std::sync::atomic::Ordering::Acquire), 0);
+        assert_eq!((&session.key, &session.proxy_session_id), (&key, &proxy_id));
+        assert_eq!(session.last_rendered_manifest, rendered);
+        assert_eq!(session.origin_control.pinned_host, pinned_host);
+        assert_eq!(session.origin_seq_highwater, Some(10));
+        assert_eq!(session.activity.active_access_lease_count, 2);
+        assert_eq!(session.origin_source, source);
+        assert_eq!(session.origin_playback_kind(), tuliprox_core::model::PlaybackKind::Catchup);
+        assert_eq!(session.origin_account_manifest_pending, Some(3));
+        assert!(session.origin_control.manifest_origin_binding.is_none());
+        assert!(session.origin_control.acceptance_episode.is_none());
+        assert!(session.origin_provider_session_headers.is_empty());
+        assert!(matches!(session.segments[&10].status, SegmentCacheStatus::Ready { content_length: 32, .. }));
     }
 }

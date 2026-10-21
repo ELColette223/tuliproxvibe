@@ -10,11 +10,14 @@
 @forward "components/panel";
 @forward "components/card";
 @forward "components/collapse_panel";
+@forward "components/horizontal_shrink_panel";
 @forward "components/breadcrumbs";
 @forward "components/login";
 @forward "components/sidebar";
 @forward "components/preferences";
 @forward "components/dashboard/action_card";
+@forward "components/dashboard/credits_action_card";
+@forward "components/dashboard/maintenance";
 @forward "components/dashboard/status_card";
 @forward "components/dashboard/sparkline";
 @forward "components/dashboard/dashboard_view";
@@ -71,7 +74,7 @@
 @forward "components/error_boundary";
 @forward "components/toastr";
 @forward "components/drop_down_icon_button";
-@forward "components/downloads";
+@forward "components/recording_library";
 @forward "components/accordion";
 @forward "components/cvs_table";
 @forward "components/config/config_view";
@@ -86,6 +89,7 @@
 @forward "components/form";
 @forward "components/api_user/api_user_view";
 @forward "components/keyvalue_editor";
+@forward "components/watch_entries_editor";
 @forward "components/loading_screen";
 @forward "components/websocket_status";
 @forward "components/health_banner";

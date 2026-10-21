@@ -225,6 +225,23 @@ pub async fn decode_response_to_identity(
     response: reqwest::Response,
     detection: ContentCodingDetection,
 ) -> Result<DecodedHttpResponse, ContentCodingError> {
+    decode_response(response, detection, false).await
+}
+
+/// Opt-in complete-body consumer: decode all members and require underlying HTTP
+/// EOF. A finished compressed member must not hide a truncated transport or suffix.
+/// Existing streaming/text consumers retain their current decoding policy.
+pub async fn decode_complete_response_to_identity(
+    response: reqwest::Response,
+) -> Result<DecodedHttpResponse, ContentCodingError> {
+    decode_response(response, ContentCodingDetection::DeclaredOnly, true).await
+}
+
+async fn decode_response(
+    response: reqwest::Response,
+    detection: ContentCodingDetection,
+    complete: bool,
+) -> Result<DecodedHttpResponse, ContentCodingError> {
     let status = response.status();
     let final_url = response.url().clone();
     let headers = response.headers().clone();
@@ -257,7 +274,7 @@ pub async fn decode_response_to_identity(
     }
 
     for coding in decoded_from.iter().rev().copied() {
-        body = decoder_for(body, coding).await?;
+        body = decoder_for(body, coding, complete).await?;
     }
 
     let mut decoded = DecodedHttpResponse { status, final_url, headers, body, decoded_from, original_content_length };
@@ -330,18 +347,38 @@ pub fn content_decoding_error_from_io(error: &io::Error) -> Option<&ContentDecod
     find_content_decoding_error(error.get_ref()?)
 }
 
-async fn decoder_for(mut reader: DynReader, coding: ContentCoding) -> Result<DynReader, ContentCodingError> {
+async fn decoder_for(
+    mut reader: DynReader,
+    coding: ContentCoding,
+    complete: bool,
+) -> Result<DynReader, ContentCodingError> {
     let reader = match coding {
-        ContentCoding::Gzip => tagged_decoder(GzipDecoder::new(BufReader::new(reader)), coding),
-        ContentCoding::Brotli => tagged_decoder(BrotliDecoder::new(BufReader::new(reader)), coding),
-        ContentCoding::Zstd => tagged_decoder(ZstdDecoder::new(BufReader::new(reader)), coding),
+        ContentCoding::Gzip => {
+            let mut decoder = GzipDecoder::new(BufReader::new(reader));
+            decoder.multiple_members(complete);
+            tagged_decoder(decoder, coding)
+        }
+        ContentCoding::Brotli => {
+            let mut decoder = BrotliDecoder::new(BufReader::new(reader));
+            decoder.multiple_members(complete);
+            tagged_decoder(decoder, coding)
+        }
+        ContentCoding::Zstd => {
+            let mut decoder = ZstdDecoder::new(BufReader::new(reader));
+            decoder.multiple_members(complete);
+            tagged_decoder(decoder, coding)
+        }
         ContentCoding::Deflate => {
             let (replayed_reader, prefix) = inspect_prefix(reader, 2).await?;
             reader = replayed_reader;
             if is_zlib_header(&prefix) {
-                tagged_decoder(ZlibDecoder::new(BufReader::new(reader)), coding)
+                let mut decoder = ZlibDecoder::new(BufReader::new(reader));
+                decoder.multiple_members(complete);
+                tagged_decoder(decoder, coding)
             } else {
-                tagged_decoder(DeflateDecoder::new(BufReader::new(reader)), coding)
+                let mut decoder = DeflateDecoder::new(BufReader::new(reader));
+                decoder.multiple_members(complete);
+                tagged_decoder(decoder, coding)
             }
         }
     };
@@ -756,7 +793,7 @@ mod tests {
         let response = local_response(StatusCode::OK, &[], encoded_binary.clone()).await;
         let mut untouched =
             decode_response_to_identity(response, ContentCodingDetection::DeclaredOnly).await.expect("identity setup");
-        assert!(untouched.decoded_from.is_empty());
+        assert_eq!(untouched.decoded_from.len(), 0);
         assert_eq!(read_to_end_limited(&mut untouched.body, 1024).await.expect("untouched body"), encoded_binary);
     }
 
@@ -769,7 +806,7 @@ mod tests {
                 .await
                 .expect("identity setup");
 
-        assert!(decoded.decoded_from.is_empty());
+        assert_eq!(decoded.decoded_from.len(), 0);
         assert_eq!(decoded.content_coding_observation(), None);
         assert!(!decoded.headers.contains_key(CONTENT_ENCODING));
         assert_eq!(read_to_end_limited(&mut decoded.body, 1024).await.expect("identity body"), encoded);

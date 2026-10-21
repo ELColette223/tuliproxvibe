@@ -4,37 +4,83 @@
 
 ## ⚠️ Breaking Changes
 
-- **Proxied resource URLs are now restricted to public destinations by default.** Tuliprox proxies external
-  resource URLs that come from provider, playlist, and EPG content: channel and small logos, EPG channel and
-  programme icons, cover images, posters, and backdrops. These requests now enforce a destination policy on every
-  route that serves them (`/resource/m3u/...`, the Xtream resource routes, `/resource/epg/...`, and
-  `/api/v1/playlist/resource/...`), where previously three of them fetched any destination reachable by the
-  configured HTTP client.
-  - A resource URL whose DNS host name resolves to a private address (RFC 1918 or IPv6 ULA) is rejected unless the
-    input that supplied it lists the exact host name in `resource_policy.allowed_hosts` **and** the address in
-    `resource_policy.allowed_networks`. A private IP literal requires only a matching
-    `resource_policy.allowed_networks` entry because IP literals are not valid `allowed_hosts` values. Add the policy
-    to the input that provides the logo or icon; for icons that `logo_override` copies out of EPG, that is the EPG
-    input.
-  - Loopback, link-local, cloud-metadata, CGNAT, multicast, and reserved addresses stay blocked with or without a
-    policy. Redirects are re-checked on every hop and are bounded.
-  - Resource ownership is stored generically with each URL, including nested cover, poster, backdrop, and episode
-    image fields. Legacy raw playlist/Xtream item resources use their containing item's input; legacy EPG resources
-    without an authoritative input remain public-only until regenerated.
-  - `resource://` is an internal reserved scheme. Provider data and mapping configuration must never supply it;
-    such values are rejected rather than interpreted as authorization claims.
-  - The canonical input name is the authorization identity of a resource origin. Configured input and alias names
-    must be non-empty, globally unique strings; a configuration with duplicate input names, duplicate alias names,
-    or an alias name that shadows an input name is now rejected while loading. Internal IDs are managed separately.
-  - The resource cache is keyed by the policy that authorized the entry, so an entry fetched under one policy is
-    never served to another. The cache starts cold once on upgrade because the key layout changes.
-  - Resource proxying now always connects directly: a configured proxy and the `HTTP_PROXY` / `HTTPS_PROXY` /
-    `ALL_PROXY` environment variables are ignored for these requests, and Tuliprox logs a warning at startup and on
-    reload when one is set. Provider fetches, playlist and EPG downloads, and streams keep using the proxy.
-  - The Source Editor exposes the policy on every input under the shield-shaped **Resource Policy** page. Empty host
-    and network lists restore the public-only default and omit the policy from the saved input.
-  - See [Resource Policy](docs/src/configuration/source.md#27-resource-policy-resource_policy) for the parameters
-    and the exact host-plus-network rule.
+- **Unused `media_server` options removed.** The input keys `media_server.playback` (`direct_play_only`,
+  `allow_transcode`, `playback_info_policy`, `preflight_streams`), `media_server.image_policy`,
+  `media_server.catalog.refresh_mode`, `media_server.catalog.refresh_on_startup`, `media_server.catalog.include_paths`
+  (alias `include_file_paths`) and `media_server.catalog.include_user_state` never had an effect and are no longer
+  accepted. Configurations that still contain them fail to load with `unknown field`; remove these keys.
+
+- **Web UI sessions must sign in again once.** The new maintenance permissions bump the permission schema, so tokens
+  issued before the update are rejected with `X-Token-Refresh: required` and the Web UI returns to the sign-in page.
+
+- **`playlist.watch.changed` carries every watch change of one update.** The payload is now
+  `{ target, changes: [...] }`, where each change has a `kind` (`groups_added`, `groups_removed`, `channels_added`,
+  `channels_removed`). Templates using `{{watch.group}}`, `{{watch.added}}` or `{{watch.removed}}` must be updated:
+
+  ```handlebars
+  {{!-- before --}}
+  {{watch.group}}: {{#each watch.added}}{{this}} {{/each}}
+  {{!-- after --}}
+  {{#each watch.channels_added}}{{group}}: {{#each items}}{{this}} {{/each}}{{/each}}
+  ```
+
+- **`clear_invalid_epg_ids` moved to `epg_output.clear_invalid_ids`.** The target option now sits next to the other
+  EPG id output options. The top-level `options.clear_invalid_epg_ids` and its legacy alias `options.required_epg` are
+  rejected while loading. To migrate, move the value:
+
+  ```yaml
+  options:
+    epg_output:
+      clear_invalid_ids: true
+  ```
+
+  In the Web UI the toggle is now part of the **EPG Output** group of the target options.
+
+- **Recordings use the local API listener.** `api.host` must resolve locally to the
+  listener; wildcard binds use loopback. `web_ui.player_server` and public `api-proxy.yml`
+  servers no longer select recording capture URLs. Recording headers now apply to the
+  provider request, including HLS follow-ups. See [DVR](docs/src/operator/dvr.md).
+
+- **`video.download` is now `video.recording`, and VOD/series downloads are recordings.** Live
+  captures and VOD/series transfers share one queue and one configuration block. A configuration
+  that still contains `video.download` is rejected while loading. To migrate:
+  - rename `video.download` to `video.recording`;
+  - move the keys of the former nested `video.download.recording` block (`enabled`,
+    `container_format`, `timezone`, `filename_template`, padding, `retention`, `disk`, `quota`,
+    `notifications`, `fallback_bytes_per_minute`) up into `video.recording`;
+  - replace `download_priority` and `recording_priority` with the single `priority`;
+  - keep one `directory`; the former download directory and recording directory are no longer
+    separate.
+
+  The `/api/v1/file/download*` and `/api/v1/file/record` routes are removed; recordings are created
+  and controlled through `/api/v1/recording/*`. The permissions `download.read` and
+  `download.write` are removed and decode to nothing, so a groups file that still lists them loses
+  them; grant `recording.read` / `recording.create` / `recording.manage` / `recording.delete`
+  instead.
+
+- **The DVR recording queue is now a recoverable B+Tree, and does not migrate.** The queue moved
+  from `storage_dir/recordings_state.json` to `storage_dir/recordings.db`, with a
+  schema-versioned recovery history under `backup_dir/recordings_recovery/`. An existing
+  `recordings_state.json` is ignored: the queue starts empty on upgrade. The queue also fails
+  closed now — a database that is ahead of every surviving recovery generation refuses to start
+  rather than silently adopting a queue it cannot account for.
+
+- **`recording.write` is split into `recording.create`, `recording.manage` and
+  `recording.delete`.** The removed name decodes to nothing, so a groups file that still lists
+  it loses the permission rather than gaining one of the replacements. The permission schema
+  version is bumped, so tokens issued before the split fail closed and clients must
+  re-authenticate.
+
+- **Recording files are stored owner-independently.** The layout is `<recording-root>/<rel>`
+  with no `users/<owner-id>/` or `shared/` component. Recordings written by an earlier build are
+  not found at the new location and must be moved, or re-recorded.
+
+- **The per-input resource policy is gone again.** `resource_policy` (with `allowed_hosts` / `allowed_networks`) is no
+  longer a valid input field, so configurations written for that feature are rejected while loading, and resource links
+  minted by it are no longer accepted. Resource destinations are classified instead of configured: a destination on a
+  private network is proxied, a public one may be handed to the client directly. Resource links that were issued
+  before this change (the `obscure_text` format) are rejected as well, so an EPG a client has already cached shows
+  broken icons until the EPG is fetched again.
 
 - **The Web UI WebSocket protocol is now version 4.** Playlist update completion messages carry the correlated
   run ID and execution order instead of a bare status. Reload existing browser tabs after upgrading the server;
@@ -145,6 +191,64 @@
   id added.
 
 ## 🌟 New Features
+
+- **Visual target filter.** The target table's filter column opens a visual editor for the keep-selection stored in
+  `target.filter`: categories and individual channels can be included or excluded, with a live preview of what stays
+  in the target. The same rules are editable as a tree in the source editor, and the generated filter is shown next
+  to the summary. A shared filter builder converts between the tree and the filter DSL in both directions, and
+  reusable filter-rule templates can be stored alongside normal pattern templates.
+- **Bouquet editor persistence.** Selections made in the bouquet editor are saved with the target instead of being
+  re-derived on every visit, and the editor's saved snapshot is merged only after a non-empty successful publication,
+  so a failed or empty update no longer clears an existing selection.
+- **Per-input Xtream proxy.** An Xtream input can carry its own `proxy` block (`url`, optional `username` and
+  `password`) that replaces the global `config.yml` proxy for that input's playlist, EPG, account-expiry check,
+  metadata/probe work, HLS manifest and segment fetches, and playback opens. Aliases inherit it. Supported schemes:
+  `http`, `https`, `socks5`, `socks5h`. Setting `proxy` on a non-Xtream input is rejected at config load, and an
+  unusable proxy fails the request instead of silently falling back to a direct connection.
+- **Stable channel IDs (`options.preserve_stream_ids`).** A target can keep channel IDs stable across source updates
+  by deriving the virtual ID from the channel's semantic identity (target name, item type, group and channel name)
+  instead of the upstream provider's stream ID. Legacy mapping records are reconciled onto the new identity, so
+  already-published IDs keep resolving after the switch and clients no longer lose channels or need a playlist reload
+  when the provider renumbers its streams.
+- **Emby and Jellyfin inputs import their libraries.** `type: emby` and `type: jellyfin` inputs now import the selected
+  movie and TV libraries like Plex inputs do, and Tuliprox proxies direct playback (with `Range` support) and artwork
+  without exposing server URLs or tokens to clients. Credentials are resolved from `media_server.token`, then
+  `media_server.api_key`, then a login with the input's `username` and `password`; `media_server.user_id` selects the
+  user for non-admin tokens. The login session is reused across refreshes and playback and renewed once when the
+  server invalidates it. Jellyfin requests use only the `Authorization: MediaBrowser` header, so imports keep working
+  with Jellyfin 12.0, which removes the legacy `X-Emby-Token` and `api_key` authentication. Missing (virtual)
+  movies and episodes are not imported; remote or `.strm` sources are imported but not playable. The Update tab
+  offers Update and Refresh for these inputs. See [Media server inputs](docs/src/configuration/source.md#27-media-server-inputs-plex-emby-jellyfin).
+- **Maintenance mode.** Inputs can be put into maintenance from the new dashboard card or through
+  `/api/v1/maintenance` (`*` addresses all inputs). New streams of an input in maintenance get the new
+  `maintenance.ts` custom video; playlist and EPG updates keep the last persisted state, and probes, metadata
+  resolution, Stalker refreshes and DVR starts do not contact the provider. Running streams and recordings continue.
+  The state is stored in `maintenance.json` and survives restarts. New permissions `maintenance.read` and
+  `maintenance.write`. See [Maintenance mode](docs/src/rest-api-cookbook.md#maintenance-mode).
+- **Optional fast start for shared live HLS.** `reverse_proxy.hls_cache.startup.mode` selects `conservative`
+  (default, unchanged behavior), `first_ready` (admits playback after one processed start segment) or `progressive`
+  (streams the raw TS start segment while the shared origin fill is still running). Progressive replay memory,
+  reader lifetime and deferred repairs are bounded by the new `startup` limits; revision files share the existing
+  disk cache limits. Archive, encrypted and fMP4/MAP sessions keep the existing path. The Web UI exposes the mode
+  and its limits. See [Optional startup modes](docs/src/configuration/shared-hls-configuration.md#optional-startup-modes).
+- **Optimistic fast start for shared live HLS.** `startup.mode: optimistic` works like `progressive`, but publishes
+  the first playlist as soon as the head segment has data and its successors were accepted by the origin, instead
+  of waiting for data from three segments. Successor fetches start together with the head. Opt-in; the default
+  stays `conservative`.
+
+- **Personal Web UI table layouts.** Show or hide optional columns, reorder them with mouse, touch, or keyboard,
+  and save layouts per account. Restore defaults, cancel drafts, and resolve conflicting saves without losing edits.
+  Settings are stored under `<config_path>/user_settings/`; installations without Web UI authentication share one layout.
+  The `/api/v1/me/settings` endpoints expose the caller's preferences with ETag-based updates.
+  Accounts CSV layouts are scoped to their header schema. See [Personal table layouts](docs/src/features.md#personal-table-layouts).
+
+- **Target-owned discovery with TMDB Trending.** `target.curation` combines optional Trakt and TMDB sources under one
+  `full`/`curated` policy. TMDB supports movie/TV day/week feeds with a unique-reference `limit` (default 100, range
+  1..=500) and guarded internal pagination. It uses its own Bearer token, exact same-kind TMDB-ID matching, and optional
+  Xtream category projection. Every active selector is required; failed fetches retain finalized target artifacts in both
+  modes. M3U/STRM keep normal selected entries, without Xtream aliases.
+  Legacy `output[].trakt` remains supported but cannot coexist with the new declaration on one target. Source Editor
+  preserves the YAML-owned block and shows ownership hints; the dashboard version card now includes TMDB Credits.
 
 - **Runtime liveness watchdog.** An optional heartbeat/watchdog detects a wedged
   async runtime (process alive, scheduler no longer making progress, logs stop) and logs a diagnostic snapshot with
@@ -270,16 +374,12 @@
     layer to stop discarding the distinction: an empty `Some` is now load-bearing and means "configured and unusable",
     which is not the same as "not configured". `playlist.watch.unmatched` covers the fourth silence — a pattern matching
     no group looks exactly like a group that has not changed, so a typo in `watch` was invisible.
-  - **`playlist.groups.changed`**: `watch` tracked channels inside named groups and was blind to the group set itself,
-    in both directions. A group appearing was silent — no baseline file, so one was written, nothing was emitted, and
-    the group's entire channel list read as "not new" from then on — and a group vanishing was worse, since it is absent
-    from the refreshed playlist and no code path observed the disappearance at all. The target's group titles are now
-    diffed against a persisted index before the per-group fan-out, so it sees every group rather than only the ones the
-    watch patterns name; the question is which groups exist, not what is inside the watched ones. The index sits beside
-    the per-group directory (`<target>.groups.bin`, not `<target>/__groups.bin`) so it cannot collide with a group whose
-    sanitized title matches, and first sight writes the baseline silently — announcing every existing group as new on
-    the first refresh after an upgrade would be noise. Gated on `target.watch` being configured, so it costs nothing for
-    targets that never asked to be watched.
+  - **Watch group contexts**: a `watch` entry can be a map with `pattern` and `on` (`channels`, `group_added`,
+    `group_removed`), so groups appearing in or vanishing from a target are reported, filtered per entry. Plain string
+    entries keep watching channels only. The target's group titles are diffed against a persisted index
+    (`<target>.groups.bin`) that always holds every group, so editing a pattern never reads as a change; first sight
+    writes the baseline silently. Group changes arrive in `playlist.watch.changed`; the short-lived
+    `playlist.groups.changed` event is gone and its name is accepted as an alias.
   - **`metadata.update.failed` for an input whose tasks burn through their retries**: the completion event only fires
     when a cycle drains *with changes*, and an exhausted task only reached a `debug!`, so an input whose resolves fail
     every time emitted a start and then nothing for as long as it stayed broken — on the bus, indistinguishable from one
@@ -897,6 +997,11 @@
 
 ## ⚙️ Optimizations
 
+- **Shared table column metadata.** Column enums define stable IDs, labels, and display/sort behavior across Web UI
+  tables. Metadata is memoized, header observers persist across renders, and layout drafts and validation avoid redundant
+  clones and sets. Settings filenames build hash prefixes only when needed while preserving existing encoded names;
+  subject validation and Bearer parsing reuse the common identity and authentication types.
+
 - **The effective admission strategy list is carried as `Arc<[AdmissionStrategy]>`**: `GraceResolutionContext` is
   stored on `StreamInfo` and travels with every clone of it, so a `Vec<AdmissionStrategy>` field meant reallocating the
   list on each clone — and `get_effective_admission_strategies` handed back a fresh `Vec` that the context builder then
@@ -1041,6 +1146,150 @@
   the `shared` crate, so `/ready` and the banner can no longer drift apart in how they group inputs and aliases.
 
 ## 🐛 Fixes
+
+- **Stable shared MPEG-TS keying.** Shared live MPEG-TS origins are keyed by input identity and upstream stream ID
+  (with a target/virtual-ID fallback) instead of the request URL, so two inputs with the same provider stream ID no
+  longer collide and a reconnect lands on the origin the session already holds. An exhausted-permission session may
+  only rejoin the shared origin it is already subscribed to.
+- **Fail-closed shared-stream continuity.** A shared live MPEG-TS origin ends when the upstream body ends, errors, or
+  goes idle (40 s without media bytes) instead of splicing a fresh HTTP body into an already committed response. The
+  idle deadline renews on media progress, so a slow but alive stream is not cut. Subscribers see a terminal error
+  (`provider_idle_timeout`, `recovery_exhausted`, …) rather than a silently truncated body.
+- **Subscriber lag is isolated.** A subscriber that falls behind the shared burst buffer is terminated alone with
+  `subscriber_lagged`; the origin and the other subscribers continue, and post-gap bytes are never delivered.
+- **Accurate disconnect reasons.** Active-stream disconnects are logged with address, stream/virtual ID, provider,
+  channel, duration, bytes sent, reason, provider error class, HTTP status and reconnect count, and stream history
+  records provider idle timeouts, terminal provider errors and subscriber lag instead of falling back to
+  `client_closed`. Client-closed and preempted causes are preserved.
+- **Xtream root expiry keeps a usable alias pool.** An expired root account is excluded from allocation while its
+  unexpired aliases stay available, so the pool keeps serving instead of the whole input going offline. The expiry
+  worker records the root's state without disabling the input when a usable alias exists.
+- **Alias-pool failover for live streams.** A reserved provider that is full, unavailable or excluded falls back to
+  the rest of the input's pool instead of pinning the request to that account, and `over_limit` is only consulted for
+  item types that require provider affinity. This removes premature rejections for live streams.
+- **Account-full rotation recovers transport-level rejections.** Panels that answer with a transport error carrying
+  `429 Too Many Requests` are recognized as account-full, so `rotate_on_full` moves to the next account instead of
+  serving a channel-unavailable response. HLS resource fetches keep the upstream status and retry headers and are
+  never rotated.
+- **Log console no longer floods.** Log WebSocket entries are batched into one UI update per 100 ms and the retained
+  line count is capped, so a provider reconnect loop emitting thousands of lines per second no longer stalls the tab.
+- **Source editor save/drag no longer panics.** A shared borrow held across a `borrow_mut()` callback no longer
+  aborts the editor.
+- **Long Telegram and ntfy notifications are no longer rejected.** Telegram accepts at most 4096 characters (UTF-16
+  units) and ntfy 4096 bytes per message; neither channel had a limit, so a large watch or statistics notification
+  failed and landed in the dead letter queue. Telegram now cuts the final text, after `MarkdownV2` escaping, and drops
+  an escape that the cut separated from its character; ntfy bodies are truncated like Pushover's.
+- **Short EPG and player guides stay empty when playlist and XMLTV ids differ only in case.** A live channel whose
+  EPG id matches a guide channel case-insensitively (for example `usa4k.us` against `<channel id="USA4K.us">`) now
+  adopts the guide's spelling, so the playlist `tvg-id` / `epg_channel_id`, the XMLTV `<channel id>` and the EPG db
+  key are identical. Previously the exact `get_short_epg` lookup and case-sensitive players missed these channels
+  unless `epg_output.lowercase_ids` was enabled. Affected ids change their visible case after the next target update.
+  The new target option `epg_output.adopt_guide_id_case` (default `true`, also in the Web UI target options) keeps
+  the playlist's original spelling when set to `false`.
+
+- **Shared HLS retries an origin account reserved for another session.** A bound account that is briefly reserved
+  by a competing session or an in-flight binding handoff is now retried within the existing acquire budget instead
+  of failing the segment fetch immediately. Ownership checks and rebinding rules are unchanged; a permanently
+  foreign reservation fails once that budget is spent.
+
+- **Shared HLS recovers from missing segments at the head of a new live window.** HTTP 404/410 responses for the
+  first segments of an unpublished live window advance the startup head instead of blocking the initial playlist.
+
+- **Table pagination and settings errors.** Pagination clamps navigation and page ranges to valid bounds and rejects
+  unsupported page sizes. Internal settings task failures return HTTP 500; oversized request bodies return HTTP 413,
+  while other body read failures return HTTP 400. Account and token checks remain active after waiting for settings locks.
+
+- **Proxied live HLS keeps its provider account when the client IP changes.** A player that refreshes its playlist
+  from alternating client IPs (dual-stack IPv4/IPv6, WLAN/mobile switching behind a reverse proxy) created a new
+  playback owner on every IP change. The new owner had no lease or provider affinity, went through normal lineup
+  selection and could land on another provider account, so the provider saw one playback on two accounts. With the
+  shared HLS cache off, an entry request whose provider returns a media playlist is now answered with a single-variant
+  master playlist. Its variant URI is a sealed token that carries the session token, so every refresh keeps the original
+  owner, lease and affinity. The playlist downloaded on the entry request is handed to the immediate variant request,
+  so channel start does not fetch the same playlist twice. A refresh after the session has expired recreates the
+  session from the token and runs the same access checks and admission as the entry route; a session that was
+  evicted, kicked or terminated is not recreated.
+- **HLS tokens carry an explicit resource kind.** Manifest and media references are classified from the playlist and
+  the tag that references them instead of the `.m3u8` extension, so catch-up manifests behind `.ts` or extensionless
+  URLs are admitted as playlist requests and rewritten as playlists, also with a `Range` header. Playlists that list
+  other playlists under `#EXTINF` count as master playlists. Child manifests are only fetched from the provider account
+  that resolved them (a stale one answers `404` without ending the playback), and a media URI resolved by another
+  account answers `404` instead of being fetched with that account's credentials; manifest refreshes forward the provider
+  session cookies stored for the playback, only to the host that set them, and catch-up refreshes renew the lease with
+  `catchup_session_ttl_secs`. Provider session cookies now survive URL changes on the same host.
+- **An upstream response that is not an HLS playlist is a failed manifest.** HTML or JSON bodies answered with `200`
+  were rewritten and served as a playlist. On an entry request they now end the session and return the
+  channel-unavailable manifest; on a playlist refresh they answer `502` and keep the session, so the player retries.
+
+- **A continuing playback keeps its provider after its reconnect window ends.** When an HLS player paused requests
+  longer than `hls_session_ttl_secs`, its lease expired and the next request ran priority selection again, so a playback
+  that had fallen back to an alias moved back to the primary account and then back to the alias. A playback now returns
+  to the provider that last delivered its media for `provider_affinity_ttl_secs` after the reconnect window. This
+  preference holds no connection slot and never causes a grace over-allocation while another provider has a free slot:
+  a full provider still falls back to the lineup. Provider errors on the preferred provider, preemption, kicks and
+  timeouts end it immediately; a failure on a fallback provider keeps it. It applies to reconnect-capable playback
+  (HLS, DASH, Catchup, VOD), not to one-shot live MPEG-TS responses. A delayed failure of an older binding cannot end the preference of its
+  successor. Terminating an HLS session or kicking its client now also releases the provider lease and preference of
+  the binding that session acquired, which the per-retry public HLS token previously left in place. Terminating an
+  unknown or outdated session token leaves a newer playback of the same client, user and channel untouched.
+
+- **Banned, disabled or expired provider accounts are excluded from allocation and remembered.** A login or expiry
+  response that reports `Banned`, `Disabled` or `Expired` excludes the account immediately and stores the exclusion in
+  `source.yml` (`account_disabled: true` for a root account) or the alias CSV (`enabled` = `0`). `Pending` and other
+  non-terminal states only exclude the account at runtime until the provider reports it as usable again. A stream
+  rejected with HTTP 401/403 sends no request of its own; it only asks the Xtream expiry worker to check the account,
+  which still queries each account at most once per 24 hours and each panel at most every 5 minutes. A stored
+  exclusion is cleared by a panel renewal or credential update of that account (this also re-enables an alias that was
+  disabled by hand), or by resetting the flag in the file. An expired root
+  account no longer disables the whole input; playlist updates use the first usable alias instead. Configuration
+  backups are now named `<file>-<path hash>-<timestamp>-<random>`, and the latest ten are kept per source file. Backups
+  written in the previous format (`<file>_<timestamp>…`) are not pruned automatically; delete them manually if they are
+  no longer needed.
+
+- **Stalker playback resolution now says why it failed, retries a rejected session, and can fall back to the stored
+  command.** A playback request that could not be resolved reported a single message naming the requested item's portal
+  id, while the actual cause — no published catalog for the configured portal identity, an item missing from the active
+  generation, an item without a playback descriptor, or a `create_link` refusal — was written to the debug log or
+  nowhere at all, which made a portal refusal look like a mismatched stream id. Each of these stages now logs at warning
+  level with the input name, stream id, item name and the portal's sanitized error, and the resolution reports the
+  portal's reason once its candidates are exhausted. A portal that rejects the session (HTTP 204/401/403/456, or a
+  Ministra `code` of 44 / 440..=449 inside a `200 OK`) no longer ends as "could not be resolved": the cached session is
+  dropped, a fresh handshake is issued and the request is retried once, which is the recovery the typed token-rejection
+  error was introduced for but nothing called. Items whose persisted playback descriptor is empty now resolve through
+  their stored `cmd`, so a row that still carries the portal command stays playable.
+- **A playback request no longer discards the published Stalker catalog.** The active-manifest lookup used by playback
+  resolution and by the disk playlist sources replaced the published manifest with an empty one and deleted the refresh
+  checkpoint whenever the stored identity did not match the configured one — for example after editing the input's
+  Stalker block or changing the MAG preset. The catalog files survived but nothing could resolve, and the running
+  refresh lost its resume point. Read paths now report "no published catalog for this identity" and leave the
+  publication state to the refresh that owns it.
+- **Resource URLs no longer expose internal destinations.** Resource URLs are classified before they are written into
+  playlist or EPG output: only a provably public destination is handed to the client, everything else (`tvg-logo`,
+  `tvg-logo-small`, Xtream covers and backdrops, EPG channel and programme icons, Web UI item icons) is replaced by an
+  authenticated resource link. This also covers redirect mode (`resource_rewrite_disabled: true`), where a
+  network-internal image is proxied instead of being published, and an image without a client-visible base URL is dropped
+  rather than written through. Destinations local to the Tuliprox host — loopback, link-local, cloud metadata — are
+  dropped from the output and refused by the resource route, and an upstream failure is reported as a generic
+  `502 Bad Gateway` instead of relaying the destination's error response. The refusal also happens while the connection
+  is built, so a destination cannot resolve to a public address during the check and to a local one afterwards. A name
+  whose lookup produced no answer stays non-public for ten seconds rather than for minutes, so a resolver hiccup does
+  not pin a destination to the proxy for the rest of its verdict lifetime.
+- **Resource proxying keeps respecting the configured proxy.** Every redirect hop of a resource URL is classified on
+  its own: a hop that is not provably public connects directly, so a self-hosted media server on the local network stays
+  reachable, while every other hop - including the public destinations of the Web UI resource route and a public hop
+  reached through a redirect - goes through the configured `proxy` block. Resource requests therefore cannot disclose
+  the operator's address to a resource host. A redirect to a destination local to the Tuliprox host is refused without
+  being requested, and both resource clients refuse such an address again while the connection is built, so a name that
+  was classified as public cannot resolve to a local address afterwards. The configured proxy hosts are exempt from
+  that guard, so a proxy on the loopback interface (`proxy: http://localhost:8118`) keeps working instead of making
+  every public resource fetch fail. A resource name that does not resolve locally is fetched through the configured
+  proxy, which can still resolve it (for example with remote DNS); a destination that resolves to a private address
+  keeps connecting directly. Redirects are followed one hop at a time, bounded to five hops.
+
+- **Duplicate input and alias names fail the configuration load again.** Input names and alias names share one
+  namespace, and a duplicate silently resolved to whichever member was inserted last, so a request could run against
+  another input's playlist, credentials, and limits. The check that rejects such a configuration is part of the sources
+  load again, which also means an invalid reload is reported instead of replacing the running configuration.
 
 - **Streaming and connection management: resolved silent async hang / deadlock during client kicks and concurrent stream load.**
   Under concurrent stream traffic, `tuliprox` would occasionally stop logging and serving requests (the Web UI became
@@ -1202,11 +1451,12 @@
 - **Auth: an access token minted for one purpose was valid everywhere.** Internal access tokens signed only a timestamp
   and a TTL, so any valid token verified at every place a token was accepted. The capability scope is now mixed into the
   keyed hash and is a compile-time constant on both sides, never caller-supplied. The token string format is unchanged.
-- **Auth: renaming a user orphaned their recordings.** The JWT subject was synthesised from the display name
-  (`web:{username}` / `api:{username}`), so a rename reassigned every recording the old subject owned to a principal
-  that does not exist. Subjects now come from the identity registry, which was already built with persistence,
-  bootstrap and a rename that preserves the id, and was simply never wired into the server. A corrupt registry refuses
-  to start rather than inventing replacement ids.
+- **Auth: a user's subject id is derived from the configured username.** The id in tokens, recordings, rules,
+  per-user quotas and token revocations is `web:<username>` for web users and `api:<username>` for proxy API users,
+  taken from the configured name rather than as typed at sign-in. The identity registry
+  (`identity_registry.json`) that mapped usernames to random ids is removed: nothing called its rename, so it only
+  added a file that had to survive every restart. An existing `identity_registry.json` is ignored and can be deleted.
+  Renaming a user in the configuration starts a new principal.
 - **Auth: passwords typed at the terminal were left in memory.** The interactive password generator left two plaintext
   `String`s sitting after it returned; they are now wiped, the same discipline already applied to a password arriving
   over HTTP. A dead duplicate of the credential type that was never declared in its crate root has been removed.
@@ -1410,13 +1660,28 @@
 
 ## ⚙️ New Settings
 
-- **source.yml (input `resource_policy`)**: Added an optional per-input policy for private resource destinations.
-  - `allowed_hosts` (list of exact DNS names, default empty) and `allowed_networks` (list of private CIDR ranges,
-    default empty) authorize a private address only together: the host name must match and the resolved address must
-    fall inside one of the networks. An IP literal is authorized by `allowed_networks` alone. An absent or empty
-    policy means public-only.
-  - Invalid entries (scheme, path, port, wildcard, IP literal in `allowed_hosts`; a range outside
-    `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, or `fc00::/7`) are rejected while the configuration is loaded.
+- **source.yml (input `options.connection_limit_policy`)** (`strict` | `bypass_local_cap` | `rotate_on_full`, default
+  `strict`): what happens when an input's local connection cap is reached. `strict` keeps today's behavior and rejects
+  over-cap requests. `bypass_local_cap` ignores the local cap; the provider still enforces its own limit, so the
+  account's real capacity is never exceeded and only Tuliprox's local counter stops rejecting early.
+  `rotate_on_full` treats an account-full rejection from the provider (HTTP 429, 503, 509, or a `200` body stating the
+  connection limit was reached) as a signal to retry the open on the next account in the input's pool; each failed
+  account is excluded for the rest of that request and rotation never preempts another user. Editable in the Web UI
+  under Sources → Options as two stacked toggles, where the second implies the first.
+
+- **source.yml (input `proxy`)**: `url` plus optional `username` and `password`. Xtream-only; see the feature above.
+
+- **source.yml (target `options.preserve_stream_ids`)** (bool, default `false`): keeps channel IDs stable across
+  source updates; see the feature above.
+
+- **config.yml (`reverse_proxy.stream`)**:
+  - `hls_wrap_media_playlist` (default `true`): answers a proxied live HLS entry request whose provider returns a media
+    playlist with a single-variant master playlist, so playlist refreshes keep their provider account across client
+    IP changes. Applies only while the shared HLS cache is off for the target. Disable it for players that mishandle a
+    master playlist. Editable in the Web UI under Reverse Proxy → Stream.
+  - `provider_affinity_ttl_secs` (default `120`): seconds a playback keeps preferring its last provider after the
+    reconnect window has ended. It reserves no capacity. `0` ends the preference together with the reconnect window;
+    values above `86400` are rejected. Editable in the Web UI under Reverse Proxy → Stream.
 
 - **Runtime diagnostics (environment variables)**:
   - `TULIPROX_WATCHDOG` (default unset = off) is a mode selector: `1` (`true`/`on`/`yes`/`enabled`) observes and logs
@@ -1566,6 +1831,28 @@
 
 ## 🛠 Maintenance
 
+- **Docker build uses Rust 1.98.** The builder image and toolchain pin were updated so the workspace's
+  `rust-version` is satisfied by the container build.
+- **`ClusterFlags` is built on `create_bitset!`.** It was the last user of the `bitflags` crate, which is removed
+  from `shared`. The API and the persisted `[live,vod]` form are unchanged.
+- **Testkit scenarios can pause and tune reconnect windows.** A step with only `pause_millis` (1 to 300000) idles the
+  scenario, and `policy_contract` accepts `hls_session_ttl_secs` and `provider_affinity_ttl_secs`. The new scenario
+  `m3u-hls-provider-affinity-after-lease-expiry` uses both to prove that a returning HLS playback stays on its
+  fallback account after its reconnect window lapsed and falls back to priority selection once the affinity ended.
+
+- **The testkit can now drive a Stalker/Ministra input.** The fixture origin emulates a portal
+  (`handshake`, `get_profile`, `get_genres`, `get_ordered_list`, `create_link`), a scenario selects it with
+  `input_type: stalker` plus a `stalker:` block (MAC, MAG preset, scripted `create_link` refusals), and the
+  generated `source.yml` points the input at it. Playback resolution is asserted where it is observable — on the
+  portal: `assert_origin` gained `stalker_handshakes_at_least`, `stalker_create_links_at_least`,
+  `stalker_token_refusals_at_least` and `stalker_create_link_markers` (set comparison, so a playback that resolved
+  another catalog item's command fails). Three scenarios use it: `stalker-live-resolution` (each channel resolves
+  through its own stored `cmd`), `stalker-session-refused-once` (a stale-session refusal is recovered by a
+  re-handshake and retry; fails without that recovery) and `stalker-refused-channel-keeps-catalog` (a permanently
+  refused channel is reported and the catalog keeps serving the others). The fixture portal answers with a loopback
+  stream URL on purpose: the SUT's destination guard refuses it, so the scenarios assert the resolution chain and
+  the guard instead of pretending a portal-supplied private URL is playable. Asserting a hard upstream failure
+  needed a new expectation, `expect: { http_error: <status> }`.
 - **Playlist curation now has a dedicated capability boundary**: matching and ordered membership evaluation live in the
   source-neutral `tuliprox-curation` kernel, while Trakt HTTP/JSON handling translates records at the edge and the
   category-scoped compatibility projector remains separate from membership identity. Existing category identity and

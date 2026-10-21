@@ -3,7 +3,7 @@ members = ["backend/*", "frontend", "shared", "tools/tuliprox-testkit"]
 resolver = "2"
 
 [workspace.package]
-version = "3.3.119"
+version = "3.3.157"
 edition = "2021"
 rust-version = "1.95.0"
 
@@ -56,12 +56,14 @@ lz4_flex      = "0.14.0"
 brotli        = "8.0.4"
 indexmap      = "2.14.0"
 dashmap       = "6.2.1"
+cookie        = "0.18.2"
 arc-swap      = "1.9.2"
 paste         = "1.0.15"
 pest          = "2.9.0"
 pest_derive   = "2.9.0"
 zeroize       = "1.9.0"
 deunicode     = "1.6.2"
+unicode-normalization = "0.1.25"
 path-clean    = "1.0.1"
 url           = "2.5.8"
 cron          = "0.17.0"
@@ -87,7 +89,6 @@ incremental = false
 [profile.dev]
 lto = false
 incremental = true
-debug = "line-tables-only"
 codegen-units = 256
 
 [profile.dev-slim]

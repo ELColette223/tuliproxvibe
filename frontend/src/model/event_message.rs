@@ -1,8 +1,7 @@
 use crate::model::BusyStatus;
 use shared::model::{
-    ActiveUserConnectionChange, ConfigType, DownloadsDelta, DownloadsResponse, LibraryScanProgressEvent,
-    PlaylistUpdateProgressEvent, PlaylistUpdateRunStateEvent, StatusCheck, StreamMeterEntry, SystemInfo,
-    TransferTaskDto,
+    ActiveUserConnectionChange, ConfigType, LibraryScanProgressEvent, PlaylistUpdateProgressEvent,
+    PlaylistUpdateRunStateEvent, RecordingTaskDto, StatusCheck, StreamMeterEntry, SystemInfo,
 };
 use std::{rc::Rc, sync::Arc};
 
@@ -22,18 +21,15 @@ pub enum EventMessage {
     WebSocketStatus(bool),
     SystemInfoUpdate(SystemInfo),
     LibraryScanProgress(LibraryScanProgressEvent),
-    StreamMeterBatch(Vec<StreamMeterEntry>),
-    DownloadsUpdate(Rc<DownloadsResponse>),
-    DownloadsDeltaUpdate(Rc<DownloadsDelta>),
+    StreamMeterBatch(Rc<[StreamMeterEntry]>),
     RecordingSnapshot {
         revision: u64,
-        tasks: Rc<Vec<TransferTaskDto>>,
-    },
-    RecordingDelta {
-        revision: u64,
-        tasks: Rc<Vec<TransferTaskDto>>,
+        available: bool,
+        quota: shared::model::RecordingQuotaSummaryDto,
+        tasks: Rc<Vec<RecordingTaskDto>>,
     },
     RecordingRulesChanged,
+    MaintenanceChanged(Rc<shared::model::MaintenanceEntries>),
     /// The socket refused to serve recordings for an actionable reason.
     /// Carries the same stable code the REST routes use, so views map
     /// both through one i18n table.

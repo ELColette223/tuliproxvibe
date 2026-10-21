@@ -131,25 +131,26 @@ inputs:
 
 ### Input Base Parameters
 
-| Parameter               | Type   | Required | Default | Technical Impact & Background                                                                                                                                                                                                                                                                                                                                                                                                             |
-|:------------------------|:-------|:--------:|:--------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `name`                  | String |   Yes    |         | Internal reference ID for Tuliprox. Must be strictly unique. Critical for persistent UUID generation!                                                                                                                                                                                                                                                                                                                                     |
-| `type`                  | Enum   |    No    | `m3u`   | Allowed: `m3u`, `xtream`, `stalker`, `library`, `staged`, `emby`, `jellyfin`, `plex`, and `m3u_batch` / `xtream_batch` / `stalker_batch` (CSV offloading). Stalker inputs use the portal handshake/catalog flow instead of a plain playlist download.                                                                                                                                                                                     |
-| `url`                   | String |   Yes    |         | The Provider URL. Tuliprox supports magic scheme prefixes: `http(s)://`, `file://`, `batch://`, and **`provider://my_failover_provider`** (for the Failover System above).                                                                                                                                                                                                                                                                |
-| `username` / `password` | String |  Often   |         | Mandatory for `xtream` and for Stalker inputs using `credentials_only` or `mac_plus_credentials`. Stalker inputs using `mac_only` do not need them.                                                                                                                                                                                                                                                                                       |
+| Parameter               | Type   | Required | Default | Technical Impact & Background                                                                                                                                                                                                                                                                                                                                                                                                            |
+|:------------------------|:-------|:--------:|:--------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `name`                  | String |   Yes    |         | Internal reference ID for Tuliprox. Must be strictly unique. Critical for persistent UUID generation!                                                                                                                                                                                                                                                                                                                                    |
+| `type`                  | Enum   |    No    | `m3u`   | Allowed: `m3u`, `xtream`, `stalker`, `library`, `staged`, `emby`, `jellyfin`, `plex` (see [Media server inputs](#27-media-server-inputs-plex-emby-jellyfin)), and `m3u_batch` / `xtream_batch` / `stalker_batch` (CSV offloading). Stalker inputs use the portal handshake/catalog flow instead of a plain playlist download.                                                                                                            |
+| `url`                   | String |   Yes    |         | The Provider URL. Tuliprox supports magic scheme prefixes: `http(s)://`, `file://`, `batch://`, and **`provider://my_failover_provider`** (for the Failover System above).                                                                                                                                                                                                                                                               |
+| `username` / `password` | String |  Often   |         | Mandatory for `xtream` and for Stalker inputs using `credentials_only` or `mac_plus_credentials`. Stalker inputs using `mac_only` do not need them. `emby` and `jellyfin` inputs may use them instead of a token (login bootstrap).                                                                                                                                                                                                      |
 | `proxy`                 | Object |    No    |         | Xtream-only outgoing proxy (`url`, optional `username` and `password`). When present, this input proxy replaces the global `config.yml` proxy for this input's playlist, EPG, account-expiry, metadata, probe, HLS, and playback requests. Aliases inherit it. Supported URL schemes: `http`, `https`, `socks5`, and `socks5h`. Without this block, the global proxy remains the fallback. |
-| `enabled`               | Bool   |    No    | `true`  | If `false`, this input is completely ignored in all processing.                                                                                                                                                                                                                                                                                                                                                                           |
-| `sequential_group`      | Int    |    No    |         | Optional non-zero process-wide group ID. With `process_parallel: true`, complete refreshes of inputs sharing an ID run one after another, including all Stalker page slices. Different groups and ungrouped inputs may overlap. Not valid for `staged` inputs; a staged overlay inherits its provider job.                                                                                                                                |
-| `cache_duration`        | String |    No    | `0`     | **Crucial:** Determines how often Tuliprox actually downloads the raw list from the provider. At `1d` (1 day), Tuliprox serves from its local `.db` for 24 hours, even if you trigger hourly updates. This heavily protects against provider bans! Supported units are `s`, `m`, `h`, and `d`. If `cache_duration` is set, the cached provider playlist stored on disk is reused for subsequent updates instead of downloading it again.  |
-| `persist`               | String |    No    |         | Optional path template (e.g., `./playlist_{}.m3u`) to permanently store the downloaded raw provider list locally on your disk. The `{}` in the filename is filled with the current timestamp. For `m3u` use a full filename. For `xtream` use a prefix like `./playlist_`.                                                                                                                                                                |
-| `method`                | Enum   |    No    | `GET`   | HTTP Request method for playlist downloads (`GET` or `POST`).                                                                                                                                                                                                                                                                                                                                                                             |
-| `exp_date`              | Mixed  |    No    |         | Expiration date as `"YYYY-MM-DD HH:MM:SS"` or Unix timestamp. In server mode, Tuliprox refreshes missing or soon-expiring Xtream account dates through the account's `player_api.php` credentials; see [Automatic Xtream Expiration Refresh](#automatic-xtream-expiration-refresh).                                                                                                                                                       |
-| `headers`               | Dict   |    No    |         | Custom HTTP headers for the download (e.g., `User-Agent: My-Player`).                                                                                                                                                                                                                                                                                                                                                                     |
-| `epg`                   | Object |    No    |         | Allows mapping of external XMLTV files (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                     |
-| `aliases`               | List   |    No    |         | Connection pooling / Sub-accounts (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                          |
-| `staged`                | Object |    No    |         | Staged overlay settings. Only valid when `type: staged` (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                    |
-| `panel_api`             | Object |    No    |         | Automated reseller account generation (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                      |
-| `resource_policy`       | Object | No       |         | Trusted private destinations for resource URLs supplied by this input (see [below](#27-resource-policy-resource_policy)).                                                                                                                                                                                                                                                                                                                 |
+| `enabled`               | Bool   |    No    | `true`  | If `false`, this input is completely ignored in all processing.                                                                                                                                                                                                                                                                                                                                                                          |
+| `sequential_group`      | Int    |    No    |         | Optional non-zero process-wide group ID. With `process_parallel: true`, complete refreshes of inputs sharing an ID run one after another, including all Stalker page slices. Different groups and ungrouped inputs may overlap. Not valid for `staged` inputs; a staged overlay inherits its provider job.                                                                                                                               |
+| `cache_duration`        | String |    No    | `0`     | **Crucial:** Determines how often Tuliprox actually downloads the raw list from the provider. At `1d` (1 day), Tuliprox serves from its local `.db` for 24 hours, even if you trigger hourly updates. This heavily protects against provider bans! Supported units are `s`, `m`, `h`, and `d`. If `cache_duration` is set, the cached provider playlist stored on disk is reused for subsequent updates instead of downloading it again. |
+| `persist`               | String |    No    |         | Optional path template (e.g., `./playlist_{}.m3u`) to permanently store the downloaded raw provider list locally on your disk. The `{}` in the filename is filled with the current timestamp. For `m3u` use a full filename. For `xtream` use a prefix like `./playlist_`.                                                                                                                                                               |
+| `method`                | Enum   |    No    | `GET`   | HTTP Request method for playlist downloads (`GET` or `POST`).                                                                                                                                                                                                                                                                                                                                                                            |
+| `exp_date`              | Mixed  |    No    |         | Expiration date as `"YYYY-MM-DD HH:MM:SS"` or Unix timestamp. In server mode, Tuliprox refreshes missing or soon-expiring Xtream account dates through the account's `player_api.php` credentials; see [Automatic Xtream Expiration Refresh](#automatic-xtream-expiration-refresh).                                                                                                                                                      |
+| `headers`               | Dict   |    No    |         | Custom HTTP headers for the download (e.g., `User-Agent: My-Player`).                                                                                                                                                                                                                                                                                                                                                                    |
+| `epg`                   | Object |    No    |         | Allows mapping of external XMLTV files (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                    |
+| `aliases`               | List   |    No    |         | Connection pooling / Sub-accounts (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                         |
+| `staged`                | Object |    No    |         | Staged overlay settings. Only valid when `type: staged` (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                   |
+| `panel_api`             | Object |    No    |         | Automated reseller account generation (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                     |
+| `resource_policy`       | Object |    No    |         | Trusted private destinations for resource URLs supplied by this input (see [below](#27-resource-policy-resource_policy)). |
+| `media_server`          | Object |   Yes*   |         | Settings of `plex`, `emby` and `jellyfin` inputs: library selection, credentials and catalog options. *Mandatory for these input types only; see [Media server inputs](#27-media-server-inputs-plex-emby-jellyfin).                                                                                                                                                                                                                      |
 
 #### Minimal Stalker Input Example
 
@@ -165,9 +166,6 @@ inputs:
       device:
         mac_address: '00:1A:79:12:34:56'
     enabled: true
-    options:
-      stalker_pre_resolve_playback: false
-      stalker_runtime_resolve_playback: true
 ```
 
 Stalker refreshes write pages into an unpublished generation. Live, VOD, series, and EPG selected for one refresh
@@ -177,9 +175,9 @@ previous complete snapshot; a first import exposes no partial catalog. A saved c
 When `process_parallel` is enabled, progress messages include the input name. Targets wait for every enabled input in
 their source and begin as soon as that source is ready, without waiting for unrelated sources.
 
-Use `stalker_pre_resolve_playback: true` if you want Tuliprox to materialize playback URLs during refresh whenever the portal already grants them.
-Keep `stalker_runtime_resolve_playback: true` when the portal uses expiring or session-bound temp links that may need a fresh `create_link`
-call later during playback.
+Stalker playback is resolved on demand: the catalog is imported without materializing stream URLs, and a playback
+request runs `create_link` against the portal when the item has no usable URL yet. A stale portal session is
+re-handshaken once and the request is retried.
 
 Stalker supports four authentication modes:
 
@@ -239,15 +237,15 @@ back to the global proxy or a direct connection.
 
 ### Input Subsections (Object Keys)
 
-| Block             | Description                                                                | Link                                                       |
-| :---------------- | :------------------------------------------------------------------------- | :--------------------------------------------------------- |
-| `headers`         | Custom HTTP request headers for playlist and EPG downloads.                | [See Headers](#21-headers-headers)                         |
-| `options`         | Behavior controls for metadata resolution, stream probing, and skip logic. | [See Options](#22-input-options-options)                   |
-| `epg`             | XMLTV source management and Smart Match fuzzy logic settings.              | [See EPG](#23-epg-assignment--smart-match-epg)             |
-| `aliases`         | Connection pooling for multiple subscriptions from the same provider.      | [See Aliases](#24-provider-aliases-aliases--batch)         |
-| `staged`          | Overlay settings for first-class staged inputs.                            | [See Staged](#25-staged-sources-staged)                    |
-| `panel_api`       | Automated reseller panel integration (provisioning/renewal).               | [See Panel API](#26-provider-panel-api-panel_api)          |
-| `resource_policy` | Trusted private destinations for resource URLs supplied by this input.     | [See Resource Policy](#27-resource-policy-resource_policy) |
+| Block          | Description                                                                           | Link                                                                  |
+|:---------------|:--------------------------------------------------------------------------------------|:----------------------------------------------------------------------|
+| `headers`      | Custom HTTP request headers for playlist and EPG downloads.                           | [See Headers](#21-headers-headers)                                    |
+| `options`      | Behavior controls for metadata resolution, stream probing, and skip logic.            | [See Options](#22-input-options-options)                              |
+| `epg`          | XMLTV source management and Smart Match fuzzy logic settings.                         | [See EPG](#23-epg-assignment--smart-match-epg)                        |
+| `aliases`      | Connection pooling for multiple subscriptions from the same provider.                 | [See Aliases](#24-provider-aliases-aliases--batch)                    |
+| `staged`       | Overlay settings for first-class staged inputs.                                       | [See Staged](#25-staged-sources-staged)                               |
+| `panel_api`    | Automated reseller panel integration (provisioning/renewal).                          | [See Panel API](#26-provider-panel-api-panel_api)                     |
+| `media_server` | Library selection, credentials and catalog options of Plex, Emby and Jellyfin inputs. | [See Media server inputs](#27-media-server-inputs-plex-emby-jellyfin) |
 
 ---
 
@@ -268,6 +266,18 @@ headers:
   X-Custom-Auth: "my-secret-token"
 ```
 
+> **Note:** Some Flussonic providers select the catch-up format by `User-Agent`. With a VLC User-Agent (for example
+> `VLC/3.0.21 LibVLC/3.0.21`), they return separate fMP4 video and audio renditions whose initialization objects
+> (`.hls.fmp4`) fail with `403 Forbidden`, while the playlists still return `200`. The ffmpeg default User-Agent
+> (`Lavf/…`) receives a combined MPEG-TS rendition that plays. If catch-up stops at the fMP4 initialization
+> object, set a non-VLC `User-Agent` for this input. Then check that live and VOD playback still work, because
+> some providers require a specific User-Agent.
+>
+> A per-channel `#EXTVLCOPT:http-user-agent` directive in the provider playlist overrides the input `User-Agent`
+> on catch-up HLS requests. If a channel sets this directive to a VLC User-Agent, the input header has no effect
+> for that channel. Change the directive to a non-VLC User-Agent as well, for example in a local copy of the
+> playlist.
+
 ---
 
 ### 2.2 Input Options (`options`)
@@ -282,7 +292,10 @@ specific provider.
 | `xtream_live_stream_without_extension`     | Bool     | `false` | Strips `.ts` from generated stream URLs.                                                                                                                                                                                               |
 | `xtream_live_stream_use_prefix`            | Bool     | `true`  | Injects the `/live/` prefix into URLs.                                                                                                                                                                                                 |
 | `disable_hls_streaming`                    | Bool     | `false` | Rewrites live `.m3u8` requests to `.ts` and bypasses Tuliprox HLS handling.                                                                                                                                                            |
+| `flussonic_hls_catchup`                    | String   | `native`| M3U Flussonic HLS catch-up mode: `native` or `bounded_archive`. See below.                                                                                                                                                             |
+| `flussonic_hls_catchup_max_duration_secs`  | Int      | `14400` | Maximum origin window in seconds for generated `bounded_archive` sources (1–604800). Longer player ranges are capped; explicit sources and native streams are unaffected.                                                              |
 | `user_agent_stream_index`                  | Bool     | `false` | Appends a process-local stream index to upstream `User-Agent` requests (e.g. `VLC/3.0 42`), keeping it stable for the session.                                                                                                         |
+| `flussonic_hls_audio_tracks`               | Bool     | `false` | Labels fragmented-MP4 HLS objects below Flussonic `tracks-a<N>` paths as `audio/mp4` when the provider sends no specific `Content-Type`. Enable only for Flussonic sources.                                                            |
 | `resolve_tmdb`                             | Bool     | `false` | Enables TMDB queries for this specific input based on parsed titles to fill missing posters and release years.                                                                                                                         |
 | `probe_stream`                             | Bool     | `false` | Uses FFprobe to read A/V details (HDR, 4K). Respects `max_connections`.                                                                                                                                                                |
 | `resolve_background`                       | Bool     | `true`  | Metadata scans run asynchronously in the background so the general playlist update (which blocks clients) finishes instantly.                                                                                                          |
@@ -293,8 +306,16 @@ specific provider.
 | `resolve_delay` / `probe_delay`            | Int      | `2`     | **Ban Protection:** Hard wait time (in seconds) between API or Probe requests to the *same* provider! Prevents API spamming.                                                                                                           |
 | `resolve_filter`                           | String   | -       | Filter expression to selectively resolve only entries matching the condition. Uses the same Filter syntax.                                                                                                                             |
 | `probe_filter`                             | String   | -       | Filter expression to selectively probe only entries matching the condition. Uses the same Filter syntax.                                                                                                                               |
-| `stalker_pre_resolve_playback`             | Bool     | `false` | Stalker-only: resolves `create_link` during playlist processing and persists the returned playback URL when the portal already grants one. Useful when you want the playlist/export step to materialize playable stream URLs up front. |
-| `stalker_runtime_resolve_playback`         | Bool     | `false` | Stalker-only: lets the reverse-proxy retry `create_link` during playback when a persisted Stalker URL has gone stale or is rejected by the portal. This is the recovery path for temp links and expired session-bound stream URLs.     |
+
+For M3U inputs, `flussonic_hls_catchup: bounded_archive` generates a `catchup-source` for live entries with
+`catchup="fs"`, no existing source, and a `/CHANNEL/mono.m3u8` URL. The generated URL uses
+`/CHANNEL/archive-{utc}-{duration}.m3u8` and preserves the scheme, host, and query string, including tokens.
+The live URL, explicit sources, other URL forms, and native TS entries remain unchanged. Archive requests use
+a validated start and positive duration, capped to `flussonic_hls_catchup_max_duration_secs` (four hours by default).
+Shorter requests retain their duration. The seven-day safety limit and HLS session identity use the capped range,
+so selecting an older programme with `lutc` set to the current timestamp does not request the entire archive.
+Changes to this option take effect after a playlist refresh. Missing archives are unavailable without a
+fallback to live playback or moving timeshift playlists. Omit the option or set `native` to retain native behavior.
 
 > **Note:** For `resolve_vod` and `resolve_series`, data is cached per input and only new or changed entries are
 > updated.
@@ -368,18 +389,18 @@ again when the process restarts. Shared playback uses the identity of the shared
 #### Stalker playback notes
 
 * Stalker playlist preview in the Web UI now works through the same protected playlist endpoints used for other input types.
-* `stalker_pre_resolve_playback` and `stalker_runtime_resolve_playback` are complementary:
-  * `stalker_pre_resolve_playback: true` tries to turn portal `cmd` values into concrete playback URLs during refresh.
-  * `stalker_runtime_resolve_playback: true` retries `create_link` later if the stored playback URL is stale, temp-link based, or rejected after processing.
+* Stalker items are imported with their portal metadata and playback descriptor but without a materialized stream URL, so the
+  exported playlist never exposes the raw portal `cmd`.
+* Playback resolves the item on demand: the reverse-proxy path runs `create_link` for the item's descriptor candidates and
+  falls back to the item's stored `cmd` when no descriptor candidate is usable.
 * Temp-link variants (`nginx_secure_link`, `flussonic_tmp_link`, `wowza_tmp_link`) are persisted as explicit playback modes
   and reused during runtime refresh, instead of being flattened into a generic direct-URL path.
-* When pre-resolve does not materialize a URL, Tuliprox keeps the Stalker item metadata and playback descriptor but does
-  not leak the raw `cmd` into the exported playlist URL field.
-* If pre-resolve is disabled or the portal refuses to resolve a specific item during refresh, the item can still remain playable
-  later through runtime resolution, assuming the reverse-proxy path is used and runtime resolve is enabled.
 * Runtime refresh reuses a cached Stalker client per input configuration and treats the session TTL as a soft re-handshake boundary.
-  If refresh still cannot resolve a playable URL, Tuliprox invalidates the stale persisted URL instead of continuing to serve it indefinitely.
-* Stalker EPG import now also consumes the portal bulk-EPG endpoint during processing when Stalker playback pre-resolve is enabled.
+  A portal that rejects the session (HTTP 401/403/204/456, or a `code` 44 / 440..449 body) triggers one re-handshake and retry;
+  a portal that refuses the request again is reported with the portal's reason in the log.
+* A playback request only ever reads the published catalog generation. If the input has no published catalog for the configured
+  portal identity, playback fails with a log line naming that input instead of starting or discarding a refresh.
+* Stalker EPG import also consumes the portal bulk-EPG endpoint during processing.
 * The bulk-EPG path is streamed and batch-persisted to reduce peak memory pressure on large portals, but portal-specific
   tuning for pathological datasets is still a separate follow-up topic.
 * Supported Stalker playback transports are currently `http` and `https` only. `rtmp://` / `rtsp://` commands are rejected
@@ -1030,9 +1051,9 @@ the actual streams are still opened against the Xtream or M3U provider.
 **Data flow:**
 
 * `staged input -> provider input`: the staged input is an overlay for that provider. Inside the clusters listed in
-  `staged.clusters`, each staged group of an `xtream` provider replaces the provider category it belongs to; provider
-  categories that the staged playlist does not represent stay as they are. For any other provider type the listed
-  clusters are replaced entirely by the staged groups. Clusters not listed are loaded from the provider input itself.
+  `staged.clusters`, an `m3u` staged playlist determines all groups and channels. An `xtream` staged playlist replaces
+  matching provider categories and keeps unmatched provider categories. Clusters not listed are loaded from the provider
+  input itself.
   The merged playlist is persisted under the provider input, and streaming/API requests still target the provider input.
 * `staged input -> target` is not supported. Use a normal `m3u` or `xtream` input if the source should be connected
   directly to a target.
@@ -1045,12 +1066,14 @@ the actual streams are still opened against the Xtream or M3U provider.
   known, an `xtream` staged group is resolved by category ID; an `m3u` staged group skips that step because its category
   IDs are positional. The group title acts as a last resort. A group title therefore never overrides a stream ID match,
   so a renamed or split group cannot take over an unrelated category by accident.
-* The overlaid category keeps its own category ID; the staged playlist supplies the group name and the channel order.
+* The overlaid category keeps its own category ID; the staged playlist supplies the group name and channel order.
+  With `staged_type: m3u`, it also supplies the group order.
 * Known streams keep their provider playback URL, including a direct source URL. New streams use the provider address and
   credentials; for VOD, the staged stream's container metadata supplies the extension when available.
 * Every staged channel needs a numeric provider stream ID in its `header.id`, either from an `xui-id` / `cuid`
   attribute or from the numeric last URL segment. Rows without one are skipped, a single warning per group reports how
-  many rows were dropped, and the provider category stays in place instead of being emptied.
+  many rows were dropped. A group with no usable channels is omitted for `m3u` staged input; for `xtream` staged input,
+  a matching provider category stays in place.
 * A staged group that matches no provider category is added as a new category. Its category ID is reused when it is
   still free, otherwise Tuliprox assigns an unused ID, so two groups of one cluster never share an ID.
 
@@ -1095,9 +1118,9 @@ inputs:
 `staged.clusters` names the clusters whose categories are overlaid from the staged input.
 
 * The referenced provider supplies all clusters not listed in `staged.clusters`.
-* Inside a listed cluster of an `xtream` provider, only the categories represented by the staged playlist are overlaid;
-  provider categories without a staged counterpart stay available. For any other provider type the listed clusters are
-  replaced entirely.
+* Inside a listed cluster of an `xtream` provider, an `m3u` staged playlist determines which groups and channels appear.
+  Provider categories without an `m3u` staged counterpart are omitted. With `staged_type: xtream`, unmatched provider
+  categories remain available. For any other provider type the listed clusters are replaced entirely.
 * `staged.for_input` must reference an existing non-staged `m3u` or `xtream` input.
 * Each provider input can have at most one staged overlay.
 * `staged.clusters` must not be empty.
@@ -1210,101 +1233,210 @@ Tuliprox processes all Panel API responses as JSON and strictly requires `status
 
 ---
 
-### 2.7 Resource Policy (`resource_policy`)
+### 2.7 Media server inputs (`plex`, `emby`, `jellyfin`)
 
-Restricts which destinations Tuliprox may reach when it proxies a resource URL that came from this input, including
-channel logos, EPG channel and programme icons, covers, posters, episode images, backdrops, and nested Xtream
-metadata resources.
+Inputs of `type: plex`, `type: emby` and `type: jellyfin` import the movie and TV libraries you select from a media
+server into the playlist, so they can be mapped, filtered and published through targets like any other input. The
+server stays the owner of the files: Tuliprox does not copy media, it proxies **direct play** on demand.
 
-Without a policy, every resource URL is treated as **public-only**: only publicly routable destinations are
-fetched. An internal logo host therefore stops working until it is listed here.
+All three types share the `media_server` block and the rules below. A media server input must not use `aliases`,
+`epg`, `panel_api` or `provider` failover definitions, and its `url` must not use the `batch://` or `provider://`
+schemes. The `media_server` block and at least one entry in `media_server.libraries` are mandatory.
+
+#### The `media_server` block
+
+Unknown keys inside `media_server` are rejected while loading the configuration.
+
+| Field                           | Type   | Required       | Default           | Description                                                                                                                                                |
+|:--------------------------------|:-------|:---------------|:------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `libraries`                     | List   | Yes            |                   | Libraries to import. Each entry is a library name or an object (see [Library selectors](#library-selectors)). Empty entries are rejected.                  |
+| `token`                         | String | See below      |                   | Plex: PMS token for direct access. Emby/Jellyfin: access token sent as `X-Emby-Token` (Emby) or in the `Authorization: MediaBrowser` header (Jellyfin).    |
+| `api_key`                       | String | See below      |                   | Emby/Jellyfin only: server API key. It is sent exactly like `token` (never as a `?api_key=` query parameter). Ignored when `token` is set.                 |
+| `user_id`                       | String | No             |                   | Emby/Jellyfin only: user whose library views and items are listed. Required for non-admin tokens (see [Emby and Jellyfin](#emby-and-jellyfin)).            |
+| `account_token`                 | String | Plex, no `url` |                   | Plex only: plex.tv account token used to discover the server when `url` is omitted.                                                                        |
+| `server_id`                     | String | No             |                   | Plex only: machine identifier of the server. With `url` it is verified against the server; without `url` it selects the server.                            |
+| `server_name`                   | String | No             |                   | Plex only: friendly name of the server, used like `server_id`.                                                                                             |
+| `prefer_https`                  | Bool   | No             | `true`            | Plex only: with account discovery, try `https` connections before `http` ones.                                                                             |
+| `allow_relay`                   | Bool   | No             | `false`           | Plex only: with account discovery, allow plex.tv relay connections (tried last).                                                                           |
+| `catalog.page_size`             | Int    | No             | `100`             | Items requested per page. Must be greater than `0`.                                                                                                        |
+| `catalog.request_delay_ms`      | Int    | No             | `250`             | Pause in milliseconds between two catalog page requests, to keep the load on the server low.                                                               |
+| `catalog.include_media_sources` | Bool   | No             | `true`            | Emby/Jellyfin: request `MediaSources` to pick the file to play and to fill container, codec, bitrate and duration. See [Playback](#media-server-playback). |
+
+#### Credentials per server type
+
+Input-level `url`, `username` and `password` sit next to `media_server`, not inside it.
+
+##### Plex
+
+* **Direct access:** set `url` to the Plex Media Server and `media_server.token`. `server_id` and `server_name`
+  are optional checks against the server identity.
+* **Account discovery:** omit `url` and set `media_server.account_token` plus `server_id` or `server_name`. The
+  server is looked up on plex.tv; `prefer_https` and `allow_relay` steer the connection choice.
+
+##### Emby and Jellyfin
+
+`url` is mandatory. The server URL may carry a path prefix, for example `https://media.example.invalid/jellyfin` or
+`http://192.0.2.10:8096/emby`; the prefix is kept for every request, with or without a trailing slash.
+
+Credentials are resolved in this order, the first one present wins:
+
+1. `media_server.token`
+2. `media_server.api_key`
+3. Login with the input's `username` and `password` (`POST /Users/AuthenticateByName`).
+
+At least one of them is mandatory. A configured `token` or `api_key` is used as is; if the server rejects it
+(`401`), the update fails with an authentication error. A token obtained by login is kept in a process-wide session
+that is shared by every request of the same input, so concurrent playback and refreshes log in only once. If the
+server invalidates that token (expired session, server restart), the next request logs in again once and is
+retried. The device identity sent to the server is derived from the input name and user name, so a restart of
+Tuliprox replaces its previous session on the server instead of adding a new device.
+
+| Server   | How the token is sent                                                                              |
+|:---------|:---------------------------------------------------------------------------------------------------|
+| Emby     | `X-Emby-Token` header, with the client identity in `X-Emby-Authorization`.                         |
+| Jellyfin | Only `Authorization: MediaBrowser Client=..., Device=..., DeviceId=..., Version=..., Token="..."`. |
+
+Jellyfin requests never carry `X-Emby-Token`, `X-MediaBrowser-Token`, `X-Emby-Authorization` or an `api_key` query
+parameter. These legacy authentication methods are deprecated since Jellyfin 10.11 and removed in Jellyfin 12.0, so
+imports keep working there. The token is never placed in a URL.
+
+`user_id` decides which library list is used:
+
+* **With a user** (`user_id` configured, or the user returned by the login): the libraries visible to that user are
+  listed and items are requested in the context of that user. A configured `user_id` takes precedence over the
+  user returned by the login.
+* **Without a user** (`token` or `api_key` and no `user_id`): the server-wide library list
+  (`/Library/VirtualFolders`) is used. This requires an administrator token or API key. A non-admin token fails
+  with an authentication error; set `user_id` to the user that owns the token in that case.
+
+#### Library selectors
+
+`libraries` lists what to import. Each entry is either a plain library name or an object:
+
+```yaml
+libraries:
+  - Movies                       # by name
+  - id: LIBRARY_ID               # by library id (Emby/Jellyfin) ...
+    kind: tvshows
+  - key: "2"                     # ... or by section key (Plex)
+    kind: movies
+```
+
+* A plain string, or `name`, matches the library title exactly (case-sensitive, surrounding spaces ignored).
+* `id` and `key` are interchangeable and match the library's stable identifier. If several of `id`, `key` and `name`
+  are given, a library matching any of them is selected.
+* `kind` (`movies` or `tvshows`, aliases `shows` and `series`) additionally requires the library to be of that
+  kind. A library of another kind does not match.
+* Every selector must resolve to exactly one library: no match fails the update (`selected library was not
+  visible`), several matches fail it (`selected library name was ambiguous`). Use `id` to disambiguate.
+
+Only libraries of the types **movies** (`movies` on Emby/Jellyfin, `movie` on Plex) and **TV shows** (`tvshows`,
+`show`) are imported. A selected library of any other type, such as `mixed`, `boxsets`, `music` or `homevideos`, is
+skipped and nothing is imported from it. Emby/Jellyfin collections (BoxSets) are not imported as collections; their
+members appear through their own library.
+
+#### What is imported
+
+For Emby and Jellyfin the import reads, per selected library:
+
+* **Movies** and, for TV libraries, **series**, **seasons** and **episodes**, with title, year, release date,
+  provider ids (TMDB, IMDb, TVDB), summary, genres, studio or network, content and audience rating, cast and crew,
+  and, when `catalog.include_media_sources` is enabled, container, codec, resolution, bitrate and duration.
+* The **primary image** of every item that has one.
+
+Items are skipped or marked as follows:
+
+* Missing episodes and movies (`LocationType: Virtual`, items the server knows but has no file for) are not
+  imported.
+* Items without a name are imported with a generic title such as `Jellyfin Movie`; items without an id are skipped.
+* Items whose media sources are all remote (`Protocol` other than `File`, `IsRemote`, or `.strm` entries) are
+  imported but not playable: Tuliprox does not proxy them, which also prevents a server library that is fed by
+  Tuliprox's own STRM output from looping back into Tuliprox. Requesting such an item fails because no stream can be
+  opened ("no direct playable source" is logged). This detection needs the media source data, so it only applies
+  while `catalog.include_media_sources` is `true`.
+* When `catalog.include_media_sources` is `true` and an item reports no media source at all, it is also imported as
+  not playable.
+
+An update reads all selected libraries completely before anything is published; an error while reading any of them
+fails the input update instead of producing a partial catalog.
+
+#### Updating
+
+The input card in the **Update** tab of the Web UI offers **Update** and **Refresh** for Plex, Emby and Jellyfin
+inputs. There is no **Force Update** for these inputs. An update contacts the server and reads all selected
+libraries; to keep the load low, requests are paged by `catalog.page_size` with `catalog.request_delay_ms` between
+pages.
+
+#### Media server playback
+
+Playlist entries of a media server input point to Tuliprox, never to the media server:
+
+* **Direct play proxy:** a play request is answered by streaming the original file from the server through
+  Tuliprox (Emby/Jellyfin: `/Videos/{id}/stream?static=true`, with the selected `mediaSourceId`). `Range` requests
+  are forwarded, so seeking works and the server's `206` status and `Content-Range` are passed on. Nothing is
+  transcoded.
+* **Artwork:** posters are fetched from the server on demand (`Primary` image, using the image tag so changes are
+  picked up) and served by Tuliprox.
+* **No credentials for clients:** the server URL, token, API key and password are never part of playlists, redirects
+  or responses. Only `Content-Type`, `Content-Length`, `Content-Range`, `Accept-Ranges`, `ETag` and `Last-Modified`
+  are passed from the server to the client.
+* **Media source choice (Emby/Jellyfin):** the first local file source is used; a source that supports direct
+  play or direct stream is preferred. With `catalog.include_media_sources: false` no source is selected and the
+  server's default source is played.
+
+#### Examples
+
+Plex, direct access:
 
 ```yaml
 inputs:
-  - name: local-playlist
-    type: m3u
-    url: /data/local-playlist.m3u
-    resource_policy:
-      allowed_hosts:
-        - media.home.arpa
-      allowed_networks:
-        - 192.168.50.20/32
+  - name: plex_home
+    type: plex
+    url: http://192.0.2.20:32400
+    enabled: true
+    media_server:
+      token: YOUR_PMS_TOKEN
+      libraries:
+        - Movies
+        - name: TV Shows
+          kind: tvshows
 ```
 
-#### Configure it in the Web UI
+Emby with an API key (server-wide library list, requires an administrator key):
 
-1. Open the **Source Editor** and select the input that supplies the resource.
-2. Open the **Resource Policy** page using the shield icon.
-3. Add the exact DNS names under **Allowed Resource Hosts**. Enter host names only, without a scheme, path, port,
-   wildcard, or IP address.
-4. Add the smallest required private CIDR ranges under **Allowed Resource Networks**.
-5. Apply the input changes and save the source configuration.
+```yaml
+inputs:
+  - name: emby_main
+    type: emby
+    url: http://192.0.2.10:8096/emby
+    enabled: true
+    media_server:
+      api_key: YOUR_EMBY_API_KEY
+      libraries:
+        - Movies
+        - Series
+```
 
-For a private DNS destination, configure both a matching host and network. A private IP literal needs only a
-matching network. Removing every host and network removes the policy from the input and restores the public-only
-default.
+Jellyfin with a login, behind a reverse proxy with a path prefix:
 
-#### Parameters
+```yaml
+inputs:
+  - name: jellyfin_main
+    type: jellyfin
+    url: https://media.example.invalid/jellyfin
+    username: tuliprox
+    password: YOUR_PASSWORD
+    enabled: true
+    media_server:
+      libraries:
+        - Movies
+        - name: Shows
+          kind: tvshows
+      catalog:
+        page_size: 200
+```
 
-| Parameter              | Type | Required | Default | Technical Impact & Background                                                                                                                                                                                                                                                                           |
-| :--------------------- | :--- | :------: | :------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **`allowed_hosts`**    | List |    No    | `[]`    | Exact DNS names that may resolve to a private address. Matched case-insensitively and without a trailing dot. Wildcards, ports, schemes, paths, and IP literals are rejected while the configuration is loaded.                                                                                         |
-| **`allowed_networks`** | List |    No    | `[]`    | Private CIDR ranges a destination address may fall into (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7` and subnets of them). Anything broader, and every public or special-use range, is rejected while the configuration is loaded. Use `/32`, `/128`, or the smallest practical subnet. |
-
-#### What a policy authorizes
-
-* A **publicly routable** destination is always allowed, with or without a policy.
-* A **private DNS destination** requires both: the exact host name in `allowed_hosts` **and** the resolved address
-  inside `allowed_networks`. Listing one without the other authorizes nothing.
-* A **private IP literal** in the URL (for example `http://192.168.1.1/logo.png`) is authorized by
-  `allowed_networks` alone, because a literal has no host name to match.
-* Loopback, link-local, cloud-metadata, unspecified, multicast, CGNAT, documentation, benchmarking, broadcast, and
-  reserved addresses are always rejected, even when a matching CIDR is configured.
-* Redirects are re-checked on every hop with the same policy, and redirect hops are bounded.
-* `allowed_hosts` and `allowed_networks` contain no port, so an authorized host is reachable on **every** port that
-  serves `http` or `https`. This is deliberate: providers serve images on non-standard ports, and the address
-  policy is the actual restriction, not the port.
-
-#### Where the policy comes from
-
-The policy is looked up on the input that supplied the concrete resource URL, not on the target, the item, or the
-record that contains it. Two consequences matter in practice:
-
-* Items delivered through an alias are authorized with the policy of their main input; aliases inherit it.
-* `logo_override: true` copies an EPG icon into a playlist logo. That logo keeps the EPG input as its origin and is
-  authorized with the **EPG input's** policy, not the playlist input's.
-
-The canonical input name is the authorization identity of a resource origin. Configured input and alias names are
-non-empty, globally unique strings: no two inputs — and no input and alias — may share a name, and the loader rejects
-a configuration that does. Internal numeric IDs and generated playlist UUIDs are managed separately from these names.
-Renaming an input invalidates the links that were issued for it, and reusing a name for a different input would hand
-it the authority of the old input, so treat a rename as a new identity.
-
-#### Legacy data and links
-
-Legacy raw resources stored on playlist and Xtream items use the containing item's input. Legacy EPG resources and
-external links without an authoritative input remain public-only until the data is regenerated. An origin that
-names an input which no longer exists or is disabled is rejected with `400`; it is never silently downgraded to
-public-only.
-
-Tuliprox stores ownership internally in a value beginning with `resource://`. This scheme is reserved and must not
-appear in provider data, playlists, EPG documents, metadata, or mapping configuration. Provider-supplied and mapped
-values using the reserved scheme are discarded so they cannot claim another input's network policy. External M3U,
-XMLTV, Xtream, and Web UI responses always contain either the original HTTP(S) URL or a Tuliprox proxy URL, never the
-internal representation.
-
-#### Proxy interaction
-
-Resource proxying always connects directly, so the destination policy can be enforced while the connection is
-established. A configured proxy, and the `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` environment variables, are
-ignored for these requests; Tuliprox logs a warning at startup and on reload when one is configured. Provider
-fetches, playlist and EPG downloads, and streams keep using the proxy.
-
-#### Cache
-
-Proxied resources are cached per policy scope. An entry fetched under one policy is never served to a request
-authorized by another, and the resource cache starts cold once on upgrade because the cache key layout changes.
-The cache size limits are unchanged.
+The login bootstraps the token and the user id; use a dedicated Jellyfin user that can see the selected libraries.
 
 ---
 
@@ -1359,8 +1491,9 @@ sources:
         sort: { }
         options:
           ignore_logo: false
-          clear_invalid_epg_ids: false
           epg_output:
+            clear_invalid_ids: false
+            adopt_guide_id_case: true
             lowercase_ids: false
             lowercase_xmltv_display_names: false
           share_live_streams:
@@ -1400,8 +1533,9 @@ sources:
 | `sort`             | Object        |    No    |           | Defines ordering for groups and channels after transformations. This affects the final playlist structure seen by clients and can significantly improve navigation quality in IPTV players.                                  |
 | `options`          | Object        |    No    |           | Target-level behavior switches such as logo suppression, duplicate removal, and shared live-stream handling. These options influence memory usage, playlist cleanliness, and reverse-proxy behavior.                         |
 | `output`           | List          |   Yes    |           | Mandatory list of output formats. A single target can generate multiple output representations (e.g., `xtream`, `m3u`, `strm`, `hdhomerun`) from the same transformed result set.                                            |
+| `curation`         | Object        |    No    |           | Optional target-wide catalog policy with Trakt and/or TMDB Trending sources. Mutually exclusive with legacy `output[].trakt`; see [target-wide curation](#target-wide-curation-curation).                                    |
 | `favourites`       | List          |    No    |           | Duplicates final transformed channels into dedicated favorite groups after processing is complete. This adds curated views without changing the original group structure.                                                    |
-| `watch`            | List          |    No    |           | Defines watched group patterns. If matching groups change during updates, Tuliprox emits Messaging events so operational changes become observable automatically.                                                            |
+| `watch`            | List          |    No    |           | Watch entries for this target: channel changes in matching groups and/or matching groups that appear or disappear. Changes are reported as Messaging events; see [Watch](#329-watch-watch).                                  |
 | `use_memory_cache` | Bool          |    No    | `false`   | If enabled, the final compiled playlist is cached in RAM. This reduces disk access and improves delivery speed, especially for M3U downloads, but increases memory consumption.                                              |
 
 ---
@@ -1450,7 +1584,7 @@ filter:
 ```
 
 `processing` runs at the normal `F` position. The target then applies favourites, merges groups, performs post-merge
-content deduplication, evaluates any configured Trakt selectors, and derives the base and Xtream appearance views.
+content deduplication, evaluates any configured curation selectors (Trakt and/or TMDB), and derives the base and Xtream appearance views.
 `persist` runs after each view is sorted, numbered, and counted, immediately before output filters, watch evaluation, and
 persistence. Output-level filters remain plain strings and have no configurable stage.
 
@@ -1473,7 +1607,7 @@ Tuliprox supports the following filter expression types:
   * Case-insensitivity is ASCII-only: ASCII letters match regardless of case, non-ASCII characters must match
     exactly. `Title CONTAINS "cinéma"` matches `Cinéma` but not `CINÉMA`.
 * Presence comparison: `EpgId IS EMPTY` matches a missing or empty field; `EpgId IS NOT EMPTY` matches a populated field.
-  This is especially useful in a `persist` filter after `clear_invalid_epg_ids` has removed unresolved EPG IDs.
+  This is especially useful in a `persist` filter after `epg_output.clear_invalid_ids` has removed unresolved EPG IDs.
   `EpgId = EMPTY` and `EpgId != EMPTY` are accepted as aliases and normalize to the `IS` forms.
 * Set membership (case-insensitive exact match against a list): `Group IN ["Sports", "News"]`
 * Numeric comparison on the channel number: `Chno = 5`, `Chno != 5`, `Chno > 100`, `Chno >= 100`, `Chno < 200`, `Chno <= 200`
@@ -1730,8 +1864,9 @@ targets:
         use_output: xtream
     options:
       ignore_logo: false
-      clear_invalid_epg_ids: false
       epg_output:
+        clear_invalid_ids: false
+        adopt_guide_id_case: true
         lowercase_ids: true
         lowercase_xmltv_display_names: false
       share_live_streams:
@@ -1749,11 +1884,12 @@ targets:
 | Parameter                                  | Type | Required | Default | Technical Impact & Background                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 |:-------------------------------------------|:-----|:--------:|:--------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `ignore_logo`                              | Bool |    No    | `false` | Ignores `tvg-logo` and `tvg-logo-small` attributes. This reduces downstream device-side logo caching and can keep generated M3U playlists leaner for clients with limited storage or poor cache invalidation behavior.                                                                                                                                                                                                                                                                                                                                                                            |
-| `clear_invalid_epg_ids`                    | Bool |    No    | `false` | Clears an EPG ID when it does not resolve to the processed EPG data. Playlist entries are never removed. Smart matching runs first, and IDs introduced or changed by later mappings are validated again before the `persist` filter. The legacy input name `required_epg` is still accepted, but configuration is serialized with the new name.                                                                                                                                                                                                                                                   |
 | `share_live_streams.hls`                   | Bool |    No    | `false` | Enables HLS live sharing for the new HLS cache proxy path. This is a configuration switch for the HLS cache feature and is independent from MPEG-TS stream sharing.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `share_live_streams.mpeg_ts`               | Bool |    No    | `false` | Allows Tuliprox to share MPEG-TS live stream connections in reverse proxy mode. This can reduce upstream provider connection usage when multiple clients watch the same channel, but it increases memory usage per shared channel.                                                                                                                                                                                                                                                                                                                                                                |
 | `remove_duplicates`                        | Bool |    No    | `false` | Legacy pre-transform identity deduplication. It runs independently for each input before the F/R/M pipe and removes repeated source identities before mapping can emit additional items. The field remains supported for backward compatibility.                                                                                                                                                                                                                                                                                                                                                  |
 | `deduplicate`                              | Map  |    No    | -       | Post-merge, quality-aware content deduplication. It runs after all inputs have been transformed and merged. Channels whose match value is identical after stripping quality tokens (`4K`, `UHD`, `2160p`, `QHD`, `1440p`, `FHD`, `1080p`, `HD`, `720p`, `SD`, `480p`, `576p`) collapse to one entry. Sub-keys: `match_by` (`caption` (default), `name`, `title`), `keep` (`best_quality` (default), `first`) and `match_as_ascii` (default `false`). Matching is per cluster across all groups; ties keep the first occurrence. This lets mappings affect the final duplicate comparison results. |
+| `epg_output.clear_invalid_ids`             | Bool |    No    | `false` | Clears an EPG ID when it does not resolve to the processed EPG data. Playlist entries are never removed. Smart matching runs first, and IDs introduced or changed by later mappings are validated again before the `persist` filter.                                                                                                                                                                                                                                                                                                                                                              |
+| `epg_output.adopt_guide_id_case`           | Bool |    No    | `true`  | Rewrites a live channel EPG id that matches a guide channel only case-insensitively (for example `usa4k.us` against `<channel id="USA4K.us">`) to the guide's exact spelling, so the M3U `tvg-id`, Xtream `epg_channel_id`, XMLTV `<channel id>` and EPG API lookups use the same id. Set `false` to keep the playlist's original spelling. Changing this option requires a full target refresh.                                                                                                                                                                                                  |
 | `epg_output.lowercase_ids`                 | Bool |    No    | `false` | Canonicalizes visible technical EPG IDs with ASCII lowercase across M3U `tvg-id`, Xtream `epg_channel_id`, XMLTV channel/programme references, and EPG API responses. Changing this option requires a full target refresh.                                                                                                                                                                                                                                                                                                                                                                        |
 | `epg_output.lowercase_xmltv_display_names` | Bool |    No    | `false` | Applies Unicode lowercase exclusively to XMLTV `<display-name>` values during serialization. Playlist names, Xtream names, programme titles, and programme descriptions remain unchanged; persisted target data does not require rebuilding.                                                                                                                                                                                                                                                                                                                                                      |
 | `force_redirect`                           | Bool |    No    | `false` | Optional redirect-related behavior switch. This influences how Tuliprox serves final stream delivery where redirect-style output handling is required by the deployment model.                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -1796,8 +1932,9 @@ targets:
 
 #### EPG Output Normalization
 
-`epg_output` applies to the entire target so every output format uses the same EPG identity space. Both options
-default to `false`; when they are omitted, Tuliprox preserves the source casing and existing output behavior.
+`epg_output` applies to the entire target so every output format uses the same EPG identity space. The two
+lowercase options default to `false`. `adopt_guide_id_case` defaults to `true`, so even when every option is omitted,
+a live channel id that matches a guide channel only case-insensitively is rewritten to the guide id's exact casing.
 
 ```yaml
 targets:
@@ -1840,6 +1977,205 @@ IDs; a configuration hot reload alone is insufficient. Clients may need to re-in
 visible IDs change.
 
 ---
+
+### Target-wide curation (`curation`)
+
+Curation is operator-configured discovery over content already available in this target. It neither imports new playback
+sources nor uses personal watch history, progress, OAuth or recommendations. TMDB Trending works without a Trakt Client ID.
+Legacy [`output[].trakt`](#trakt-object-in-xtream-output) remains supported; existing configurations need no migration.
+
+Start with `catalog_selection: full` to retain the ordinary catalog and add Xtream categories for locally available matches:
+
+```yaml
+# A target under sources[].targets, linked to your authorized movie/TV inputs.
+name: discovery
+curation:
+  catalog_selection: full
+  include_xtream_base_categories: true
+  tmdb:
+    api:
+      access_token: "${env:TMDB_READ_ACCESS_TOKEN}"
+    trending:
+      - kind: movie
+        time_window: week
+        limit: 100
+        category_name: TMDB Weekly Movies
+      - kind: tv
+        time_window: day
+        limit: 100
+        category_name: TMDB Daily TV
+output:
+  - type: xtream
+  - type: m3u
+    filename: discovery.m3u
+```
+
+Obtain your application's **API Read Access Token** from [TMDB API settings](https://www.themoviedb.org/settings/api).
+Configure the raw token without a `Bearer` prefix, preferably through an environment variable. It is sent as a sensitive
+Authorization header, never as a query parameter. There is no bundled discovery token, `api_key` alias, configurable TMDB
+origin, or fallback to `metadata_update.tmdb`. Discovery credentials and enablement are independent of metadata enrichment.
+Missing/blank credentials or values that cannot form an HTTP header leave configuration readable but make an enabled
+selector unavailable without a request. Rejected/expired credentials also fail the refresh, rather than yielding an empty feed.
+
+#### Curation policy and source parameters
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Enables the whole curation block. |
+| `catalog_selection` | `full` | `full` retains the eligible catalog; `curated` keeps the union of selected VOD/series subjects and series children, plus Live. |
+| `include_xtream_base_categories` | `true` | Includes ordinary VOD/Series groups in Xtream alongside projections. Does not affect Live or M3U/STRM grouping. |
+| `trakt` | absent | Optional source with `enabled`, `api`, `lists`, `charts`; reuses the [Trakt selector parameters](#trakt-parameters). |
+| `tmdb` | absent | Optional TMDB Trending source. |
+| `trakt.enabled`, `tmdb.enabled` | `true` | Disabled sources make no requests and contribute no required selectors. |
+| `tmdb.api.access_token` | empty | Explicit TMDB application Read Access Token, required for an active fetch. |
+| `tmdb.trending` | `[]` | Configured Trending selectors. Each active entry is required. |
+| `tmdb.trending[].kind` | required | `movie` or `tv`; no mixed/person endpoint. |
+| `tmdb.trending[].time_window` | required | `day` or `week`. |
+| `tmdb.trending[].limit` | `100` | Integer **1..=500**: up to this many unique remote references, before local matching. |
+| `tmdb.trending[].create_xtream_category` | `true` | Projects a category in Xtream; false makes the selector selection-only. |
+| `tmdb.trending[].category_name` | absent | Nonblank name required for an active projection; retained but unused for selection-only entries. |
+
+There is one catalog policy per target, not one per provider or output. `curation.trakt` does not accept its own
+`catalog_selection` or `include_xtream_base_categories`. An active projection, or suppression of Xtream base categories,
+requires an Xtream output. Projection names involving TMDB must be unique within each media cluster after trimming,
+lowercasing and accent removal, including overlaps with Trakt selectors. A Trakt `both` list reserves both clusters;
+selection-only and disabled sources reserve neither. Existing Trakt-only and ordinary base-group merging is unchanged.
+Category names still participate in alias identity: renaming them does not promise stable virtual IDs.
+
+An enabled non-default policy without active selectors is rejected. An all-default source-less block is a no-op.
+Disabling the whole block preserves incomplete category/credential edits without executing them. Required enum fields
+(`kind`, `time_window`), unknown-field checks and declaration ownership checks still apply to disabled drafts. `limit` must
+remain an integer in range even when the target, block or source is disabled: null, zero, negatives, fractions, quoted
+numbers and overflow are errors, not defaults or clamped values. Saving omits the default 100 and retains non-default limits.
+
+#### Bounded discovery, matching and failure behavior
+
+TMDB requests `/3/trending/movie/{day|week}` or `/3/trending/tv/{day|week}`, with `language=en-US&page=p`, sequentially
+from page 1. Pagination is internal transport, not operator configuration. There is no remote `limit` parameter, Discover
+filtering or details lookup. N counts unique **(movie/TV kind, positive TMDB ID)** references, not local titles, versions,
+aliases or episodes. An unavailable local title still consumes a reference; Tuliprox does not keep searching for N matches.
+
+Selection stops at the Nth unique reference, but the entire last response is read and validated, including duplicates and
+the suffix beyond N. An invalid record anywhere fails the selector. Duplicates keep the first text and rank. Rank is the
+observed row ordinal across actual page lengths, including duplicates, not an ordinal among unique IDs or a fixed page-size
+calculation. No extra page is requested after N or a valid end. A valid end before N is also complete.
+
+Each response must echo the requested page and have coherent totals. A short page alone is not an end. Totals may change;
+the current page's last-page indication is used without assuming a remote snapshot. An empty response is valid only on
+page 1 with zero results and total pages 0 or 1. A later empty page, or a later page with no new IDs (even the last page),
+fails rather than publishing a partial prefix. This deliberately conservative rule can reject a legitimately overlapping
+page. Trending pagination has empirical support; TMDB's public Trending references do not currently document the `page`
+query parameter. If its behavior changes, these checks fail closed, not back to first-page discovery.
+
+Internal guards are independent of `limit` and cannot be configured:
+
+| Resource | Per request | Per TMDB selector | Shared TMDB acquisition batch per target/run |
+| --- | --- | --- | --- |
+| Admitted GET attempts | 1 | 32 | 128 |
+| Absolute deadline | 15 seconds | 60 seconds | 180 seconds |
+| Decoded bytes consumed | 1 MiB | 8 MiB | 32 MiB |
+
+The dedicated configured HTTP profile preserves proxy/authentication, trusted CAs and connect timeout, but always verifies
+TLS certificates and hostnames, even when `accept_insecure_ssl_certificates: true`. A TLS-inspecting proxy with an untrusted
+certificate cannot complete TMDB discovery until valid CA trust is established. This exception does not change Trakt,
+metadata or playback clients. The profile never follows redirects or replays requests. Client construction failures have
+no unconfigured fallback. Attempts are counted before
+sending, and consumed decoded bytes include duplicate/suffix rows and failed bodies; size detection may consume one extra
+byte on failure, never on success. These are not TLS/compressed-byte or total-memory limits. Deadlines cover headers,
+decoding and normalization, do not restart per page/chunk, and are checked before success. They bound TMDB acquisition,
+not inputs, Trakt, local matching or the entire refresh. Acquisition finishes before local matching. There is no feed
+cache or stale-feed fallback. A valid N may not fit these guards: needing another request or byte after exhaustion fails;
+completing exactly at a request/byte boundary succeeds. Do not assume 100 references always require five pages or yield
+100 matches.
+
+Matching is exact by positive TMDB ID **and** movie/TV kind; there is no title/year fuzzy fallback for TMDB. Local items
+without a matching ID are not selected. Distinct local subjects sharing an ID remain distinct; duplicate feed entries keep
+the first rank. Day/week selectors keep independent ranks and memberships; their base selection is unioned by local
+subject, not remote ID. Changing only the limit preserves surviving subject/alias identities when local UUID and category
+name remain unchanged. Remote order applies within each projected category, without globally reordering the base catalog.
+Existing target sorting and filters still apply afterwards. M3U and STRM consume selected ordinary entries, not the new
+Xtream aliases; HDHomeRun follows its existing underlying output.
+
+All enabled Trakt and TMDB selectors, including selection-only selectors, must complete before publication in **both**
+`full` and `curated`. A timeout, resource exhaustion, unsuccessful status, malformed/inconsistent page, invalid ID/media
+kind, lack of pagination progress or any redirect prevents changes to finalized target IDs, files, caches and watches. Successful sibling
+feeds do not authorize partial publication. The first failed run publishes nothing; later failures retain prior artifacts.
+`full` does not make configured discovery optional. Writers remain best-effort after successful curation admission; this
+is not a cross-output storage transaction.
+
+A valid initial empty page and a complete selection with **no local matches are successes**, not errors. In `curated`, either can clear
+published VOD/Series while retaining eligible Live. This can happen when the library lacks trending titles or TMDB IDs.
+Enrichment is separate: rebuild the target after IDs become available. Start with `full` if this narrowing is not intended.
+
+#### Selection-only and mixed sources
+
+M3U/STRM-only targets are supported by explicitly disabling Xtream projection:
+
+```yaml
+name: weekly-m3u
+curation:
+  catalog_selection: curated
+  tmdb:
+    api:
+      access_token: "${env:TMDB_READ_ACCESS_TOKEN}"
+    trending:
+      - kind: movie
+        time_window: week
+        limit: 100
+        create_xtream_category: false
+output:
+  - type: m3u
+    filename: weekly.m3u
+```
+
+To combine sources, add a Trakt source inside the same `curation` block. For example:
+
+```yaml
+trakt:
+  api:
+    api_key: "${env:TRAKT_CLIENT_ID}"
+  charts:
+    - kind: movies
+      chart: popular
+      category_name: Trakt Popular Movies
+      tmdb_only: true
+```
+
+Both providers read the same eligible pre-projection catalog. In `curated`, their selected subjects are unioned once for
+normal outputs; each projected Xtream category retains its own memberships/rank. Either provider failing blocks the run.
+
+#### Explicit migration and Source Editor
+
+At most one non-null declaration surface is allowed: `target.curation` **or** legacy `output[].trakt`. Declaring both is
+an error even if one is disabled, empty or uses only defaults. Null is equivalent to absence. There is no implicit merge,
+precedence or automatic migration.
+
+To migrate an existing Trakt target deliberately:
+
+1. Move its whole-block `enabled`, `catalog_selection` and `include_xtream_base_categories` to `target.curation`.
+2. Move its `api`, `lists` and `charts` into `curation.trakt`; leave this source enabled (the default).
+3. Remove `output[].trakt`. Leave the rest of the output configuration in place.
+
+This preserves the original policy, including a globally disabled block, and the legacy matching/category identity rules.
+Equivalent canonical Trakt-only configurations keep their existing aliases/virtual IDs. Add TMDB only after deliberately
+choosing the shared policy; all newly enabled selectors become required.
+
+The new block is YAML-owned. Source Editor shows a read-only target summary, preserves the block when editing other
+fields, and hides legacy Trakt controls on its connected outputs. Edit provider/policy settings in YAML; there is no TMDB
+query-builder or migration wizard. Read/save/reload preserves configured meaning and ownership, not YAML formatting or
+spelling of defaults/aliases. Backend validation still rejects conflicting declarations introduced by graph edits.
+
+#### TMDB attribution and usage terms
+
+The dashboard version card's **Credits** button displays an approved TMDB logo and the required notice:
+
+> This product uses the TMDB API but is not endorsed or certified by TMDB.
+
+The developer API is free for non-commercial use with attribution. Commercial deployments must assess TMDB's commercial
+licensing requirements; configuring a token does not grant unrestricted commercial use or rights to playback content.
+See the [TMDB FAQ](https://developer.themoviedb.org/docs/faq),
+[branding guidance](https://www.themoviedb.org/about/logos-attribution) and
+[commercial API information](https://www.themoviedb.org/api-for-business).
 
 ### 3.2.7 Output Formats (`output`)
 
@@ -1911,6 +2247,9 @@ output:
 > IP masking, and failover logic for those streams.
 
 #### `trakt` Object in Xtream Output
+
+This is the compatible legacy declaration. For TMDB or combined sources use
+[target-wide `curation`](#target-wide-curation-curation) instead; do not declare both surfaces on one target.
 
 Trakt.tv is an online platform for tracking, organizing, and discovering movies and TV shows. Tuliprox evaluates every
 configured list and chart against the target's merged, deduplicated VOD and series catalog. The resulting exact-entry
@@ -2197,25 +2536,44 @@ favourites:
 
 ### 3.2.9 Watch (`watch`)
 
-For each target with a *unique name*, you can define watched groups.
-It is a list of group patterns Tuliprox monitors for content changes during updates.
+For each target with a *unique name*, you can define watch entries. Each entry is a regex matched against final group
+names and says which changes to report:
 
-If matching groups gain or lose channels, Tuliprox emits a Messaging event such as:
+| `on` value      | Reported change                                                |
+|:----------------|:---------------------------------------------------------------|
+| `channels`      | Channels added to or removed from a matching group.            |
+| `group_added`   | A matching group appeared that was not in the previous update. |
+| `group_removed` | A group that matched in the previous update is gone.           |
 
-* channels added
-* channels removed
+An entry is either a plain string, which means `on: [channels]`, or a map with `pattern` and `on`:
 
 ```yaml
 watch:
-  - group: '^Sports'
-  - group: '^Movies'
+  # Short form: channel changes in all German sports groups.
+  - "^DE Sport.*"
+  # Report new 4K/UHD groups only.
+  - pattern: "(?i)\\b(4K|UHD)\\b"
+    on: [group_added]
+  # Report every group that disappears.
+  - pattern: ".*"
+    on: [group_removed]
+  # Event groups: appearing, disappearing and their channel changes.
+  - pattern: "^Event.*|^PPV.*"
+    on: [channels, group_added, group_removed]
 ```
+
+The first update of a target only records the current state; changes are reported from the second update on. All
+changes of one update arrive as a single `playlist.watch.changed` event.
+
+A `playlist.watch.unmatched` warning is sent for entries that watch `channels` (without `group_added`) and match no
+group. Entries waiting for a group to appear, or reporting only removals, never trigger it.
 
 #### `watch` Parameters
 
-| Parameter | Type           | Required | Default | Technical Impact & Background                                                                                                                                                                                              |
-|:----------|:---------------|:--------:|:--------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `group`   | String (Regex) |   Yes    |         | Regex pattern matched against final group names. This allows Tuliprox to detect meaningful content changes in selected areas of the playlist and notify operators automatically through the configured messaging backends. |
+| Parameter | Type           | Required | Default      | Technical Impact & Background                                         |
+|:----------|:---------------|:--------:|:-------------|:----------------------------------------------------------------------|
+| `pattern` | String (Regex) |   Yes    |              | Regex matched against final group names.                              |
+| `on`      | List           |    No    | `[channels]` | Any of `channels`, `group_added`, `group_removed`. Must not be empty. |
 
 > **Note:** `watch` is especially useful for monitoring premium groups, VOD collections,
 > or unstable provider segments where additions and removals should generate operational alerts.

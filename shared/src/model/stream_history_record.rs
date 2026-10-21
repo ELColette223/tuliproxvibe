@@ -89,6 +89,7 @@ pub enum ConnectFailureReason {
     Preempted,
     SessionExpired,
     Provisioning,
+    Maintenance,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

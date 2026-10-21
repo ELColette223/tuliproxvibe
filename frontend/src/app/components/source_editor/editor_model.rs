@@ -237,6 +237,7 @@ pub struct SourceEditorContext {
     pub filter_rules: Rc<Vec<ManagedFilterRule>>,
     pub open_target_bouquet: Callback<String>,
     pub bouquet_revision: u64,
+    pub output_curation_managed: bool,
     pub edit_mode: UseStateHandle<EditMode>,
     pub allow_write: bool,
 }

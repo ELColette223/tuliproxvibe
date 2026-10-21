@@ -44,6 +44,7 @@ pub(super) async fn hls_manifest_terminal_preflight(
 ) -> HlsManifestTerminalPreflight {
     match &lease.playback_mode {
         HlsLeasePlaybackMode::TerminalTail(_)
+        | HlsLeasePlaybackMode::TerminalCustomResponse(_)
         | HlsLeasePlaybackMode::TerminalUnavailable { .. }
         | HlsLeasePlaybackMode::Ended => return HlsManifestTerminalPreflight::ServeCommittedPlayback,
         HlsLeasePlaybackMode::Live => {}
@@ -183,6 +184,13 @@ pub(super) fn hls_terminal_playback_response(
             };
             Some(hls_response(body.to_owned()))
         }
+        HlsLeasePlaybackMode::TerminalCustomResponse(plan) => {
+            Some(if plan.matches_route(proxy_session_id, access_lease_id) {
+                hls_response(plan.manifest_body().to_owned())
+            } else {
+                StatusCode::NOT_FOUND.into_response()
+            })
+        }
         HlsLeasePlaybackMode::TerminalUnavailable { .. } => Some(StatusCode::SERVICE_UNAVAILABLE.into_response()),
         HlsLeasePlaybackMode::Live => None,
         HlsLeasePlaybackMode::Ended => Some(StatusCode::NOT_FOUND.into_response()),
@@ -210,7 +218,7 @@ async fn current_hls_terminal_lease(
     access_lease_id: &HlsAccessLeaseId,
     now_ms: u64,
 ) -> Result<HlsAccessLease, Box<axum::response::Response>> {
-    app_state.hls_proxy.access_lease_response_snapshot(access_lease_id, proxy_session_id, now_ms).await.ok_or_else(
+    app_state.hls.proxy.access_lease_response_snapshot(access_lease_id, proxy_session_id, now_ms).await.ok_or_else(
         || Box::new(hls_terminal_failed_closed_response(HlsTerminalFailedClosedReason::LeaseStateUnavailable)),
     )
 }
@@ -219,7 +227,7 @@ async fn current_hls_terminal_session(
     app_state: &Arc<AppState>,
     proxy_session_id: &ProxySessionId,
 ) -> Result<HlsSessionHandle, Box<axum::response::Response>> {
-    app_state.hls_proxy.sessions().get_by_proxy_session_id(proxy_session_id).await.ok_or_else(|| {
+    app_state.hls.proxy.sessions().get_by_proxy_session_id(proxy_session_id).await.ok_or_else(|| {
         Box::new(hls_terminal_failed_closed_response(HlsTerminalFailedClosedReason::LeaseStateUnavailable))
     })
 }

@@ -330,7 +330,8 @@ pub(crate) async fn prepare_playlist_for_target<E: EventSink + Clone + 'static, 
         );
         let clear_invalid_epg_ids = target.options.as_ref().is_some_and(ConfigTargetOptions::clear_invalid_epg_ids);
         let input_epg_start = new_epg.len();
-        process_playlist_epg(&mut processed_fpl, &mut new_epg, clear_invalid_epg_ids).await;
+        let epg_assign_options = EpgAssignOptions::from_target_options(target.options.as_ref());
+        process_playlist_epg(&mut processed_fpl, &mut new_epg, epg_assign_options).await;
         log_memory_snapshot(
             format!("target '{}' input '{}' after_epg_apply", target.name, processed_fpl.input.name).as_str(),
         );
@@ -342,6 +343,9 @@ pub(crate) async fn prepare_playlist_for_target<E: EventSink + Clone + 'static, 
             deduplicate.then_some(&mut duplicates),
         ) {
             processed_fpl.source = MemoryPlaylistSource::new(groups).into_source();
+        }
+        if epg_assign_options.adopt_guide_id_case && processed_fpl.epg.is_some() {
+            adopt_guide_live_epg_id_case(&mut processed_fpl, &new_epg[input_epg_start..]);
         }
         if clear_invalid_epg_ids && processed_fpl.epg.is_some() {
             clear_invalid_live_epg_ids(&mut processed_fpl, &new_epg[input_epg_start..]);
@@ -487,9 +491,49 @@ fn finalize_playlist_view(
     playlist
 }
 
+// Keep construction and its diagnostic seam private to the processing boundary.
+// Only fixed phase labels can reach the reporter, never dependency error details.
+pub(super) fn build_target_tmdb_client(
+    target: &ConfigTarget,
+    configure: impl FnOnce() -> Result<reqwest::ClientBuilder, TuliproxError>,
+    report: impl FnOnce(&'static str),
+) -> Option<reqwest::Client> {
+    let needs_tmdb = target.curation.as_ref().is_some_and(|config| {
+        config.enabled && config.tmdb.as_ref().is_some_and(|source| source.enabled && !source.trending.is_empty())
+    });
+    if !needs_tmdb {
+        return None;
+    }
+    let Ok(builder) = configure() else {
+        report("phase=profile_configuration");
+        return None;
+    };
+    if let Ok(client) = builder.build() {
+        Some(client)
+    } else {
+        report("phase=client_build");
+        None
+    }
+}
 pub(crate) async fn finalize_prepared_target<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
     ctx: Arc<PlaylistProcessingContext<E, M>>,
     prepared: PreparedTarget,
+) -> (Result<(), Vec<TuliproxError>>, Vec<TuliproxError>) {
+    // Keep TMDB transport settings independent of the generic client.
+    let tmdb_client = build_target_tmdb_client(
+        &prepared.target,
+        || tuliprox_core::utils::network::request::create_tmdb_client(&ctx.config),
+        |phase| {
+            warn!("TMDB discovery client unavailable: target_id={} run_id={} {phase}", prepared.target.id, ctx.run_id);
+        },
+    );
+    finalize_prepared_target_with_tmdb(ctx, prepared, tmdb_client.as_ref()).await
+}
+
+pub(super) async fn finalize_prepared_target_with_tmdb<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
+    ctx: Arc<PlaylistProcessingContext<E, M>>,
+    prepared: PreparedTarget,
+    tmdb_client: Option<&reqwest::Client>,
 ) -> (Result<(), Vec<TuliproxError>>, Vec<TuliproxError>) {
     let target = &prepared.target;
     let mut new_playlist = prepared.playlist;
@@ -519,13 +563,7 @@ pub(crate) async fn finalize_prepared_target<E: EventSink + Clone + 'static, M: 
             target.name
         ))]), errors);
     }
-    let views = match prepare_target_playlist_views(&ctx.client, target, eligible_catalog).await {
-        Ok(views) => views,
-        Err(error) => {
-            step.stop("Curation failed; skipping persist to preserve finalized artifacts");
-            return (Err(vec![error]), errors);
-        }
-    };
+    let views = prepare_target_playlist_views(&ctx.client, tmdb_client, target, eligible_catalog).await;
     if views.base.is_empty()
         && views.xtream.is_none()
         && views.publication_plan == PlaylistPublicationPlan::Ordinary
@@ -615,9 +653,9 @@ pub(crate) async fn playlist_resolve<E: EventSink + Clone + 'static, M: Metadata
     provider_fpl: &mut FetchedPlaylist<'_>,
     processed_fpl: &mut FetchedPlaylist<'_>,
 ) {
-    // Offline target rebuilds use only the persisted input. Resolution and probes
-    // can call the provider or queue background network work even after cache load.
-    if ctx.offline_target_reprocess {
+    // Offline target rebuilds use only the persisted input, and an input in maintenance keeps
+    // what it has: resolution and probes would contact the provider either way.
+    if ctx.offline_target_reprocess || ctx.is_input_in_maintenance(&processed_fpl.input.name) {
         return;
     }
     playlist_resolve_series(ctx, target, errors, pipe, provider_fpl, processed_fpl).await;
@@ -913,20 +951,24 @@ pub(crate) struct TargetPlaylistViews {
 pub(crate) fn build_curated_playlist_views(
     playlist: Vec<PlaylistGroup>,
     evaluation: &CurationEvaluation,
-    trakt_config: &TraktConfig,
+    config: &CurationConfig,
     appearance_filter_configured: bool,
+    has_xtream_output: bool,
 ) -> TargetPlaylistViews {
-    let curated_catalog = trakt_config.catalog_selection.is_curated();
-    let mut categories = project_trakt_categories(evaluation, &playlist, trakt_config);
+    let curated_catalog = config.catalog_selection.is_curated();
+    let categories = has_xtream_output.then(|| project_curation_categories(evaluation, &playlist, config));
     let base = select_target_catalog(playlist, evaluation, curated_catalog);
-    let mut xtream = if trakt_config.include_xtream_base_categories { base.clone() } else { live_only(&base) };
-    xtream.append(&mut categories);
+    let xtream = categories.map(|mut categories| {
+        let mut view = if config.include_xtream_base_categories { base.clone() } else { live_only(&base) };
+        view.append(&mut categories);
+        view
+    });
     TargetPlaylistViews {
         base,
-        xtream: Some(xtream),
+        xtream,
         publication_plan: PlaylistPublicationPlan::complete_curation_with_filter(
             curated_catalog,
-            !trakt_config.include_xtream_base_categories,
+            has_xtream_output && !config.include_xtream_base_categories,
             appearance_filter_configured,
         ),
     }
@@ -934,39 +976,56 @@ pub(crate) fn build_curated_playlist_views(
 
 pub(crate) async fn prepare_target_playlist_views(
     client: &reqwest::Client,
+    tmdb_client: Option<&reqwest::Client>,
     target: &ConfigTarget,
     playlist: Vec<PlaylistGroup>,
-) -> Result<TargetPlaylistViews, TuliproxError> {
-    let Some(trakt_config) = target.get_xtream_output().and_then(|xtream| xtream.trakt.as_ref()) else {
-        return Ok(TargetPlaylistViews {
+) -> TargetPlaylistViews {
+    let Some(config) = target.effective_curation() else {
+        return TargetPlaylistViews {
             base: playlist,
             xtream: None,
             publication_plan: PlaylistPublicationPlan::Ordinary,
-        });
+        };
     };
 
-    match evaluate_trakt_curation(client, &playlist, &target.name, trakt_config).await {
-        CurationRunOutcome::NotConfigured => Ok(TargetPlaylistViews {
-            base: playlist,
-            xtream: None,
-            publication_plan: PlaylistPublicationPlan::Ordinary,
-        }),
-        CurationRunOutcome::Failed(failure) => Err(curation_failure_error(&target.name, &failure)),
+    let outcome = evaluate_curation(client, tmdb_client, &playlist, &target.name, &config).await;
+    curation_playlist_views(target, playlist, &config, outcome)
+}
+
+pub(super) fn curation_playlist_views(
+    target: &ConfigTarget,
+    playlist: Vec<PlaylistGroup>,
+    config: &CurationConfig,
+    outcome: CurationRunOutcome,
+) -> TargetPlaylistViews {
+    match outcome {
+        CurationRunOutcome::NotConfigured => {
+            TargetPlaylistViews { base: playlist, xtream: None, publication_plan: PlaylistPublicationPlan::Ordinary }
+        }
+        CurationRunOutcome::Failed(failure) => {
+            warn_curation_failure(&target.name, &failure);
+            // Discovery is optional; unavailable selections must not suppress the source catalog or EPG.
+            TargetPlaylistViews { base: playlist, xtream: None, publication_plan: PlaylistPublicationPlan::Ordinary }
+        }
         CurationRunOutcome::Complete(evaluation) => {
-            let views =
-                build_curated_playlist_views(playlist, &evaluation, trakt_config, target.filter.persist.is_some());
+            let views = build_curated_playlist_views(
+                playlist,
+                &evaluation,
+                config,
+                target.filter.persist.is_some(),
+                target.get_xtream_output().is_some(),
+            );
             info!(
                 "Target '{}' curation completed with {} memberships and {} Xtream groups",
                 target.name,
                 evaluation.memberships.len(),
                 views.xtream.as_deref().map_or(0, <[PlaylistGroup]>::len)
             );
-            Ok(views)
+            views
         }
     }
 }
-
-fn curation_failure_error(target_name: &str, failure: &CurationFailure) -> TuliproxError {
+fn warn_curation_failure(target_name: &str, failure: &CurationFailure) {
     let mut complete = 0usize;
     let mut incomplete = 0usize;
     let mut unavailable = 0usize;
@@ -977,9 +1036,9 @@ fn curation_failure_error(target_name: &str, failure: &CurationFailure) -> Tulip
             SelectorOutcome::Unavailable { .. } => unavailable += 1,
         }
     }
-    TuliproxError::RepositoryPlaylist(format!(
-        "Target '{target_name}' curation refresh failed (complete selectors: {complete}, incomplete: {incomplete}, unavailable: {unavailable}); existing finalized artifacts were retained"
-    ))
+    warn!(
+        "Target '{target_name}' curation refresh failed (complete selectors: {complete}, incomplete: {incomplete}, unavailable: {unavailable}); continuing with the regular catalog"
+    );
 }
 
 fn item_subject_uuid(item: &PlaylistItem) -> UUIDType {
@@ -1095,34 +1154,48 @@ pub(crate) async fn process_watch<E: EventSink>(
         return false;
     }
 
+    // One snapshot for the whole refresh rather than a config load per group.
+    let config = app_config.config.load_full();
+    let storage_dir = config.storage_dir.as_str();
+
     // Before the per-group fan-out: this is about which groups exist, not
     // what is inside the ones the patterns name, so it must see every group
     // rather than only the watched ones.
-    process_target_groups_watch(app_config, events, &target.name, new_playlist).await;
+    let group_changes = diff_target_groups(storage_dir, events, &target.name, new_playlist, watches).await;
 
+    // Only `channels` entries are matched against the current groups: they
+    // pick the groups to diff, and they are the only ones the unmatched
+    // warning reports on (`ConfigWatch::reports_unmatched`). Once a group is
+    // watched, an entry that already matched elsewhere needs no regex run.
     let mut matched = vec![false; watches.len()];
-    let mut watched_groups = Vec::new();
+    let mut group_watches = Vec::new();
     for group in new_playlist {
-        let mut any = false;
-        for (index, pattern) in watches.iter().enumerate() {
-            if pattern.is_match(&group.title) {
+        let mut watch_channels = false;
+        for (index, watch) in watches.iter().enumerate() {
+            if !watch.contexts.contains(WatchContext::Channels) || (watch_channels && matched[index]) {
+                continue;
+            }
+            if watch.pattern.is_match(&group.title) {
                 matched[index] = true;
-                any = true;
+                watch_channels = true;
             }
         }
-        if any {
-            watched_groups.push(group);
+        if watch_channels {
+            // Futures built up front: a lazy `map` closure over borrowed state
+            // trips the higher-ranked `Send` check of the spawned pipeline task.
+            group_watches.push(process_group_watch(storage_dir, events, &target.name, group));
         }
     }
 
-    // A pattern that matches nothing looks exactly like a group that has not
-    // changed. `EventKindMask::from_wire_names` already reports unmatched
-    // subscription names for the same reason: a typo must surface.
+    // A channel pattern that matches nothing looks exactly like a group that
+    // has not changed, so a typo must surface. Entries waiting for a group to
+    // appear, and removal-only entries, match nothing by design.
+    // `EventKindMask::from_wire_names` reports unmatched names for the same reason.
     let unmatched: Vec<String> = watches
         .iter()
-        .enumerate()
-        .filter(|(index, _)| !matched[*index])
-        .map(|(_, pattern)| pattern.as_str().to_string())
+        .zip(&matched)
+        .filter(|(watch, matched)| !**matched && watch.reports_unmatched())
+        .map(|(watch, _)| watch.pattern.as_str().to_string())
         .collect();
     if !unmatched.is_empty() {
         warn!("target '{}' has {} watch pattern(s) matching no group", target.name, unmatched.len());
@@ -1133,11 +1206,12 @@ pub(crate) async fn process_watch<E: EventSink>(
         )));
     }
 
-    futures::stream::iter(
-        watched_groups.into_iter().map(|pl| process_group_watch(app_config, events, &target.name, pl)),
-    )
-    .for_each_concurrent(16, |f| f)
-    .await;
+    let channel_diffs: Vec<_> =
+        futures::stream::iter(group_watches).buffer_unordered(16).filter_map(futures::future::ready).collect().await;
+
+    if let Some(changes) = assemble_watch_changes(&target.name, group_changes, channel_diffs) {
+        events.emit(EventMessage::PlaylistWatchChanged(changes));
+    }
 
     true
 }

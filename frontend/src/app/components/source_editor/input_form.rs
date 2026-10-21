@@ -22,8 +22,7 @@ use crate::{
     app::{
         components::{
             config::HasFormData, AliasItemForm, BlockId, BlockInstance, Card, EditMode, EpgSmartMatchForm,
-            EpgSourceItemForm, IconButton, Panel, ProviderItemForm, SourceEditorContext, Tag, TagList, TextButton,
-            TitledCard,
+            EpgSourceItemForm, IconButton, Panel, ProviderItemForm, SourceEditorContext, TextButton,
         },
         ConfigContext,
     },
@@ -35,9 +34,9 @@ use shared::{
     error::TuliproxError,
     model::{
         ConfigInputAliasDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto, ConfigInputUpdateQualityDto,
-        ConfigProviderDto, ConnectionLimitPolicy, EpgSmartMatchConfigDto, EpgSourceDto, InputFetchMethod, InputType,
-        MediaServerInputConfigDto, MediaServerLibrarySelector, OnConnectErrorPolicy, ProviderUrlSelectionPolicy,
-        ProxyConfigDto, ResourcePolicyDto, StagedInputType, StalkerDeviceProfileDto, StalkerInputConfigDto,
+        ConfigProviderDto, ConnectionLimitPolicy, EpgSmartMatchConfigDto, EpgSourceDto, FlussonicHlsCatchup,
+        InputFetchMethod, InputType, MediaServerInputConfigDto, MediaServerLibrarySelector, OnConnectErrorPolicy,
+        ProviderUrlSelectionPolicy, ProxyConfigDto, StagedInputType, StalkerDeviceProfileDto, StalkerInputConfigDto,
     },
     utils::{Internable, BATCH_SCHEME_PREFIX},
 };
@@ -94,6 +93,7 @@ pub(super) const LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP: &str =
     "LABEL.CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP";
 pub(super) const LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL: &str =
     "LABEL.CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL";
+const LABEL_FLUSSONIC_HLS_AUDIO_TRACKS: &str = "LABEL.FLUSSONIC_HLS_AUDIO_TRACKS";
 const LABEL_RESOLVE_TMDB: &str = "LABEL.RESOLVE_TMDB";
 const LABEL_RESOLVE: &str = "LABEL.RESOLVE";
 const LABEL_PROBE: &str = "LABEL.PROBE";
@@ -127,11 +127,6 @@ const LABEL_SERVER_ID: &str = "LABEL.SERVER_ID";
 const LABEL_SERVER_NAME: &str = "LABEL.SERVER_NAME";
 const LABEL_PREFER_HTTPS: &str = "LABEL.PREFER_HTTPS";
 const LABEL_ALLOW_RELAY: &str = "LABEL.ALLOW_RELAY";
-const LABEL_RESOURCE_POLICY: &str = "LABEL.RESOURCE_POLICY";
-const LABEL_RESOURCE_ALLOWED_HOSTS: &str = "LABEL.RESOURCE_ALLOWED_HOSTS";
-const LABEL_RESOURCE_ALLOWED_NETWORKS: &str = "LABEL.RESOURCE_ALLOWED_NETWORKS";
-const LABEL_ADD_HOST: &str = "LABEL.ADD_HOST";
-const LABEL_ADD_NETWORK: &str = "LABEL.ADD_NETWORK";
 
 fn input_persist_hint_key(staged_input: bool) -> &'static str {
     if staged_input {
@@ -261,7 +256,6 @@ const LABEL_EDIT_EPG_SMART_MATCH: &str = "LABEL.EDIT_EPG_SMART_MATCH";
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum InputFormPage {
     Main,
-    ResourcePolicy,
     Device,
     Options,
     Libraries,
@@ -272,7 +266,6 @@ enum InputFormPage {
 
 impl InputFormPage {
     const MAIN: &str = "Main";
-    const RESOURCE_POLICY: &str = "ResourcePolicy";
     const DEVICE: &str = "Device";
     const OPTIONS: &str = "Options";
     const LIBRARIES: &str = "Libraries";
@@ -287,7 +280,6 @@ impl FromStr for InputFormPage {
     fn from_str(s: &str) -> Result<Self, TuliproxError> {
         match s {
             Self::MAIN => Ok(InputFormPage::Main),
-            Self::RESOURCE_POLICY => Ok(InputFormPage::ResourcePolicy),
             Self::DEVICE => Ok(InputFormPage::Device),
             Self::OPTIONS => Ok(InputFormPage::Options),
             Self::LIBRARIES => Ok(InputFormPage::Libraries),
@@ -306,7 +298,6 @@ impl Display for InputFormPage {
             "{}",
             match *self {
                 InputFormPage::Main => Self::MAIN,
-                InputFormPage::ResourcePolicy => Self::RESOURCE_POLICY,
                 InputFormPage::Device => Self::DEVICE,
                 InputFormPage::Options => Self::OPTIONS,
                 InputFormPage::Libraries => Self::LIBRARIES,
@@ -322,7 +313,6 @@ impl Internable for InputFormPage {
     fn intern(self) -> Arc<str> {
         match self {
             Self::Main => Self::MAIN,
-            Self::ResourcePolicy => Self::RESOURCE_POLICY,
             Self::Device => Self::DEVICE,
             Self::Options => Self::OPTIONS,
             Self::Libraries => Self::LIBRARIES,
@@ -351,27 +341,8 @@ fn input_form_pages(input_type: shared::model::InputType) -> Vec<InputFormPage> 
     if !input_type.is_library() && !input_type.is_staged() && !input_type.is_media_server() {
         pages.extend([InputFormPage::Epg, InputFormPage::Provider]);
     }
-    pages.push(InputFormPage::ResourcePolicy);
     pages
 }
-
-fn normalized_resource_policy(mut policy: ResourcePolicyDto) -> Option<ResourcePolicyDto> {
-    fn normalize(values: &mut Vec<String>) {
-        values.iter_mut().for_each(|value| *value = value.trim().to_string());
-        values.retain(|value| !value.is_empty());
-        values.dedup();
-    }
-
-    normalize(&mut policy.allowed_hosts);
-    normalize(&mut policy.allowed_networks);
-    (!policy.is_empty()).then_some(policy)
-}
-
-fn resource_policy_tags(values: &[String]) -> Vec<Rc<Tag>> {
-    values.iter().map(|value| Rc::new(Tag { label: value.clone(), class: None })).collect()
-}
-
-fn tag_values(tags: Vec<Rc<Tag>>) -> Vec<String> { tags.into_iter().map(|tag| tag.label.clone()).collect() }
 
 fn normalize_optional_device_field(value: &mut Option<String>) {
     *value = value.take().and_then(|value| {
@@ -411,7 +382,10 @@ generate_form_reducer!(
       XtreamLiveStreamUsePrefix => xtream_live_stream_use_prefix: bool,
       XtreamLiveStreamWithoutExtension => xtream_live_stream_without_extension: bool,
       DisableHlsStreaming => disable_hls_streaming: bool,
+      FlussonicHlsCatchup => flussonic_hls_catchup: FlussonicHlsCatchup,
+      FlussonicHlsCatchupMaxDurationSecs => flussonic_hls_catchup_max_duration_secs: u32,
       UserAgentStreamIndex => user_agent_stream_index: bool,
+      FlussonicHlsAudioTracks => flussonic_hls_audio_tracks: bool,
       ResolveTmdb => resolve_tmdb: bool,
       ResolveBackground => resolve_background: bool,
       ResolveSeries => resolve_series: bool,
@@ -448,7 +422,6 @@ generate_form_reducer!(
         MediaServer => media_server: Option<MediaServerInputConfigDto>,
         ExpDate => exp_date: Option<i64>,
         CacheDuration => cache_duration: Option<String>,
-        ResourcePolicy => resource_policy: Option<ResourcePolicyDto>,
     }
 );
 
@@ -943,55 +916,6 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
         }
     };
 
-    let render_resource_policy = || {
-        let policy = input_form_state.form.resource_policy.clone().unwrap_or_default();
-        let allowed_hosts = resource_policy_tags(&policy.allowed_hosts);
-        let allowed_networks = resource_policy_tags(&policy.allowed_networks);
-        let handle_hosts_change = {
-            let state = input_form_state.clone();
-            Callback::from(move |tags: Vec<Rc<Tag>>| {
-                let mut policy = state.form.resource_policy.clone().unwrap_or_default();
-                policy.allowed_hosts = tag_values(tags);
-                state.dispatch(ConfigInputFormAction::ResourcePolicy(normalized_resource_policy(policy)));
-            })
-        };
-        let handle_networks_change = {
-            let state = input_form_state.clone();
-            Callback::from(move |tags: Vec<Rc<Tag>>| {
-                let mut policy = state.form.resource_policy.clone().unwrap_or_default();
-                policy.allowed_networks = tag_values(tags);
-                state.dispatch(ConfigInputFormAction::ResourcePolicy(normalized_resource_policy(policy)));
-            })
-        };
-
-        html! {
-            <Card class="tp__config-view__card">
-                <TitledCard title={translate.t(LABEL_RESOURCE_POLICY)}>
-                    { config_field_child!(translate.t(LABEL_RESOURCE_ALLOWED_HOSTS), "INPUT_FORM.RESOURCE_POLICY_ALLOWED_HOSTS", {
-                        html! {
-                            <TagList
-                                tags={allowed_hosts}
-                                readonly={!props.allow_write}
-                                placeholder={translate.t(LABEL_ADD_HOST)}
-                                on_change={handle_hosts_change}
-                            />
-                        }
-                    })}
-                    { config_field_child!(translate.t(LABEL_RESOURCE_ALLOWED_NETWORKS), "INPUT_FORM.RESOURCE_POLICY_ALLOWED_NETWORKS", {
-                        html! {
-                            <TagList
-                                tags={allowed_networks}
-                                readonly={!props.allow_write}
-                                placeholder={translate.t(LABEL_ADD_NETWORK)}
-                                on_change={handle_networks_change}
-                            />
-                        }
-                    })}
-                </TitledCard>
-            </Card>
-        }
-    };
-
     let render_alias = || {
         let aliases = aliases_state.clone();
         let show_alias_form = show_alias_form_state.clone();
@@ -1348,7 +1272,6 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
 
         Callback::from(move |_| {
             let mut input = input_form_state.data().clone();
-            input.resource_policy = input.resource_policy.take().and_then(normalized_resource_policy);
 
             let options = input_options_state.data();
             input.options = if options.is_empty() { None } else { Some(options.clone()) };
@@ -1430,9 +1353,6 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                 <Panel value={InputFormPage::Main.intern()} active={view_visible.intern()}>
                     {render_main()}
                 </Panel>
-                <Panel value={InputFormPage::ResourcePolicy.intern()} active={view_visible.intern()}>
-                    {render_resource_policy()}
-                </Panel>
                 { html_if!(stalker_input, {
                     <Panel value={InputFormPage::Device.intern()} active={view_visible.intern()}>
                         <StalkerDeviceInputForm state={stalker_device_state.clone()} allow_write={props.allow_write} />
@@ -1497,7 +1417,6 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
             <IconButton class={format!("tp__app-sidebar-menu--{}{}", InputFormPage::Provider, if *view_visible == InputFormPage::Provider { " active" } else {""})}  icon="Dns" hint={translate.t(LABEL_PROVIDER)} name={InputFormPage::Provider.to_string()} onclick={&handle_menu_click}></IconButton>
                 </>
              })}
-            <IconButton class={format!("tp__app-sidebar-menu--{}{}", InputFormPage::ResourcePolicy, if *view_visible == InputFormPage::ResourcePolicy { " active" } else {""})} icon="Shield" hint={translate.t(LABEL_RESOURCE_POLICY)} name={InputFormPage::ResourcePolicy.to_string()} onclick={&handle_menu_click}></IconButton>
           </div>
         }
     };
@@ -1534,32 +1453,6 @@ mod tests {
     fn media_server_libraries_page_round_trips() {
         assert_eq!(InputFormPage::from_str(InputFormPage::LIBRARIES).ok(), Some(InputFormPage::Libraries));
         assert_eq!(InputFormPage::Libraries.to_string(), InputFormPage::LIBRARIES);
-    }
-
-    #[test]
-    fn resource_policy_page_is_available_for_every_input_family() {
-        assert_eq!(InputFormPage::from_str(InputFormPage::RESOURCE_POLICY).ok(), Some(InputFormPage::ResourcePolicy));
-        assert_eq!(InputFormPage::ResourcePolicy.to_string(), InputFormPage::RESOURCE_POLICY);
-        for input_type in [InputType::M3u, InputType::Xtream, InputType::Stalker, InputType::Library, InputType::Plex] {
-            assert!(input_form_pages(input_type).contains(&InputFormPage::ResourcePolicy));
-        }
-    }
-
-    #[test]
-    fn resource_policy_materialization_trims_values_and_omits_empty_policy() {
-        let policy = ResourcePolicyDto {
-            allowed_hosts: vec![" media.home.arpa ".to_string(), String::new()],
-            allowed_networks: vec![" 192.168.50.0/24 ".to_string()],
-        };
-
-        assert_eq!(
-            normalized_resource_policy(policy),
-            Some(ResourcePolicyDto {
-                allowed_hosts: vec!["media.home.arpa".to_string()],
-                allowed_networks: vec!["192.168.50.0/24".to_string()],
-            })
-        );
-        assert_eq!(normalized_resource_policy(ResourcePolicyDto::default()), None);
     }
 
     #[test]
@@ -1654,6 +1547,31 @@ mod tests {
     }
 
     #[test]
+    fn flussonic_catchup_reducer_loads_changes_and_serializes_select_values() -> Result<(), serde_json::Error> {
+        let loaded = ConfigInputOptionsDto {
+            flussonic_hls_catchup: FlussonicHlsCatchup::BoundedArchive,
+            user_agent_stream_index: true,
+            ..ConfigInputOptionsDto::default()
+        };
+        let state = Rc::new(ConfigInputOptionsDtoFormState { form: ConfigInputOptionsDto::default(), modified: false })
+            .reduce(ConfigInputOptionsFormAction::SetAll(loaded.clone()));
+        assert_eq!(state.form, loaded);
+        assert!(!state.modified());
+        let state = state.reduce(ConfigInputOptionsFormAction::FlussonicHlsCatchupMaxDurationSecs(1800));
+        assert!(state.modified());
+        for value in [FlussonicHlsCatchup::Native, FlussonicHlsCatchup::BoundedArchive] {
+            let changed = state.clone().reduce(ConfigInputOptionsFormAction::FlussonicHlsCatchup(value));
+            assert!(changed.modified());
+            assert!(changed.form.user_agent_stream_index);
+            let saved = serde_json::to_string(changed.data())?;
+            let reloaded: ConfigInputOptionsDto = serde_json::from_str(&saved)?;
+            assert_eq!(reloaded.flussonic_hls_catchup, value);
+            assert_eq!(reloaded.flussonic_hls_catchup_max_duration_secs, 1800);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn update_quality_translations_exist_in_every_frontend_locale() -> Result<(), serde_json::Error> {
         let locales = [
             ("en", include_str!("../../../../public/assets/i18n/en.json")),
@@ -1664,37 +1582,6 @@ mod tests {
         for (locale, source) in locales {
             let translations: serde_json::Value = serde_json::from_str(source)?;
             for pointer in ["/LABEL/UPDATE_QUALITY", "/EXPLANATION/INPUT_FORM/UPDATE_QUALITY"] {
-                assert!(
-                    translations
-                        .pointer(pointer)
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|value| !value.is_empty()),
-                    "missing {pointer} translation for {locale}"
-                );
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn resource_policy_translations_exist_in_every_frontend_locale() -> Result<(), serde_json::Error> {
-        let locales = [
-            ("en", include_str!("../../../../public/assets/i18n/en.json")),
-            ("ru", include_str!("../../../../public/assets/i18n/ru.json")),
-            ("ar", include_str!("../../../../public/assets/i18n/ar.json")),
-        ];
-
-        for (locale, source) in locales {
-            let translations: serde_json::Value = serde_json::from_str(source)?;
-            for pointer in [
-                "/LABEL/RESOURCE_POLICY",
-                "/LABEL/RESOURCE_ALLOWED_HOSTS",
-                "/LABEL/RESOURCE_ALLOWED_NETWORKS",
-                "/LABEL/ADD_HOST",
-                "/LABEL/ADD_NETWORK",
-                "/EXPLANATION/INPUT_FORM/RESOURCE_POLICY_ALLOWED_HOSTS",
-                "/EXPLANATION/INPUT_FORM/RESOURCE_POLICY_ALLOWED_NETWORKS",
-            ] {
                 assert!(
                     translations
                         .pointer(pointer)
@@ -1780,7 +1667,7 @@ mod browser_tests {
         let body = document.body().ok_or_else(|| wasm_bindgen::JsValue::from_str("test document has no body"))?;
         let root = document.create_element("div")?;
         body.append_child(&root)?;
-        Renderer::<M3uRefreshHarness>::with_root(root.clone()).render();
+        let handle = Renderer::<M3uRefreshHarness>::with_root(root.clone()).render();
         settle_render().await;
         assert_eq!(rendered_name(&root).as_deref(), Some("first"));
 
@@ -1793,6 +1680,9 @@ mod browser_tests {
         settle_render().await;
 
         assert_eq!(rendered_name(&root).as_deref(), Some("second"));
+        // Unmount so providers rendered outside the root do not leak into later browser tests.
+        handle.destroy();
+        settle_render().await;
         root.remove();
         Ok(())
     }

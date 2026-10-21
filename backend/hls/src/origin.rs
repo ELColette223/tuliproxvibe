@@ -227,7 +227,15 @@ impl fmt::Debug for HlsOriginAccountIoLeaseGuard {
 }
 
 impl HlsOriginAccountIoLeaseGuard {
-    pub fn new(binding: HlsOriginAccountBinding, lease: Arc<HlsOriginAccountIoLease>) -> Self {
+    pub fn new(mut binding: HlsOriginAccountBinding, lease: Arc<HlsOriginAccountIoLease>) -> Self {
+        {
+            let handle = lease.provider_handle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(handle) = handle.as_ref() {
+                // A joining caller may still carry the expired predecessor's lease metadata.
+                binding.playback_request_id = handle.playback_request_id;
+                binding.provider_binding_tag = handle.binding_tag;
+            }
+        }
         Self { binding, lease, disarmed: false }
     }
 
@@ -512,12 +520,14 @@ pub enum HlsOriginAccountStatus {
     Known,
     Missing,
     Expired,
+    Blocked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HlsBoundAccountAcquireErrorKind {
     Missing,
     Expired,
+    Blocked,
     Exhausted,
     ReservedForOther,
     Detached,
@@ -528,12 +538,20 @@ pub enum HlsBoundAccountAcquireErrorKind {
 }
 
 impl HlsBoundAccountAcquireErrorKind {
-    pub fn allows_rebind(self) -> bool { matches!(self, Self::Missing | Self::Expired) }
+    pub fn allows_rebind(self) -> bool { matches!(self, Self::Missing | Self::Expired | Self::Blocked) }
 
     pub fn is_retryable_resource_failure(self) -> bool {
+        // A competing session or an in-flight binding handoff can temporarily
+        // deny origin I/O. Retry acquisition within the existing resource
+        // budget; never bypass ownership checks or rebind on this error.
         matches!(
             self,
-            Self::Exhausted | Self::WaitTimedOut | Self::AcquireTimedOut | Self::StoreRace | Self::Unavailable
+            Self::Exhausted
+                | Self::ReservedForOther
+                | Self::WaitTimedOut
+                | Self::AcquireTimedOut
+                | Self::StoreRace
+                | Self::Unavailable
         )
     }
 
@@ -541,6 +559,7 @@ impl HlsBoundAccountAcquireErrorKind {
         match self {
             Self::Missing => "Missing",
             Self::Expired => "Expired",
+            Self::Blocked => "Blocked",
             Self::Exhausted => "Exhausted",
             Self::ReservedForOther => "ReservedForOther",
             Self::Detached => "Detached",
@@ -626,6 +645,9 @@ pub struct HlsOriginIoContext {
     pub reservation_ttl_secs: u64,
     pub preacquired_provider_handle: Option<Arc<std::sync::Mutex<Option<tuliprox_session::ManagedProviderHandle>>>>,
     pub started_generation: Option<u64>,
+    pub prepared_account: Option<crate::origin_account_runtime::HlsOriginAccountSnapshot>,
+    pub playback_kind: PlaybackKind,
+    pub account_runtime: Option<Arc<dyn crate::origin_account_runtime::HlsOriginAccountRuntime>>,
 }
 
 impl HlsOriginIoContext {
@@ -638,6 +660,11 @@ impl HlsOriginIoContext {
         let managed =
             tuliprox_session::ManagedProviderHandle::new(Arc::clone(&self.ctx.active_provider), provider_handle);
         self.preacquired_provider_handle = Some(Arc::new(std::sync::Mutex::new(Some(managed))));
+        self
+    }
+
+    pub fn with_managed_provider_handle(mut self, handle: tuliprox_session::ManagedProviderHandle) -> Self {
+        self.preacquired_provider_handle = Some(Arc::new(std::sync::Mutex::new(Some(handle))));
         self
     }
 
@@ -665,6 +692,9 @@ pub fn hls_origin_account_status(ctx: &HlsCtx, binding: &HlsOriginAccountBinding
     if is_input_expired(provider_config.exp_date()) {
         return HlsOriginAccountStatus::Expired;
     }
+    if provider_config.is_account_blocked() {
+        return HlsOriginAccountStatus::Blocked;
+    }
     HlsOriginAccountStatus::Known
 }
 
@@ -675,6 +705,7 @@ pub fn acquire_bound_hls_origin_account_handle(
     allow_grace: bool,
     priority: i8,
     connection_kind: ConnectionKind,
+    playback_kind: PlaybackKind,
 ) -> Result<ProviderHandle, HlsBoundAccountAcquireErrorKind> {
     if binding.is_detached() {
         return Err(HlsBoundAccountAcquireErrorKind::Detached);
@@ -682,6 +713,7 @@ pub fn acquire_bound_hls_origin_account_handle(
     match hls_origin_account_status(ctx, binding) {
         HlsOriginAccountStatus::Missing => return Err(HlsBoundAccountAcquireErrorKind::Missing),
         HlsOriginAccountStatus::Expired => return Err(HlsBoundAccountAcquireErrorKind::Expired),
+        HlsOriginAccountStatus::Blocked => return Err(HlsBoundAccountAcquireErrorKind::Blocked),
         HlsOriginAccountStatus::Known => {}
     }
     if ctx.active_provider.is_provider_reserved_for_other_session(&binding.account_name, Some(&binding.session_owner)) {
@@ -693,7 +725,7 @@ pub fn acquire_bound_hls_origin_account_handle(
         allow_grace,
         priority,
         connection_kind,
-        Some(PlaybackLeaseRef::new(&binding.session_owner, PlaybackKind::LiveHls)),
+        Some(PlaybackLeaseRef::new(&binding.session_owner, playback_kind)),
     );
     if let Some(handle) = handle {
         return Ok(handle);
@@ -742,6 +774,13 @@ async fn begin_hls_origin_account_io_inner(
     let slot = reserve_hls_origin_account_io_slot(session, binding, deadline).await?;
     if let HlsOriginAccountIoSlot::Joined(lease) = slot {
         let guard = HlsOriginAccountIoLeaseGuard::new(binding.clone(), lease);
+        match hls_origin_account_status(&origin_io.ctx, binding) {
+            HlsOriginAccountStatus::Known => {}
+            HlsOriginAccountStatus::Missing => return Err(HlsBoundAccountAcquireErrorKind::Missing),
+            HlsOriginAccountStatus::Expired => return Err(HlsBoundAccountAcquireErrorKind::Expired),
+            HlsOriginAccountStatus::Blocked => return Err(HlsBoundAccountAcquireErrorKind::Blocked),
+        }
+
         // Release any unused pre-acquired handle synchronously on drop. It needs no
         // cleanup permit, so a join cannot self-block on a single-permit cleanup queue.
         drop(origin_io.take_preacquired_provider_handle());
@@ -758,6 +797,12 @@ async fn begin_hls_origin_account_io_inner(
     let cleanup_permit = reserve_cleanup_permit(origin_io, deadline).await?;
 
     let acquired_handle = if let Some(mut managed) = origin_io.take_preacquired_provider_handle() {
+        if !managed.handle().is_some_and(|handle| {
+            handle.allocation.get_provider_name().as_ref() == Some(&binding.account_name)
+                && binding.provider_binding_tag.is_none_or(|tag| handle.binding_tag == Some(tag))
+        }) {
+            return Err(HlsBoundAccountAcquireErrorKind::StoreRace);
+        }
         // Disarm the managed owner only after the cleanup permit is already reserved,
         // so the naked handle is immediately paired with its release responsibility.
         // The wrapper always carries its handle; fall back to a fresh acquire defensively.
@@ -770,6 +815,7 @@ async fn begin_hls_origin_account_io_inner(
                 origin_io.allow_grace,
                 origin_io.priority,
                 origin_io.connection_kind,
+                origin_io.playback_kind,
             ),
         }
     } else {
@@ -780,6 +826,7 @@ async fn begin_hls_origin_account_io_inner(
             origin_io.allow_grace,
             origin_io.priority,
             origin_io.connection_kind,
+            origin_io.playback_kind,
         )
     };
 
@@ -931,7 +978,7 @@ async fn store_acquired_hls_origin_account_io_handle(
             pending_guard.disarm();
             return Err(HlsBoundAccountAcquireErrorKind::AcquireTimedOut);
         }
-        let lease_ref = PlaybackLeaseRef { owner: &binding.session_owner, kind: PlaybackKind::LiveHls, request_id };
+        let lease_ref = PlaybackLeaseRef { owner: &binding.session_owner, kind: origin_io.playback_kind, request_id };
         origin_io.ctx.active_provider.refresh_playback_lease(
             &binding.account_name,
             &lease_ref,
@@ -1032,64 +1079,61 @@ pub async fn finish_hls_origin_account_io(
     refresh_reservation: bool,
 ) {
     let binding = guard.binding().clone();
-    let mut provider_resource_to_release = None;
+    let mut session = session.write().await;
+
+    let now_ms = chrono::Utc::now().timestamp_millis().try_into().unwrap_or_default();
+    let confirmed_ttl_secs = session.activity.last_delivered_media_at_ms.map_or(0, |last| {
+        last.saturating_add(origin_io.reservation_ttl_secs.saturating_mul(1000)).saturating_sub(now_ms).div_ceil(1000)
+    });
+
+    // Decrement directly on guard.lease, not session.origin_account_io_lease.
+    // The session may have been rebound or replaced between I/O start and finish.
+    // Only clear the session reference if it still points to this exact lease instance.
+    guard.disarm();
     let mut should_refresh_reservation = false;
-    let confirmed_ttl_secs;
-    {
-        let mut session = session.write().await;
-
-        let now_ms = chrono::Utc::now().timestamp_millis().try_into().unwrap_or_default();
-        confirmed_ttl_secs = session.activity.last_delivered_media_at_ms.map_or(0, |last| {
-            last.saturating_add(origin_io.reservation_ttl_secs.saturating_mul(1000))
-                .saturating_sub(now_ms)
-                .div_ceil(1000)
-        });
-
-        // Decrement directly on guard.lease, not session.origin_account_io_lease.
-        // The session may have been rebound or replaced between I/O start and finish.
-        // Only clear the session reference if it still points to this exact lease instance.
-        guard.disarm();
-        if guard.lease.active_io_count.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
-            provider_resource_to_release = guard.lease.take_resource();
-            if session
-                .origin_account_io_lease
-                .as_ref()
-                .is_some_and(|session_lease| std::sync::Arc::ptr_eq(session_lease, &guard.lease))
-            {
-                session.origin_account_io_lease = None;
-            }
-            if refresh_reservation && confirmed_ttl_secs > 0 {
-                should_refresh_reservation = true;
-            }
+    if guard.lease.active_io_count.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
+        let provider_resource_to_release = guard.lease.take_resource();
+        if session
+            .origin_account_io_lease
+            .as_ref()
+            .is_some_and(|session_lease| std::sync::Arc::ptr_eq(session_lease, &guard.lease))
+        {
+            session.origin_account_io_lease = None;
         }
-
-        if let Some(current) = session.origin_account_binding.as_mut().filter(|current| {
-            current.is_active()
-                && current.account_name == binding.account_name
-                && current.session_owner == binding.session_owner
-                && current.generation == binding.generation
-        }) {
-            let now_ms = chrono::Utc::now().timestamp_millis().try_into().unwrap_or_default();
-            current.last_origin_io_at_ms = Some(now_ms);
+        should_refresh_reservation = refresh_reservation && confirmed_ttl_secs > 0;
+        if let Some((provider_handle, cleanup_permit)) = provider_resource_to_release {
             if should_refresh_reservation {
-                current.last_reservation_refresh_at_ms = Some(now_ms);
+                if let Some(request_id) = binding.playback_request_id {
+                    origin_io.ctx.active_provider.refresh_playback_lease(
+                        &binding.account_name,
+                        &PlaybackLeaseRef {
+                            owner: &binding.session_owner,
+                            kind: session.origin_playback_kind(),
+                            request_id,
+                        },
+                        confirmed_ttl_secs,
+                    );
+                }
             }
+            // Released synchronously and still under the session lock: the next I/O of
+            // this session reserves its slot under the same lock, so it can never see the
+            // lease gone while the provider still counts the old connection. A deferred
+            // release lets it race for a new slot, which an account at its connection
+            // limit answers with `Exhausted`.
+            origin_io.ctx.connection_manager.release_provider_handle(Some(provider_handle));
+            drop(cleanup_permit);
         }
     }
 
-    if let Some((provider_handle, cleanup_permit)) = provider_resource_to_release {
-        let mut handle_guard = ManagedHandleGuard::new(provider_handle, cleanup_permit);
+    if let Some(current) = session.origin_account_binding.as_mut().filter(|current| {
+        current.is_active()
+            && current.account_name == binding.account_name
+            && current.session_owner == binding.session_owner
+            && current.generation == binding.generation
+    }) {
+        current.last_origin_io_at_ms = Some(now_ms);
         if should_refresh_reservation {
-            if let Some(request_id) = binding.playback_request_id {
-                origin_io.ctx.active_provider.refresh_playback_lease(
-                    &binding.account_name,
-                    &PlaybackLeaseRef { owner: &binding.session_owner, kind: PlaybackKind::LiveHls, request_id },
-                    confirmed_ttl_secs,
-                );
-            }
-        }
-        if let Some((handle, permit)) = handle_guard.take_resource() {
-            permit.send(CleanupEvent::ReleaseProviderHandle { handle: Some(handle) });
+            current.last_reservation_refresh_at_ms = Some(now_ms);
         }
     }
 }
@@ -1346,6 +1390,7 @@ mod tests {
     fn bound_account_acquire_error_rebind_policy_matches_concept() {
         assert!(HlsBoundAccountAcquireErrorKind::Missing.allows_rebind());
         assert!(HlsBoundAccountAcquireErrorKind::Expired.allows_rebind());
+        assert!(HlsBoundAccountAcquireErrorKind::Blocked.allows_rebind());
         assert!(!HlsBoundAccountAcquireErrorKind::Exhausted.allows_rebind());
         assert!(!HlsBoundAccountAcquireErrorKind::ReservedForOther.allows_rebind());
         assert!(!HlsBoundAccountAcquireErrorKind::Detached.allows_rebind());
@@ -1359,7 +1404,7 @@ mod tests {
     fn bound_account_acquire_error_resource_retry_policy_matches_handoff_semantics() {
         assert!(!HlsBoundAccountAcquireErrorKind::Missing.is_retryable_resource_failure());
         assert!(!HlsBoundAccountAcquireErrorKind::Expired.is_retryable_resource_failure());
-        assert!(!HlsBoundAccountAcquireErrorKind::ReservedForOther.is_retryable_resource_failure());
+        assert!(HlsBoundAccountAcquireErrorKind::ReservedForOther.is_retryable_resource_failure());
         assert!(!HlsBoundAccountAcquireErrorKind::Detached.is_retryable_resource_failure());
         assert!(HlsBoundAccountAcquireErrorKind::Exhausted.is_retryable_resource_failure());
         assert!(HlsBoundAccountAcquireErrorKind::WaitTimedOut.is_retryable_resource_failure());
@@ -1580,6 +1625,9 @@ mod tests {
             reservation_ttl_secs: 60,
             preacquired_provider_handle: None,
             started_generation: None,
+            prepared_account: None,
+            playback_kind: tuliprox_core::model::PlaybackKind::LiveHls,
+            account_runtime: None,
         };
 
         let mut session = HlsSession::new(HlsSessionKey::new(1, "permit-timeout"), b"secret", 1_000);

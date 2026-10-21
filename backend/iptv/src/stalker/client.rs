@@ -24,7 +24,6 @@ use reqwest::{
 };
 use serde::Deserialize;
 use std::{
-    fmt::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -724,32 +723,15 @@ fn identity_cookie_pairs(config: &StalkerInputConfig) -> Vec<(String, String)> {
         return pairs;
     };
     if let Some(mac) = device.mac_address.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        pairs.push(("mac".to_string(), percent_encode_cookie_value(mac)));
+        pairs.push(("mac".to_string(), shared::utils::percent_encode_unreserved(mac)));
     }
     if let Some(locale) = device.locale.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        pairs.push(("stb_lang".to_string(), percent_encode_cookie_value(locale)));
+        pairs.push(("stb_lang".to_string(), shared::utils::percent_encode_unreserved(locale)));
     }
     if let Some(timezone) = device.timezone.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        pairs.push(("timezone".to_string(), percent_encode_cookie_value(timezone)));
+        pairs.push(("timezone".to_string(), shared::utils::percent_encode_unreserved(timezone)));
     }
     pairs
-}
-
-/// Percent-encode a cookie value, keeping only RFC 3986 unreserved characters. This is
-/// what real MAG firmware does for the `mac`/`timezone` cookies (e.g. `:` → `%3A`,
-/// `/` → `%2F`).
-fn percent_encode_cookie_value(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(char::from(byte)),
-            other => {
-                out.push('%');
-                let _ = write!(out, "{other:02X}");
-            }
-        }
-    }
-    out
 }
 
 fn persist_stalker_debug_body(portal_url: &str, action: &'static str, body: &Bytes) {
@@ -848,7 +830,9 @@ mod transport_tests {
         session::StalkerSession,
         transport::testing::{FakeTransport, Reply},
     };
-    use shared::model::stalker::{StalkerBootstrapRecipe, StalkerPortalCapabilitiesDto};
+    use shared::model::stalker::{
+        StalkerBootstrapRecipe, StalkerPlaybackMode, StalkerPortalCapabilitiesDto, StalkerStreamKind,
+    };
     use tuliprox_core::utils::ManualClock;
 
     const PORTAL: &str = "http://portal.example/stalker_portal/";
@@ -946,6 +930,71 @@ mod transport_tests {
             vec!["/stalker_portal/server/load.php".to_string(), "/stalker_portal/portal.php".to_string()],
             "both candidates should have been tried, in priority order"
         );
+    }
+
+    /// Portals invalidate sessions out of band (another device on the same MAC, a short TTL),
+    /// and then answer `create_link` with a stale-token refusal. Treating that as "this item
+    /// cannot be resolved" is what made playback fail without a usable reason.
+    #[tokio::test]
+    async fn create_link_rehandshakes_once_when_the_portal_rejects_the_session() {
+        let transport = std::sync::Arc::new(FakeTransport::new([
+            // create_link against the stale session.
+            Reply::ok(r#"{"code": 44, "text": "Authorization failed"}"#),
+            // Re-handshake: handshake, get_profile, capabilities.
+            Reply::ok(r#"{"js":{"token":"fresh"}}"#),
+            Reply::ok(r#"{"js":{"status":"1","max_connections":"1"}}"#),
+            Reply::ok("{}"),
+            // create_link retried with the fresh session.
+            Reply::ok(r#"{"js":{"cmd":"ffmpeg http://line.example/live/7.ts"}}"#),
+        ]));
+        let client = client_with(std::sync::Arc::clone(&transport), StalkerInputConfig::default());
+
+        let resolved = client
+            .create_link(
+                &handshake(),
+                StalkerStreamKind::Live,
+                StalkerPlaybackMode::DirectUrl,
+                "ffmpeg http://portal.example/ch/7",
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("the item resolves after the session is refreshed");
+
+        assert_eq!(resolved.stream_url, "http://line.example/live/7.ts");
+        assert_eq!(transport.requested().len(), 5, "one refused create_link, one re-handshake, one resolved retry");
+    }
+
+    /// A fresh session that is refused as well must be reported, not retried forever.
+    #[tokio::test]
+    async fn create_link_reports_a_session_rejected_twice() {
+        let transport = std::sync::Arc::new(FakeTransport::new([
+            Reply::ok(r#"{"code": 44, "text": "Authorization failed"}"#),
+            Reply::ok(r#"{"js":{"token":"fresh"}}"#),
+            Reply::ok(r#"{"js":{"status":"1","max_connections":"1"}}"#),
+            Reply::ok("{}"),
+            Reply::ok(r#"{"code": 44, "text": "Authorization failed"}"#),
+            Reply::ok(r#"{"code": 44, "text": "Authorization failed"}"#),
+            Reply::ok(r#"{"code": 44, "text": "Authorization failed"}"#),
+        ]));
+        let client = client_with(std::sync::Arc::clone(&transport), StalkerInputConfig::default());
+
+        let err = client
+            .create_link(
+                &handshake(),
+                StalkerStreamKind::Live,
+                StalkerPlaybackMode::DirectUrl,
+                "ffmpeg http://portal.example/ch/7",
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect_err("a portal that keeps refusing the session cannot resolve the item");
+
+        assert!(err.is_token_rejected(), "the refusal must stay classifiable: {err}");
+        assert_eq!(transport.requested().len(), 7, "at most one re-handshake per call");
     }
 
     /// Every candidate failing must surface the last real error, not a synthetic one.
@@ -1337,13 +1386,6 @@ mod tests {
     }
 
     #[test]
-    fn percent_encode_cookie_value_escapes_mac_colons() {
-        assert_eq!(percent_encode_cookie_value("00:1A:79:DE:AD:BE"), "00%3A1A%3A79%3ADE%3AAD%3ABE");
-        assert_eq!(percent_encode_cookie_value("Europe/Berlin"), "Europe%2FBerlin");
-        assert_eq!(percent_encode_cookie_value("en_US.utf8"), "en_US.utf8");
-    }
-
-    #[test]
     fn identity_cookie_pairs_includes_mac_lang_and_timezone() {
         let config = StalkerInputConfig {
             device: Some(tuliprox_core::model::StalkerDeviceProfile {
@@ -1364,6 +1406,6 @@ mod tests {
     #[test]
     fn identity_cookie_pairs_empty_without_device() {
         let config = StalkerInputConfig::default();
-        assert!(identity_cookie_pairs(&config).is_empty());
+        assert_eq!(identity_cookie_pairs(&config), [] as [(std::string::String, std::string::String); 0]);
     }
 }

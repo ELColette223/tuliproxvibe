@@ -8,6 +8,7 @@
 use super::{
     episode::candidate_resource_timeline_evidence,
     error::{HlsManifestRejectLogReason, OriginManifestFetchError},
+    fetch::cap_manifest_retry_after_ms,
     fingerprint::{
         build_manifest_timeline_fingerprint, deterministic_conflict_fingerprint,
         deterministic_timeline_conflict_from_rejection,
@@ -28,6 +29,7 @@ use crate::{
     recovery_timing::HlsAcceptanceDeadlineMs,
     resource_identity::{HlsMediaResourceIdentity, HlsMediaResourceSemanticKey},
     timeline::HlsResourceReplayDecision,
+    HlsSession, HlsSessionKey,
 };
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use flate2::{
@@ -385,6 +387,38 @@ fn initial_manifest_retry_delay_uses_next_slot_bounded_jitter_and_retry_after_ov
 }
 
 #[test]
+fn manifest_retry_after_is_capped_at_half_the_origin_target_duration() {
+    let mut session = HlsSession::new(HlsSessionKey::new(1, "12345"), b"secret", 0);
+    session.origin_control.record_media_progress(50, 12_000);
+    session.target_duration = Some(2);
+
+    assert_eq!(
+        [0, 3_000, 6_000, 60_000, u64::MAX].map(|delay_ms| cap_manifest_retry_after_ms(&session, delay_ms)),
+        [0, 3_000, 6_000, 6_000, 6_000]
+    );
+}
+
+#[test]
+fn manifest_retry_after_uses_session_target_duration_when_origin_timing_is_missing() {
+    let mut session = HlsSession::new(HlsSessionKey::new(1, "12345"), b"secret", 0);
+    session.target_duration = Some(3);
+
+    assert_eq!(cap_manifest_retry_after_ms(&session, 60_000), 1_500);
+    session.origin_control.target_duration_snapshot_ms = Some(0);
+    assert_eq!(cap_manifest_retry_after_ms(&session, 60_000), 1_500);
+}
+
+#[test]
+fn manifest_retry_after_uses_default_target_duration_before_first_manifest() {
+    let mut session = HlsSession::new(HlsSessionKey::new(1, "12345"), b"secret", 0);
+
+    assert_eq!(cap_manifest_retry_after_ms(&session, 60_000), 7_500);
+    session.target_duration = Some(0);
+    session.origin_control.target_duration_snapshot_ms = Some(0);
+    assert_eq!(cap_manifest_retry_after_ms(&session, 60_000), 7_500);
+}
+
+#[test]
 fn initial_manifest_retry_status_is_not_labeled_as_recovery() {
     let error = OriginManifestFetchError::Timeout;
 
@@ -634,4 +668,71 @@ async fn shared_manifest_rejects_encoded_partial_content() {
             .expect_err("encoded partial manifest must fail");
 
     assert!(matches!(error, OriginManifestFetchError::ContentCoding(ContentCodingError::EncodedPartialContent)));
+}
+
+#[test]
+fn single_variant_url_keeps_bounded_archive_query_and_child_path() {
+    let master = "https://origin.example.invalid/channel/archive-1700000000-3600.m3u8?token=fixture";
+    let body = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=9150000,RESOLUTION=1920x1080\n\
+                tracks-v1/index-1700000000-3600.ts.m3u8\n";
+    let url = super::fetch::single_variant_url(body, master).expect("single variant");
+    assert_eq!(url.path(), "/channel/tracks-v1/index-1700000000-3600.ts.m3u8");
+    assert_eq!(url.query(), Some("token=fixture"));
+}
+
+#[test]
+fn single_variant_url_refuses_ambiguous_or_rendition_masters() {
+    let master = "https://origin.example.invalid/channel/archive-1-2.m3u8";
+    for body in [
+        "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\na.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000\nb.m3u8\n",
+        "#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"aac\",NAME=\"audio\",URI=\"tracks-a1/index.m3u8\"\n\
+         #EXT-X-STREAM-INF:BANDWIDTH=1000,AUDIO=\"aac\"\ntracks-v1/index.m3u8\n",
+        "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nftp://origin.example.invalid/a.m3u8\n",
+        "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\n",
+    ] {
+        assert!(super::fetch::single_variant_url(body, master).is_none(), "{body}");
+    }
+}
+
+#[test]
+fn archive_variant_request_headers_only_send_credentials_to_origins_that_received_them() {
+    let url = |value: &str| url::Url::parse(value).expect("url");
+    let mut source = HeaderMap::new();
+    source.insert(header::AUTHORIZATION, HeaderValue::from_static("Basic entry"));
+    source.insert(header::COOKIE, HeaderValue::from_static("configured=entry"));
+    let mut master_cookies = HeaderMap::new();
+    master_cookies.insert(header::COOKIE, HeaderValue::from_static("session=master"));
+    let entry = url("https://entry.example.invalid/archive-1-2.m3u8");
+    let cdn = url("https://cdn.example.invalid/archive-1-2.m3u8");
+    let headers = |entry_url: &url::Url, master_url: &url::Url, variant: &str| {
+        super::fetch::archive_variant_request_headers(
+            &source,
+            Some(entry_url),
+            master_url,
+            &master_cookies,
+            &url(variant),
+        )
+    };
+
+    let same_origin = headers(&entry, &entry, "https://entry.example.invalid/tracks-v1/index.m3u8");
+    assert_eq!(same_origin[header::AUTHORIZATION], "Basic entry");
+    assert_eq!(same_origin[header::COOKIE], "session=master");
+
+    let redirected_master = headers(&entry, &cdn, "https://cdn.example.invalid/tracks-v1/index.m3u8");
+    assert!(!redirected_master.contains_key(header::AUTHORIZATION));
+    assert_eq!(redirected_master[header::COOKIE], "session=master");
+
+    let foreign_variant = headers(&entry, &entry, "https://other.example.invalid/tracks-v1/index.m3u8");
+    assert!(!foreign_variant.contains_key(header::AUTHORIZATION));
+    assert!(!foreign_variant.contains_key(header::COOKIE));
+
+    let unknown_entry = super::fetch::archive_variant_request_headers(
+        &source,
+        None,
+        &entry,
+        &HeaderMap::new(),
+        &url("https://entry.example.invalid/tracks-v1/index.m3u8"),
+    );
+    assert!(!unknown_entry.contains_key(header::AUTHORIZATION));
+    assert!(!unknown_entry.contains_key(header::COOKIE));
 }

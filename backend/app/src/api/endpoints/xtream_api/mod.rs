@@ -5,22 +5,24 @@ use crate::{
     api::{
         api_utils,
         api_utils::{
-            admission_failure_response, coalesce_byte_stream, create_api_proxy_user, create_catchup_session_key,
-            create_m3u_catchup_session_key, create_playback_session_fingerprint, create_session_fingerprint,
-            empty_json_response_as_array, empty_json_response_as_object, force_provider_stream_response,
-            get_session_reservation_ttl_secs, get_user_target, get_user_target_by_credentials, internal_server_error,
-            is_seekable_media_request, is_session_based_playback, is_stream_share_enabled, local_stream_response,
-            log_resource_rejection, redirect, redirect_response, reentry_suppressed_response, rejection_status,
-            resolve_initial_stalker_playback_url, resolve_resource, resource_response, separate_number_and_remainder,
+            admission_failure_response, blocks_new_playback, coalesce_byte_stream, create_api_proxy_user,
+            create_catchup_session_key, create_m3u_catchup_session_key, create_playback_session_fingerprint,
+            create_session_fingerprint, empty_json_response_as_array, empty_json_response_as_object,
+            force_provider_stream_response, get_session_reservation_ttl_secs, get_user_target,
+            get_user_target_by_credentials, internal_server_error, is_running_playback, is_seekable_media_request,
+            is_session_based_playback, is_stream_share_enabled, local_stream_response, maintenance_rejection_response,
+            redirect, redirect_response, reentry_suppressed_response, resolve_initial_stalker_playback_url,
+            resource_proxy_response, resource_redirect_or_proxy, separate_number_and_remainder,
             shared_live_mpeg_ts_key, should_allow_exhausted_shared_reconnect, stream_response,
-            stream_response_with_shared_key, try_option_bad_request, try_result_bad_request, try_unwrap_body,
-            RedirectParams, ResourceFetchOptions,
+            stream_response_with_provider_handle, stream_response_with_shared_key,
+            try_option_bad_request, try_result_bad_request, try_unwrap_body, RedirectParams,
         },
         endpoints::{
             hls_api::{
                 build_virtual_hls_entry_path, handle_hls_stream_request, hls_admission_failure_manifest_response,
                 hls_custom_video_manifest_response, m3u_archive_epg_reference_ts,
-                m3u_catchup_epg_reference_from_session_token, HlsEntryStreamContext,
+                m3u_catchup_epg_reference_from_session_token, user_allows_entry_content, HlsEntryOutputScope,
+                HlsEntryStreamContext, HlsRequestStage,
             },
             xmltv_api::{get_empty_epg_response, get_epg_path_for_target_by_type, serve_short_epg},
         },
@@ -42,7 +44,10 @@ use crate::{
         get_target_id_mapping, get_target_storage_path, storage_const, user_get_bouquet_filter,
         xtream_get_collection_path, xtream_get_item_for_stream_id, xtream_load_rewrite_playlist, VirtualIdRecord,
     },
-    utils::{apply_timeshift, debug_if_enabled, file_exists_async, parse_timeshift, request, trace_if_enabled},
+    utils::{
+        apply_timeshift, debug_if_enabled, file_exists_async, parse_timeshift, prepare_xtream_resource_hosts, request,
+        trace_if_enabled,
+    },
 };
 use axum::{http::HeaderMap, response::IntoResponse};
 use bytes::Bytes;
@@ -318,12 +323,12 @@ async fn xtream_player_api_stream(
         .map_or(stream_ext, |input| override_live_hls_extension(stream_req.context, input, stream_ext));
     let is_hls_manifest_request = stream_ext == Some(HLS_EXT);
 
-    let output_allowed = (if stream_req.context == ApiStreamContext::Timeshift {
-        user.allows_cluster(XtreamCluster::Live)
+    let output_scope = if stream_req.context == ApiStreamContext::Timeshift {
+        HlsEntryOutputScope::LiveCluster
     } else {
-        user.allows_item_type(pli.item_type)
-    }) && (user.t_filter.is_none()
-        || user.allows_content(&shared::model::PlaylistItem::from(&pli)));
+        HlsEntryOutputScope::ItemType(pli.item_type)
+    };
+    let output_allowed = user_allows_entry_content(&user, output_scope, &pli);
     if !output_allowed {
         if is_hls_manifest_request {
             return hls_custom_video_manifest_response(
@@ -440,6 +445,7 @@ async fn xtream_player_api_stream(
     pli.url = match resolve_initial_stalker_playback_url(
         app_state,
         &input,
+        &user,
         pli.provider_id,
         pli.xtream_cluster,
         item_type,
@@ -587,6 +593,20 @@ async fn xtream_player_api_stream(
         pli.url.clone()
     };
 
+    if !is_running_playback(user_session.as_ref()) && blocks_new_playback(app_state, &input, &user, false) {
+        let stream_channel = create_stream_channel_with_type(target.id, &pli, item_type);
+        return maintenance_rejection_response(
+            app_state,
+            fingerprint,
+            &user,
+            stream_channel,
+            &input,
+            req_headers,
+            playback_ext == HLS_EXT,
+        )
+        .await;
+    }
+
     let (connection_admission, grace_mode, request_class) = crate::api::api_utils::resolve_playback_request_admission(
         &app_state.admission_ctx(),
         &user,
@@ -690,6 +710,7 @@ async fn xtream_player_api_stream(
             connection_permission,
             connection_admission.kind(),
             &original_hls_entry_path,
+            HlsRequestStage::Entry,
         )
         .await
         .into_response();
@@ -720,6 +741,7 @@ async fn xtream_player_api_stream(
         connection_kind,
         allow_exhausted_shared_reconnect,
         grace_mode,
+        None,
         Some(&shared_key),
     )
     .await
@@ -869,9 +891,22 @@ pub(in crate::api) async fn xtream_player_api_stream_with_token(
     let Some(target) = app_state.app_config.get_target_by_id(target_id) else {
         return axum::http::StatusCode::BAD_REQUEST.into_response();
     };
-    xtream_player_api_stream_with_resolved_target(fingerprint, req_headers, app_state, target, None, stream_req)
-        .await
-        .into_response()
+    xtream_player_api_stream_with_resolved_target(
+        fingerprint,
+        req_headers,
+        app_state,
+        target,
+        InternalPlaybackSource::WebUi,
+        stream_req,
+        None,
+    )
+    .await
+    .into_response()
+}
+
+pub(in crate::api) enum InternalPlaybackSource {
+    WebUi,
+    Recording(Arc<ConfigInput>),
 }
 
 #[allow(clippy::too_many_lines)]
@@ -880,8 +915,9 @@ pub(in crate::api) async fn xtream_player_api_stream_with_resolved_target(
     req_headers: &HeaderMap,
     app_state: &Arc<AppState>,
     target: Arc<ConfigTarget>,
-    expected_input: Option<Arc<ConfigInput>>,
+    source: InternalPlaybackSource,
     stream_req: ApiStreamRequest<'_>,
+    provider_allocation_id: Option<u64>,
 ) -> impl IntoResponse + Send {
     if stream_req.access_token
         && !verify_access_token(
@@ -914,6 +950,10 @@ pub(in crate::api) async fn xtream_player_api_stream_with_resolved_target(
             format!("Failed to read xtream item for stream id {req_virtual_id}")
         );
         let virtual_id = pli.virtual_id;
+        let (is_recording, expected_input) = match source {
+            InternalPlaybackSource::WebUi => (false, None),
+            InternalPlaybackSource::Recording(input) => (true, Some(input)),
+        };
         if !recording_input_matches(expected_input.as_deref(), pli.input_name.as_ref()) {
             return axum::http::StatusCode::BAD_REQUEST.into_response();
         }
@@ -935,7 +975,11 @@ pub(in crate::api) async fn xtream_player_api_stream_with_resolved_target(
             return axum::http::StatusCode::BAD_REQUEST.into_response();
         }
 
-        let user = create_api_proxy_user(app_state);
+        let user = if is_recording {
+            crate::api::api_utils::create_recording_proxy_user(app_state)
+        } else {
+            create_api_proxy_user(app_state)
+        };
 
         if pli.item_type.is_local() {
             let playback_session_token = create_session_fingerprint(fingerprint, "webui", virtual_id.get(), false);
@@ -962,6 +1006,7 @@ pub(in crate::api) async fn xtream_player_api_stream_with_resolved_target(
         pli.url = match resolve_initial_stalker_playback_url(
             app_state,
             &input,
+            &user,
             pli.provider_id,
             pli.xtream_cluster,
             resolution_item_type,
@@ -991,6 +1036,9 @@ pub(in crate::api) async fn xtream_player_api_stream_with_resolved_target(
 
         // Reverse proxy mode — only route genuine HLS into the HLS handler, not DASH
         if is_session_request && playback_ext == Some(shared::defaults::HLS_EXT) {
+            if let Some(allocation_id) = provider_allocation_id {
+                app_state.active_provider.complete_release(allocation_id);
+            }
             let Some(stream_context) = HlsEntryStreamContext::from_playlist_item(&pli) else {
                 error!("HLS input stream identity missing for virtual_id={virtual_id}; refresh target playlist");
                 return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -1011,6 +1059,7 @@ pub(in crate::api) async fn xtream_player_api_stream_with_resolved_target(
                 UserConnectionPermission::Allowed,
                 Some(crate::api::model::ConnectionKind::Normal),
                 &original_hls_entry_path,
+                HlsRequestStage::Entry,
             )
             .await
             .into_response();
@@ -1026,7 +1075,15 @@ pub(in crate::api) async fn xtream_player_api_stream_with_resolved_target(
         );
 
         trace_if_enabled!("Streaming stream request from {}", sanitize_sensitive_info(&stream_url));
-        stream_response(
+        let preacquired_provider_handle = if let Some(allocation_id) = provider_allocation_id {
+            let Some(handle) = app_state.active_provider.claim_download_connection(allocation_id, &input.name) else {
+                return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+            };
+            Some(tuliprox_session::ManagedProviderHandle::new(Arc::clone(&app_state.active_provider), handle))
+        } else {
+            None
+        };
+        stream_response_with_provider_handle(
             fingerprint,
             app_state,
             session_key.as_str(),
@@ -1042,6 +1099,7 @@ pub(in crate::api) async fn xtream_player_api_stream_with_resolved_target(
             crate::api::model::ConnectionKind::Normal,
             false,
             None,
+            preacquired_provider_handle,
         )
         .await
         .into_response()
@@ -1088,33 +1146,19 @@ async fn xtream_player_api_resource(
     if !shared::model::is_resource_field_name(resource) {
         return axum::http::StatusCode::NOT_FOUND.into_response();
     }
+
     let stream_url = pli.resolve_resource_url(resource);
 
     match stream_url {
         None => axum::http::StatusCode::NOT_FOUND.into_response(),
-        Some(value) => {
-            let resolved = match resolve_resource(&app_state.app_config, &value, Some(&pli.input_name)) {
-                Ok(resolved) => resolved,
-                Err(err) => {
-                    log_resource_rejection(Some(pli.input_name.as_ref()), &err, &value);
-                    return rejection_status(&err).into_response();
-                }
-            };
-            let url = resolved.url;
+        Some(url) => {
             if user.proxy.is_redirect(pli.item_type) || target.is_force_redirect(pli.item_type) {
-                let input = resolved
-                    .authorization
-                    .input_name
-                    .as_ref()
-                    .and_then(|input_name| app_state.app_config.get_input_by_name(input_name));
+                let input = app_state.app_config.get_input_by_name(&pli.input_name);
                 let redirect_url = api_utils::resolve_redirect_location(input.as_deref(), &url);
                 match redirect_url {
                     Ok(redirect_url) => {
-                        trace_if_enabled!(
-                            "Redirecting resource request to {}",
-                            sanitize_sensitive_info(redirect_url.as_ref())
-                        );
-                        redirect(redirect_url.as_ref()).into_response()
+                        resource_redirect_or_proxy(app_state, redirect_url.as_ref(), req_headers, input.as_deref())
+                            .await
                     }
                     Err(err) => {
                         error!("Failed to resolve redirect url: {}", sanitize_sensitive_info(&err.to_string()));
@@ -1123,15 +1167,10 @@ async fn xtream_player_api_resource(
                 }
             } else {
                 trace_if_enabled!("Resource request to {}", sanitize_sensitive_info(&url));
-                resource_response(
-                    app_state,
-                    ResourceFetchOptions::cached(resolved.authorization),
-                    &url,
-                    req_headers,
-                    None,
-                )
-                .await
-                .into_response()
+                // The response narrows the input to the resource origin itself; passing the input of
+                // the item keeps that decision in one place.
+                let input = app_state.app_config.get_input_by_name(&pli.input_name);
+                resource_proxy_response(app_state, &url, req_headers, input.as_deref()).await
             }
         }
     }
@@ -1365,12 +1404,13 @@ pub async fn xtream_get_stream_info_response(
                 return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
             }
         };
+        prepare_xtream_resource_hosts(&pli, &options).await;
         return axum::Json(pli.to_info_document(&options)).into_response();
     }
 
-    // handle upstream provider
+    // handle upstream provider; an input in maintenance answers from the fallback below
     if pli.provider_id > 0 {
-        if let Some(input) = input {
+        if let Some(input) = input.filter(|input| !app_state.maintenance.is_in_maintenance(&input.name)) {
             if let Some(info_url) = xtream::get_xtream_player_api_info_url(&input, cluster, pli.provider_id) {
                 // redirect is only possible for live streams
                 if user.proxy == ProxyType::Redirect && cluster == XtreamCluster::Live {
@@ -1384,7 +1424,7 @@ pub async fn xtream_get_stream_info_response(
                 }
 
                 // fetch info from the upstream provider
-                let global_client = app_state.http_client.load();
+                let global_client = app_state.http_clients.default.load();
                 let client = match tuliprox_core::utils::request::create_input_http_client(
                     &app_state.app_config,
                     &global_client,
@@ -1397,7 +1437,7 @@ pub async fn xtream_get_stream_info_response(
                     }
                 };
                 if let Ok(content) = xtream::get_xtream_stream_info(
-                    &client,
+                    &app_state.http_clients.default.load(),
                     &app_state.app_config,
                     &app_state.playlists,
                     user,
@@ -1479,8 +1519,7 @@ async fn xtream_get_short_epg(
             }
 
             if pli.provider_id > 0 {
-                let input_name = &pli.input_name;
-                if let Some(input) = app_state.app_config.get_input_by_name(input_name) {
+                if let Some(input) = app_state.contactable_input(&pli.input_name) {
                     if let Some(action_url) =
                         xtream::get_xtream_player_api_action_url(&input, crate::model::XC_ACTION_GET_SHORT_EPG)
                     {
@@ -1503,7 +1542,7 @@ async fn xtream_get_short_epg(
                         }
 
                         let input_source = InputSource::from(&*input).with_url(info_url);
-                        let global_client = app_state.http_client.load();
+                        let global_client = app_state.http_clients.default.load();
                         let client = match tuliprox_core::utils::request::create_input_http_client(
                             &app_state.app_config,
                             &global_client,
@@ -1517,7 +1556,7 @@ async fn xtream_get_short_epg(
                         };
                         return match request::download_text_content(
                             &app_state.app_config,
-                            &client,
+                            &app_state.http_clients.default.load(),
                             &input_source,
                             None,
                             None,
@@ -1652,14 +1691,20 @@ async fn xtream_get_catchup_response(
     }
 
     let input_source = InputSource::from(&*input).with_url(info_url);
-    let global_client = app_state.http_client.load();
+    let global_client = app_state.http_clients.default.load();
     let client = try_result_bad_request!(tuliprox_core::utils::request::create_input_http_client(
         &app_state.app_config,
         &global_client,
         input.proxy.as_ref(),
     ));
     let content = try_result_bad_request!(
-        xtream::get_xtream_stream_info_content(&app_state.app_config, &client, &input_source, false).await
+        xtream::get_xtream_stream_info_content(
+            &app_state.app_config,
+            &app_state.http_clients.default.load(),
+            &input_source,
+            false,
+        )
+        .await
     );
 
     let mut doc: Map<String, Value> = try_result_bad_request!(serde_json::from_str(&content));

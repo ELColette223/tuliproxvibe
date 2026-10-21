@@ -56,10 +56,24 @@ reverse_proxy:
 
 | Parameter | Type | Default | Technical Impact & Background |
 | :--- | :--- | :--- | :--- |
-| `resource_rewrite_disabled` | Bool | `false` | Normally, Tuliprox rewrites all image URLs in playlists to point to itself (e.g., `http://tuliprox:8901/resource/...`). If set to `true`, original URLs are kept (clients load images directly from the provider). **Warning:** Local caching will stop working if this is enabled! |
+| `resource_rewrite_disabled` | Bool | `false` | Normally, Tuliprox rewrites image URLs in playlists to point to itself (e.g., `http://tuliprox:8901/resource/...`). If set to `true`, only provably public image URLs are kept; private destinations still use Tuliprox resource links so external clients can load them. Public images bypass local caching in this mode. |
 | `rewrite_secret` | String | `""` | A 32-character Hex string (16 bytes). Tuliprox encrypts/signs the original image URLs during the rewrite process. To prevent image URLs from becoming invalid after a server restart, you MUST enter a static secret here. |
 | `stream_history` | Block | `null` | Optional stream telemetry block that persists raw connect/disconnect/startup-failure events to daily history files. |
 | `qos_aggregation` | Block | `null` | Optional background worker that aggregates stream history into compact per-stream QoS snapshots. |
+
+**Internal destinations are never exposed through the resource route.** When resource rewriting is disabled, channel
+logos, Xtream covers and backdrops, and EPG image links are classified before they are written into player output.
+Only a provably public destination is handed to the client while `resource_rewrite_disabled: true`; a
+destination on a private network or a name that cannot be resolved is replaced by an
+authenticated `/resource/...` link, so the internal address never reaches the client. This holds in both modes, and it is
+what makes images hosted on a local media server work without publishing their address. Destinations local to the Tuliprox
+host — loopback, link-local (including cloud metadata endpoints) — are dropped from the output and refused by the resource
+route, because they can only reach Tuliprox itself. The resource route checks that while the connection is built as well,
+so a name cannot resolve to a public address during the check and to a local one afterwards.
+
+**Player metadata follows the resource setting independently of stream redirects.** The `tvg-logo`, cover and backdrop
+fields of M3U and Xtream output use Tuliprox links for private destinations even when stream URLs are redirected.
+`mask_redirect_url` controls stream URLs; keep it enabled when clients should not see the original stream destination.
 
 > **Note:** You can generate a random secret using:
 
@@ -120,6 +134,8 @@ reverse_proxy:
     grace_period_hold_stream: true
     hls_session_ttl_secs: 15
     catchup_session_ttl_secs: 45
+    provider_affinity_ttl_secs: 120
+    hls_wrap_media_playlist: true
     shared_burst_buffer_mb: 12
     cleanup_queue_capacity: 4096
     recent_eviction_reentry_ttl_ms: 3000
@@ -142,6 +158,8 @@ reverse_proxy:
 | `grace_period_hold_stream` | Bool | `true` | Tuliprox artificially holds back video data to the client, waiting for grace check to finish, so it doesn't trigger provider prematurely. |
 | `hls_session_ttl_secs` | Int | `15` | Keeps virtual provider slot open between HLS segment (`.ts`) requests to prevent provider bans for "Account Hopping". |
 | `catchup_session_ttl_secs` | Int | `45` | Same session-holding principle applied to Archive/Catchup TV. See notes on section [Session TTLs for HLS & Catchup](#session-ttls-for-hls-m3u8--catchup) for details. |
+| `provider_affinity_ttl_secs` | Int | `120` | How long a reconnect-capable playback (HLS, DASH, Catchup, VOD) keeps returning to its last provider account after the reconnect window has ended. It holds no connection slot and never causes a grace over-allocation. `0` ends the preference together with the reconnect window; the maximum is `86400`. See [Session TTLs for HLS & Catchup](#session-ttls-for-hls-m3u8--catchup). |
+| `hls_wrap_media_playlist` | Bool | `true` | With the shared HLS cache off, a proxied live HLS entry request whose provider returns a media playlist is answered with a single-variant master playlist. The player then refreshes a sealed token URL instead of the entry URL, so the playback keeps its owner, lease and provider account when the client IP changes. Disable it for players that mishandle a master playlist. See [Playlist refreshes and client IP changes](#playlist-refreshes-and-client-ip-changes). |
 | `shared_burst_buffer_mb` | Int | `12` | Minimum burst buffer size (in MB) used for shared live streams to immediately synchronize new clients without Keyframe dropouts. See notes on section [Shared Live Streams](#shared-live-streams) for details. |
 | `cleanup_queue_capacity` | Int | `4096` | Maximum number of concurrent cleanup permits available to active response bodies and shared subscribers. Must be at least `1`. If all permits remain held, new stream admission waits for a bounded interval and then returns `503 Service Unavailable` instead of growing memory without limit. |
 | `recent_eviction_reentry_ttl_ms` | Int | `3000` | Time window after an eviction during which a retry of the evicted playback must not evict its replacement. The guard is scoped to the user, client address and channel, so unrelated clients are not blocked. Suppressed retries end quietly (no `user_connections_exhausted` video and no `ConnectionDenied` event), since they are not a real connection-limit refusal. Raise this for players with slow automatic retries; `0` disables the guard. The cumulative suppression count is exposed as `reentry_suppressed_total` in the server status (`GET /api/v1/status`). |
@@ -272,6 +290,12 @@ For the configuration reference, see [Shared HLS Configuration](./shared-hls-con
 For the shared session, access lease, and transient delivery state machines, see
 [HLS Cache State Machines](./hls-cache-state-machine.md).
 
+The session and global byte limits cover committed objects, immutable revisions, and outstanding write reservations.
+Staging and postprocessing grow their budgets before writing additional bytes. Committing an object consumes its own
+reservation; capacity released by a completed or aborted write wakes deferred downloads. Both targeted reclamation
+and periodic GC retire obsolete, unpinned revisions. See
+[capacity diagnostics](./shared-hls-troubleshooting.md#symptom-downloads-wait-for-local-cache-capacity).
+
 ```yaml
 reverse_proxy:
   hls_cache:
@@ -297,6 +321,15 @@ reverse_proxy:
         mode: "off"
         max_parallel_jobs: 1
 ```
+
+Short rolling origin playlists (one or two segments) are permitted only after the session evaluates its complete
+configured manifest recovery burst. A suitable window with at least three segments takes priority. The resulting
+permission belongs to the session's validated origin binding and epoch, and survives subsequent short manifests
+and new access leases. Freshness refreshes share the existing singleflight; they do not themselves renew the burst.
+Failed qualification also shares its retry receipt and backoff. A genuine origin revalidation requires a new
+qualification. One warning per short-window qualification cites RFC 8216 section 6.2.2; larger available cache
+windows, media readiness, lease validity, and resource retention rules still apply. See
+[Shared HLS configuration](shared-hls-configuration.md#unstable-manifests).
 
 ### HLS Cache Parameter Details
 
@@ -333,7 +366,20 @@ Important boundaries:
 
 * `reverse_proxy.hls_cache` only prepares the global cache engine. A target must also set
   `options.share_live_streams.hls: true` in `source.yml` before generated HLS live entries use the shared HLS path.
-* HLS cache retry behavior is fixed internally and is not user-configurable.
+* HLS cache retry behavior is fixed internally and is not user-configurable. Shared HLS origin-manifest retries cap an
+  upstream `Retry-After` delay at half the last known target duration. When no target duration is available, the
+  15-second fallback limits the delay to 7.5 seconds.
+* Playback reserve uses a stable session media clock and completed segment deliveries. Removing old cache entries
+  does not reset the playback position; missing segments, MAPs and keys still limit the usable reserve.
+* A retryable manifest failure marks the origin as degraded on the first failed attempt. A bounded background owner
+  reevaluates the remaining reserve and schedules the terminal transition independently of origin retries and client
+  playlist polling. New origin progress invalidates the pending transition.
+* A terminal video splice must commit before its safe splice deadline. After that deadline, a valid published lease
+  receives an HTTP `200` finite `channel_unavailable` Custom Response on the same manifest URL, containing only prepared
+  custom segments. This fallback needs no old cache segments and has a separate bounded commit budget that playlist
+  polls cannot renew. Successful authorized custom-segment requests renew the lease and session activity independently
+  of manifest polling after `ENDLIST`. Disabled, missing or invalid custom media can still produce an error response;
+  concrete preparation failures such as `TargetDurationExceeded` retain their diagnostic reason.
 * `reverse_proxy.rewrite_secret` must stay stable. It is used for future HLS `proxy_session_id` values and transient resource IDs.
 * `session_idle_timeout` controls HLS cache access-lease validity and idle cleanup. It is independent from
   `reverse_proxy.stream.hls_session_ttl_secs`, which belongs to the non-cache HLS request continuity path.
@@ -572,6 +618,24 @@ reverse_proxy:
 
 ## Additional Information
 
+### Shared HLS account replacement
+
+A shared HLS session checks its bound account when it needs origin work. Removed, expired, disabled and runtime-blocked
+accounts are replaced using available accounts from the same input pool. Manifest refreshes, segment and MAP cache misses,
+key/transient fetches and existing background workers use the same preparation path. Cached media needs no new allocation.
+There is no additional monitoring service or configuration setting.
+
+Replacement retains the shared session identity, valid access leases, published timeline and cached media. Tuliprox drops
+old provider cookies and recovery targets, resolves the entry URL with the replacement account, and qualifies its manifest
+against the existing timeline and content/host checks before scheduling new media. Catchup retains its archive identity.
+Account replacement assigns new resource IDs even when the concrete key URI is unchanged. Cached AES keys for previously
+published media retain their old IDs, so the replacement manifest cannot reuse a key cached for the previous account.
+
+If no suitable account is available, requests receive the existing temporary response with `Retry-After`; background work
+uses its existing retry budgets. Failed replacement attempts are separated by at least two seconds. Full capacity, foreign
+reservations, timeouts and isolated HTTP errors do not invalidate an otherwise healthy account. Replacement never borrows
+an account from another source or guarantees uninterrupted playback.
+
 ### Session TTLs for HLS (`.m3u8`) & Catchup
 
 HLS streams do not consist of an endless TCP pipe. Instead, the player downloads small `.ts` segments every few seconds (e.g., `seg1.ts`, `seg2.ts`).
@@ -584,6 +648,35 @@ hopping. Tuliprox therefore keeps a logical, confirmed slot lease for the playba
   create a capacity reservation.
 * Archive/Catchup playback uses the same confirmed-lease principle with `catchup_session_ttl_secs: 45`.
 * Provider errors, preemption, kicks and timeouts release the lease immediately rather than keeping the reconnect window.
+* `provider_affinity_ttl_secs: 120`: When a player pauses its requests longer than the reconnect window (for example
+  while buffering), the lease expires but the playback still prefers the provider account that last delivered its
+  media for another 120 seconds. This preference holds no slot: other playbacks can still use that account, and if it
+  is full, the playback falls back to the normal provider order. A full preferred account never receives a grace
+  over-allocation while another account has a free slot. Provider errors on the preferred account, preemption, kicks
+  and timeouts end the preference immediately; a failure on a fallback account keeps it. The preference applies to
+  reconnect-capable playback (HLS, DASH, Catchup, VOD), not to one-shot live MPEG-TS responses. `0` ends it together
+  with the reconnect window; values above `86400` are rejected.
+
+#### Playlist refreshes and client IP changes
+
+The playback owner of proxied live HLS contains the client IP, so that several devices of one user with the same app
+stay separate playbacks. A player that refreshes its playlist from alternating client IPs (dual-stack IPv4/IPv6,
+WLAN/mobile switching behind a reverse proxy) would therefore create a new owner on every IP change, and that owner
+could be placed on another provider account.
+
+With `hls_wrap_media_playlist: true` (default) and the shared HLS cache off, Tuliprox answers an entry request whose
+provider returns a media playlist with a single-variant master playlist. Its only URI is a sealed `/hls/...` token
+URL that carries the session token. The player refreshes that URL, so every refresh keeps the original owner, lease
+and provider account regardless of the client IP:
+
+* The playlist downloaded on the entry request is handed to the immediate variant request (once, for at most one
+  target duration), so channel start does not fetch the same playlist twice.
+* A refresh after the session has expired recreates the session from the token. It runs the same content access
+  checks and admission as the entry route; a sealed token of another user, channel or user agent is rejected, and a
+  session that was evicted, kicked or terminated is not recreated.
+* Child playlists of an upstream master are only fetched from the provider account that resolved them.
+
+With the shared HLS cache on, the playback owner does not contain the client IP, and this setting has no effect.
 
 ---
 

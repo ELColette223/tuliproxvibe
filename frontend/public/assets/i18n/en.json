@@ -1,4 +1,5 @@
 {
+  "HLS_STARTUP_MODE_DESCRIPTION": "Conservative keeps the existing startup behavior. First ready waits for a processed start segment. Progressive delivers raw TS and requires suitable sources; it takes effect for new sessions.",
   "BACKOFF_JITTER_PERCENT_VALIDATION": "Backoff jitter percent must be between 0 and 95.",
   "COUNTRY": {
     "AD": "Andorra",
@@ -257,6 +258,8 @@
   },
   "UNAUTHORIZED": "Not authorized",
   "EXPLANATION": {
+    "TABLE_COLUMNS_SHARED": "Use the switches to show or hide columns. Drag a handle to change the order. Save applies your changes; Restore defaults resets the layout.\n\nSpace or Enter picks up or drops a column. Use Up/Down to move; Escape cancels the move.\n\nThese settings are shared by everyone using this installation without authentication.",
+    "TABLE_COLUMNS": "Use the switches to show or hide columns. Drag a handle to change the order. Save applies your changes; Restore defaults resets the layout.\n\nSpace or Enter picks up or drops a column. Use Up/Down to move; Escape cancels the move.",
     "API_PROXY_CONFIG": {
       "USE_USER_DB": "If enabled, API proxy users are loaded from the user database.",
       "AUTH_ERROR_STATUS": "HTTP status code returned for authentication failures. Default is 403 (Forbidden)."
@@ -370,7 +373,10 @@
       "XTREAM_LIVE_STREAM_USE_PREFIX": "If true, adds /live/ prefix to Xtream stream links (default true).",
       "XTREAM_LIVE_STREAM_WITHOUT_EXTENSION": "If true, removes .ts extension from Xtream stream links (default false).",
       "DISABLE_HLS_STREAMING": "Replaces live Xtream .m3u8 requests with .ts. Enable only when the provider supports MPEG-TS endpoints; this does not transcode HLS.",
+      "FLUSSONIC_HLS_CATCHUP": "native keeps the provider’s native catch-up behavior (default). bounded_archive generates a fixed archive source for live M3U entries with catchup=\"fs\" and a /CHANNEL/mono.m3u8 URL when no catchup-source exists. The live URL and token remain unchanged.",
+      "FLUSSONIC_HLS_CATCHUP_MAX_DURATION_SECS": "Maximum archive playback window requested from the provider in bounded_archive mode. Default: 14400 seconds (4 hours). Allowed range: 1–604800 seconds. Longer player requests are shortened to this window from the selected start time; shorter requests keep their duration. Applies only to automatically generated Flussonic HLS archive sources. Explicit catchup sources, native mode and TS streams are unaffected. Refresh the playlist after changing this value.",
       "USER_AGENT_STREAM_INDEX": "Appends a process-local numeric index to the configured User-Agent. The index stays stable for one playback session across manifests, segments, seeks, reconnects, and provider failover.",
+      "FLUSSONIC_HLS_AUDIO_TRACKS": "Labels fragmented-MP4 HLS objects below Flussonic tracks-a<N> paths as audio/mp4 when the provider sends no specific Content-Type. Enable only for Flussonic sources.",
       "XTREAM_SKIP_LIVE": "If true, the live section of the Xtream provider is skipped during update.",
       "XTREAM_SKIP_SERIES": "If true, the series section of the Xtream provider is skipped during update.",
       "XTREAM_SKIP_VOD": "If true, the VOD section of the Xtream provider is skipped during update."
@@ -380,7 +386,7 @@
       "MAPPING": "List of mapping IDs to apply to this target.",
       "NAME": "Human readable name for this entry. Used for selective processing via -t CLI arg.",
       "USE_MEMORY_CACHE": "If enabled, the playlist is cached in RAM to reduce disk overhead (increases memory usage).",
-      "WATCH": "List of group patterns to monitor for changes. Notifications are sent via configured messaging."
+      "WATCH": "List of group patterns to monitor. Each pattern is a regular expression matched against the group name (e.g. ^Sport.* or (?i)event). Each entry reports channel changes, new groups and/or removed groups. Notifications are sent via configured messaging."
     },
     "CONFIG_TARGET_OPTIONS": {
       "CLEAR_INVALID_EPG_IDS": "Clears EPG IDs that do not match the processed EPG data. Playlist entries are not removed.",
@@ -388,6 +394,8 @@
       "SHARE_LIVE_STREAMS": "Enables live stream sharing. The master toggle sets HLS and MPEG-TS together; each format can also be changed separately."
     },
     "EPG_OUTPUT_OPTIONS": {
+      "CLEAR_INVALID_IDS": "Clears EPG IDs that do not match the processed EPG data. Playlist entries are not removed.",
+      "ADOPT_GUIDE_ID_CASE": "Rewrites a playlist EPG id that matches a guide channel only case-insensitively to the guide's exact channel id, so playlist ids, XMLTV and EPG API lookups stay identical. Enabled by default; a full target refresh is required after changing this option.",
       "LOWERCASE_IDS": "Canonicalizes technical EPG IDs to ASCII lowercase across M3U, Xtream, XMLTV, and EPG API output. A full target refresh is required after changing this option.",
       "LOWERCASE_XMLTV_DISPLAY_NAMES": "Converts only XMLTV display-name text to Unicode lowercase. Playlist names and programme titles remain unchanged."
     },
@@ -501,8 +509,6 @@
     },
     "INPUT_FORM": {
       "ALIASES": "Optional aliases used to manage multiple lines from the same provider.",
-      "RESOURCE_POLICY_ALLOWED_HOSTS": "Exact DNS names allowed to resolve to a private address. Enter host names only, without scheme, path, port, wildcard, or IP address. A private DNS resource requires both a matching host and network.",
-      "RESOURCE_POLICY_ALLOWED_NETWORKS": "Private CIDR ranges allowed for resources from this input. Only subnets of 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, and fc00::/7 are accepted. Use the smallest practical subnet.",
       "EPG_SOURCES": "Associated EPG (Electronic Program Guide) sources for this input.\n You can use `auto` to create the epg url based on your input settings,\nor you can write the full epg url.",
       "FETCH_METHOD": "HTTP method used to retrieve the input (e.g., GET, POST).",
       "HEADERS": "Custom HTTP headers sent when retrieving the input playlist.",
@@ -756,6 +762,8 @@
       "GRACE_PERIOD_TIMEOUT_SECS": "How many seconds to wait before terminating excess connections after grace period ends (default 5).",
       "HLS_SESSION_TTL_SECS": "How long to keep an HLS provider-account reservation alive between playlist or segment requests so the same provider account can be reused.",
       "METRICS_ENABLED": "Enables live stream bandwidth and transferred counters in the Streams table. Disable this to remove stream metering overhead entirely.",
+      "PROVIDER_AFFINITY_TTL_SECS": "How long a reconnect-capable playback (HLS, DASH, Catchup, VOD) keeps returning to the provider that last delivered its media after the reconnect window has ended. Holds no connection slot and never causes a grace over-allocation; other playbacks can still use the provider. Set 0 to end affinity together with the HLS/Catchup session TTL (default 120, maximum 86400).",
+      "HLS_WRAP_MEDIA_PLAYLIST": "If enabled (default), a proxied live HLS entry request whose provider returns a media playlist is answered with a single-variant master playlist. The player then refreshes a sealed token URL, so playback keeps its provider account when the client IP changes. Disable for players that mishandle a master playlist.",
       "RETRY": "Number of times to retry connecting to the provider on initial stream failure.",
       "SHARED_BURST_BUFFER_MB": "Initial buffer size in MB to provide immediate data to new clients joining a shared stream.",
       "THROTTLE": "Enables bandwidth limiting for outgoing streams.",
@@ -829,11 +837,9 @@
       "RESERVE_SLOTS_FOR_USERS": "Keeps this many provider slots free for normal user streaming before background downloads are allowed to consume them.\n\nSet to 0 to disable reserved headroom.",
       "WEB_SEARCH": "Template URL for external web search (e.g. IMDb). {} is replaced by the title."
     },
-    "VIDEO_DOWNLOAD_CONFIG": {
-      "DIRECTORY": "The destination directory for downloaded video files.",
-      "EPISODE_PATTERN": "Regex with 'episode' capture group to clean up series filenames.\nExample:\n```\nepisode_pattern: '.*(?P<episode>[Ss]\\\\d{1,2}.*?[Ee]\\\\d{1,2}).*'\n```",
-      "ORGANIZE_INTO_DIRECTORIES": "If enabled, creates subdirectories per movie or series during download."
-    },
+    "DIRECTORY": "The destination directory for recorded video files.",
+    "EPISODE_PATTERN": "Regex with 'episode' capture group to clean up series filenames.\nExample:\n```\nepisode_pattern: '.*(?P<episode>[Ss]\\\\d{1,2}.*?[Ee]\\\\d{1,2}).*'\n```",
+    "ORGANIZE_INTO_DIRECTORIES": "If enabled, creates subdirectories per movie or series while recording.",
     "WEBUI_CONFIG": {
       "CONTENT_SECURITY_POLICY_CUSTOM_ATTRIBUTES": "Custom CSP (Content Security Policy) directives applied to the Web UI."
     },
@@ -869,6 +875,10 @@
       "SKIP_LIVE_DIRECT_SOURCE": "If enabled, live streams are not linked directly but proxied/resolved.",
       "SKIP_SERIES_DIRECT_SOURCE": "If enabled, series episodes are not linked directly but proxied/resolved.",
       "SKIP_VIDEO_DIRECT_SOURCE": "If enabled, VOD files are not linked directly but proxied/resolved."
+    },
+    "MAINTENANCE": {
+      "INPUT": "Input to take out of service. While it is in maintenance, new streams get the maintenance video and Tuliprox does not contact its provider; running streams and recordings continue.",
+      "REASON": "Optional remark shown in the maintenance list, for example why the provider is down. At most 500 characters."
     }
   },
   "HINT": {
@@ -906,6 +916,17 @@
     "WEB_ROOT": "Web-Root: Contains the web-ui files. They are normally placed in the same directory under ./web"
   },
   "LABEL": {
+    "HLS_STARTUP_LIMITS": "Fast start limits",
+    "HLS_PROGRESSIVE_SEGMENTS": "Maximum progressive segments",
+    "HLS_PROGRESSIVE_BYTES_PER_SEGMENT": "Replay memory per segment",
+    "HLS_PROGRESSIVE_BYTES_TOTAL": "Total replay memory",
+    "HLS_PROGRESSIVE_READER_LIFETIME": "Maximum reader lifetime (seconds)",
+    "HLS_DEFERRED_REPAIRS": "Maximum pending repair jobs",
+    "HLS_STARTUP_MODE": "HLS startup mode",
+    "HLS_STARTUP_MODE_CONSERVATIVE": "Conservative",
+    "HLS_STARTUP_MODE_FIRST_READY": "First ready",
+    "HLS_STARTUP_MODE_PROGRESSIVE": "Progressive",
+    "HLS_STARTUP_MODE_OPTIMISTIC": "Optimistic",
     "ALL_TARGETS": "All targets",
     "ACCEPT_INSECURE_SSL_CERTIFICATES": "Accept Insecure SSL Certificates",
     "ACTIVE": "Active",
@@ -923,13 +944,21 @@
     "ADD_FORMAT": "Add Format",
     "ADD_HEADER": "Add header",
     "ADD_COUNTRY": "Add country",
-    "ADD_HOST": "Add host",
     "ADD_NETWORK": "Add network",
     "ADD_MAPPING": "Add Mapping",
     "ADD_PATTERN": "Add Pattern",
     "ADD_PROPERTY": "Add Property",
     "ADD_PROVIDER": "Add Provider",
     "ADD_QUALITY_TO_FILENAME": "Quality",
+    "MAINTENANCE": "Maintenance",
+    "MAINTENANCE_ADD_ALL": "All into maintenance",
+    "MAINTENANCE_COUNT": "{count} inputs in maintenance",
+    "MAINTENANCE_COUNT_ONE": "1 input in maintenance",
+    "MAINTENANCE_NONE": "No input in maintenance",
+    "MAINTENANCE_REASON": "Remark",
+    "MAINTENANCE_REMOVE_ALL": "End all maintenance",
+    "MAINTENANCE_SINCE": "Since",
+    "MANAGE": "Manage",
     "USE_METADATA": "Use metadata",
     "ADD_SERVER": "Add Server",
     "ADD_PLAN": "Add Plan",
@@ -957,7 +986,6 @@
     "ADD_VALUE": "Add value",
     "AUTOMATIC_CODEC_TRIGGER_POLICY": "automatic codec trigger policy",
     "ALLOWED_COUNTRIES": "Allowed Countries",
-    "ALLOWED_HOSTS": "Allowed Hosts",
     "ALLOWED_NETWORKS": "Allowed Networks",
     "ACCOUNT_TOKEN": "Account token",
     "ALLOW_RELAY": "Allow relay",
@@ -1073,33 +1101,23 @@
     "DNS_SCHEME_HTTPS": "HTTPS",
     "DNS_SCHEMES": "DNS Schemes",
     "DOWNLOAD": "Download",
-    "DOWNLOADS": "Downloads",
-    "DOWNLOAD_CANCEL": "Cancelled",
-    "DOWNLOAD_DOWNLOADED": "Downloaded",
-    "DOWNLOAD_FILE_SIZE": "File size",
-    "DOWNLOAD_FINISHED": "Finished",
-    "DOWNLOAD_QUEUE": "Queue",
+    "RECORDING_TRANSFERRED": "Downloaded",
+    "RECORDING_FILE_SIZE": "File size",
+    "RECORDING_QUEUE": "Queue",
     "ATTEMPT": "Attempt",
     "NEXT_RETRY": "Next retry",
-    "DOWNLOAD_RETRY_BACKOFF_JITTER_PERCENT": "Download retry jitter (%)",
-    "DOWNLOAD_RETRY_MAX_ATTEMPTS": "Download retry max attempts",
-    "DOWNLOAD_RETRY_BACKOFF_INITIAL": "Download retry initial backoff (secs)",
-    "DOWNLOAD_RETRY_BACKOFF_MULTIPLIER": "Download retry backoff multiplier",
-    "DOWNLOAD_RETRY_BACKOFF_MAX": "Download retry max backoff (secs)",
-    "DOWNLOAD_STATE_COMPLETED": "Completed",
-    "DOWNLOAD_STATE_DOWNLOADING": "Downloading",
-    "DOWNLOAD_STATE_FAILED": "Failed",
-    "DOWNLOAD_STATE_PAUSED": "Paused",
-    "DOWNLOAD_STATE_QUEUED": "Queued",
-    "DOWNLOAD_STATE_RETRY_WAITING": "Retry waiting",
-    "DOWNLOAD_STATE_SCHEDULED": "Scheduled",
-    "DOWNLOAD_STATE_WAITING_FOR_CAPACITY": "Waiting for capacity",
+    "RECORDING_RETRY_BACKOFF_JITTER_PERCENT": "Download retry jitter (%)",
+    "RECORDING_RETRY_MAX_ATTEMPTS": "Download retry max attempts",
+    "RECORDING_RETRY_BACKOFF_INITIAL": "Download retry initial backoff (secs)",
+    "RECORDING_RETRY_BACKOFF_MULTIPLIER": "Download retry backoff multiplier",
+    "RECORDING_RETRY_BACKOFF_MAX": "Download retry max backoff (secs)",
     "DURATION": "Duration",
     "DURATION_MINUTES": "Duration (min)",
     "EDIT": "Edit",
     "EMPTY": "",
     "ENABLED": "Enabled",
     "EPG": "Epg",
+    "EPG_GROUPS": "Groups",
     "EDIT_EPG_SMART_MATCH": "Edit EPG Smart Match",
     "EPG_LOGO_OVERRIDE": "Logo Override",
     "EPG_OUTPUT": "EPG output",
@@ -1162,6 +1180,8 @@
     "INCLUDE_TYPE_IN_URL": "Include type in url",
     "INFINITE": "Infinite",
     "INPUTS": "Inputs",
+    "PROVIDER_AFFINITY_TTL_SECS": "Provider Affinity TTL (secs)",
+    "HLS_WRAP_MEDIA_PLAYLIST": "Wrap HLS Media Playlist",
     "SELECTION_MODE": "Selection mode",
     "WHITELIST_INCLUDE_SELECTED": "Whitelist (include selected)",
     "BLACKLIST_EXCLUDE_SELECTED": "Blacklist (exclude selected)",
@@ -1190,7 +1210,10 @@
     "LIVE_STREAM_USE_PREFIX": "Use prefix",
     "LIVE_STREAM_WITHOUT_EXTENSION": "Without ext.",
     "DISABLE_HLS_STREAMING": "Force MPEG-TS",
+    "FLUSSONIC_HLS_CATCHUP": "Flussonic HLS catch-up",
+    "FLUSSONIC_HLS_CATCHUP_MAX_DURATION_SECS": "Max. Flussonic archive window (secs)",
     "USER_AGENT_STREAM_INDEX": "Append stream index to User-Agent",
+    "FLUSSONIC_HLS_AUDIO_TRACKS": "Label Flussonic audio tracks as audio/mp4",
     "LOG": "Log",
     "LOGS": "Logs",
     "LIVE_LOGS": "Live Logs",
@@ -1209,6 +1232,7 @@
     "LOG_ACTIVE_USER": "Log Active User",
     "LOG_CONFIG": "Log",
     "LOG_LEVEL": "Log Level",
+    "ADOPT_GUIDE_EPG_ID_CASE": "Adopt guide EPG ID case",
     "LOWERCASE_EPG_IDS": "Lowercase EPG IDs",
     "LOWERCASE_XMLTV_DISPLAY_NAMES": "Lowercase XMLTV display names",
     "M3U": "m3u",
@@ -1282,6 +1306,7 @@
     "MPEG_TS": "MPEG-TS",
     "MSG_KIND_ERROR": "Error",
     "MSG_KIND_INFO": "Info",
+    "MSG_KIND_MAINTENANCE_CHANGED": "Maintenance Changed",
     "MSG_KIND_LIBRARY_SCAN_COMPLETED": "Library Scan Completed",
     "MSG_KIND_LIBRARY_SCAN_FAILED": "Library Scan Failed",
     "MSG_KIND_METADATA_UPDATE_COMPLETED": "Metadata Update Completed",
@@ -1454,6 +1479,7 @@
     "RECORDING": "Recording",
     "RECORDING_ACTION_CANCEL": "Cancel",
     "RECORDING_ACTION_DELETE": "Delete",
+    "RECORDING_ACTION_REMOVE_ENTRY": "Remove entry (keep file)",
     "RECORDING_ACTION_EDIT": "Edit",
     "RECORDING_COLUMN_ACTIONS": "Actions",
     "RECORDING_COLUMN_CHANNEL": "Channel",
@@ -1476,6 +1502,14 @@
     "RECORDING_HIGH_WATER_PERCENT": "High-water mark (%)",
     "RECORDING_KEEP_LAST_PER_CHANNEL": "Keep last per channel",
     "RECORDING_LIBRARY": "Recordings",
+    "RECORDING_CONFIG": "Recording",
+    "RECORDING_CURRENT": "Current",
+    "RECORDING_COMPLETED": "Completed",
+    "RECORDING_OFFLINE": "Offline — showing the last known state",
+    "RECORDING_EMPTY": "No recordings",
+    "RECORDING_UNAVAILABLE": "Recordings are not available",
+    "RECORDING_DISABLED_HINT": "Recording is not enabled on this server. Enable it in the server configuration.",
+    "RECORDING_TOKEN_REFRESH_HINT": "Your session is out of date. Sign in again to refresh it.",
     "RECORDING_LOW_WATER_PERCENT": "Low-water mark (%)",
     "RECORDING_MAX_ATTEMPTS": "Notification max attempts",
     "RECORDING_MAX_POST_ROLL_SECS": "Maximum post-roll (seconds)",
@@ -1529,6 +1563,8 @@
     "REFRESH": "Refresh",
     "REGEXP": "Regexp",
     "RELEASES": "Releases",
+    "CREDITS": "Credits",
+    "CREDITS_CONTENT": "Attributions and third-party notices",
     "REMOVE_DUPLICATES": "Remove duplicates",
     "CLEAR_INVALID_EPG_IDS": "Clear invalid EPG IDs",
     "RENAME": "Rename",
@@ -1542,9 +1578,6 @@
     "RESOLVE_FILTER": "Resolve Filter",
     "RESOLVE_TMDB": "Resolve TMDB",
     "RESOURCE_IMAGE_CACHE": "Resource/Image Cache",
-    "RESOURCE_ALLOWED_HOSTS": "Allowed Resource Hosts",
-    "RESOURCE_ALLOWED_NETWORKS": "Allowed Resource Networks",
-    "RESOURCE_POLICY": "Resource Policy",
     "RESOURCE_RETRY": "Resource Retry",
     "RESOURCE_REWRITE_DISABLE": "Resource Rewrite disable",
     "RESOURCE_REWRITE_DISABLED": "Resource Rewrite Disabled",
@@ -1668,6 +1701,7 @@
     "STREAM_HISTORY_TIME": "Time",
     "STREAM_HISTORY_TO": "To",
     "STREAM_HISTORY_ENABLED": "Enable stream history",
+    "STREAM_HISTORY_DISABLED_HINT": "Stream history is not enabled on this server. Enable it in the server configuration.",
     "STREAM_HISTORY_BATCH_SIZE": "Batch size",
     "STREAM_HISTORY_DETAILS": "Details",
     "STREAM_HISTORY_DISCONNECTS": "Disconnects",
@@ -1705,6 +1739,8 @@
     "TMDB": "TMDB",
     "TOKEN": "Token",
     "TOKEN_TTL_MINS": "Token ttl (mins)",
+    "CURATION": "Curation",
+    "CURATION_YAML_NOTICE": "Target curation is configured in YAML. These settings are preserved when editing other fields; legacy Trakt controls are unavailable for this target.",
     "TRAKT": "Trakt",
     "TRAKT_CATALOG_SELECTION": "VOD and series catalog",
     "TRAKT_CATALOG_SELECTION_FULL": "Full catalog",
@@ -1798,6 +1834,9 @@
     "VOD": "VOD",
     "VOD_SHORT": "V",
     "WATCH": "Watch",
+    "WATCH_CHANNELS": "Channels",
+    "WATCH_GROUP_ADDED": "New groups",
+    "WATCH_GROUP_REMOVED": "Removed groups",
     "WEBHOOK_URL": "Webhook URL",
     "WEB_AUTH": "Auth",
     "WEB_ROOT": "Web-Root",
@@ -1851,7 +1890,6 @@
     "VIEW_TYPE_STATS": "Stats",
     "VIEW_TYPE_STREAMS": "Streams",
     "VIEW_TYPE_STREAM_HISTORY": "Stream History",
-    "VIEW_TYPE_DOWNLOADS": "Downloads",
     "VIEW_TYPE_USERS": "Api Users",
     "VIEW_TYPE_CONFIG": "Config",
     "VIEW_TYPE_SOURCE_EDITOR": "Sources",
@@ -1892,6 +1930,7 @@
     "TASK_STATUS_COMPLETED": "Completed",
     "TASK_STATUS_FAILED": "Failed",
     "TASK_STATUS_CANCELLED": "Cancelled",
+    "TASK_STATUS_CANCELLING": "Cancelling",
     "CONFLICT_NO_KNOWN_CONFLICT": "No conflict",
     "CONFLICT_POSSIBLE_CAPACITY_WAIT": "May wait for a free slot",
     "CONFLICT_LIKELY_MISSED_WINDOW": "Likely to miss the programme",
@@ -1914,35 +1953,6 @@
     "CONFIG_CHANGED": "Configuration on server changed.",
     "CONFIRM_DELETE": "You really want to delete it?",
     "CONFIRM_SOURCES_SAVE": "Do you really want to save?",
-    "DOWNLOAD": {
-      "DOWNLOAD_QUEUED": "Download queued.",
-      "RECORDING_QUEUED": "Recording queued.",
-      "DOWNLOAD_PAUSED": "Download paused.",
-      "DOWNLOAD_RESUMED": "Download resumed",
-      "DOWNLOAD_CANCELLED": "Download cancelled.",
-      "DOWNLOAD_REMOVED": "Download removed.",
-      "DOWNLOAD_RETRIED": "Download retried.",
-      "CONFIRM_CANCEL": "Do you really want to cancel this transfer?",
-      "CONFIRM_REMOVE": "Do you really want to remove this entry?",
-      "FAIL": "Failed to download!",
-      "INVALID_RECORD_DURATION": "Recording duration must be a positive number of minutes.",
-      "INVALID_RECORD_START": "Recording start time is invalid.",
-      "GEOIP": {
-        "FAIL": "Failed to download Geo-IP db!",
-        "SUCCESS": "Successfully downloaded Geo-IP db"
-      },
-      "PLAYLIST": {
-        "FAIL": "Failed to download playlist!",
-        "SUCCESS": "Successfully downloaded playlist"
-      },
-      "SERVER_CONFIG": {
-        "FAIL": "Failed to download server config!"
-      },
-      "SUCCESS": "Successfully downloaded",
-      "USER_BOUQUET": {
-        "FAIL": "Failed to download user bouquets!"
-      }
-    },
     "FAILED_TO_KICK_USER_STREAM": "Failed to kick user stream",
     "FAILED_TO_RETRIEVE_PROVIDER_URL": "Failed to retrieve provider URL",
     "FAILED_TO_RETRIEVE_WEBPLAYER_URL": "Failed to retrieve webplayer URL",
@@ -1955,6 +1965,11 @@
     "LOGIN": {
       "MESSAGE": "Enter Your Credentials",
       "FAILED": "Failed to login"
+    },
+    "MAINTENANCE": {
+      "LOAD_FAILED": "Could not load maintenance state",
+      "REASON_TOO_LONG": "The remark may have at most 500 characters",
+      "SAVE_FAILED": "Could not save maintenance state"
     },
     "SESSION": {
       "EXPIRED": "Your session has expired. Please log in again."
@@ -1981,7 +1996,11 @@
     },
     "EPG": {
       "SELECT_AN_EPG_TO_VIEW_CONTENT": "Select an epg to view its content.",
-      "SELECT_AN_EPG_HINT": "Choose an EPG source above to preview its programme guide."
+      "SELECT_AN_EPG_HINT": "Choose an EPG source above to preview its programme guide.",
+      "NO_GROUPS_WITH_EPG": "No playlist group has channels with EPG data.",
+      "UPDATE_TARGET_FOR_GROUPS": "Update the target once to use the group view.",
+      "GROUP_TRUNCATED": "This group has more channels than can be shown; only the first 1000 are listed.",
+      "NO_SEARCH_MATCHES": "No channel matches the search."
     },
     "RECORDING": {
       "INVALID_QUOTA": "Quota values must be non-negative whole numbers of bytes.",
@@ -2022,7 +2041,16 @@
       "EMPTY_RULES": "No recurring rules yet. Create one to record a series automatically.",
       "RULE_DELETED": "Recurring rule deleted.",
       "RULE_UPDATED": "Recurring rule updated.",
-      "RULE_SAVED": "Recurring rule saved."
+      "RULE_SAVED": "Recurring rule saved.",
+      "TASK_PAUSED": "Recording paused.",
+      "TASK_RESUMED": "Recording resumed.",
+      "TASK_REMOVED": "Recording removed.",
+      "TASK_RETRIED": "Recording queued again.",
+      "RANGE_UNSUPPORTED": "The provider does not support resuming this download.",
+      "CONFIRM_RESTART_FROM_BEGINNING": "The provider does not support partial downloads. Start this recording again from the beginning? The saved partial download will be discarded.",
+      "CONFIRM_CANCEL": "Do you really want to stop this recording?",
+      "CONFIRM_REMOVE": "Remove this entry from the list? The saved file will be kept.",
+      "CONFIRM_DELETE_FILE": "Delete this recording and its saved file?"
     },
     "RBAC": {
       "ADMIN_HINT": "User is Admin — additional groups have no effect.",
@@ -2046,7 +2074,6 @@
       "BASELINE": "Previous population",
       "BULK_BUSY": "Another playlist update is already running or queued. The bulk update was not started.",
       "BULK_ONLY_DESCRIPTION": "Single-input updates are not available for this input. Use ‘Update all inputs’.",
-      "PROVIDER_IMPORT_UNAVAILABLE": "Provider import not available",
       "CACHE_BYPASSED_FORCE": "Bypassed by Force",
       "CACHE_BYPASSED_REFRESH": "Bypassed by Refresh",
       "CACHE_NOT_USED": "Not used (provider)",
@@ -2184,6 +2211,13 @@
       "NETWORK_ACCESS_COUNTRIES": "Enter one 2-letter ISO country code per entry, for example DE.",
       "NETWORK_ACCESS_NETWORKS": "Enter one CIDR per entry, for example 192.168.0.0/16 or 2001:db8::/32.",
       "REQUIRED": "This field is required."
+    },
+    "GEOIP": {
+      "FAIL": "Failed to download Geo-IP db!",
+      "SUCCESS": "Successfully downloaded Geo-IP db"
+    },
+    "USER_BOUQUET": {
+      "FAIL": "Failed to download user bouquets!"
     }
   },
   "SETUP": {
@@ -2367,5 +2401,52 @@
     "PREVIEW_REMOVAL": "Preview removals",
     "CANCEL": "Cancel",
     "APPLY_REMOVALS": "Apply removals"
+  },
+  "TABLE_COLUMNS": {
+    "COLUMNS": "Columns",
+    "OPEN": "Customize table columns",
+    "TITLE": "Customize columns",
+    "ACTIONS": "Actions",
+    "CLOSE": "Close",
+    "REQUIRED": "Required",
+    "REORDER": "Reorder {column}",
+    "KEYBOARD_HELP": "Space or Enter picks up or drops a column. Use Up/Down to move; Escape cancels the move.",
+    "POSITION": "{column}, position {position} of {total}",
+    "RESET": "Restore defaults",
+    "CANCEL": "Cancel",
+    "SAVE": "Save",
+    "RETRY": "Retry",
+    "REAPPLY": "Apply my draft to the current version",
+    "CONFLICT": "This layout changed in another session. Your draft is preserved. Review and apply it again explicitly.",
+    "ERROR": "Settings could not be loaded or saved. Your draft is preserved.",
+    "LOAD_ERROR": "Table settings could not be loaded. Default columns are shown.",
+    "SHARED": "These settings are shared by everyone using this installation without authentication.",
+    "LIMIT": "This CSV has more than 256 columns. All columns remain visible; saving a layout is unavailable.",
+    "ERROR_INVALID": "The settings file is invalid. Correct it before saving.",
+    "ERROR_VERSION_UNSUPPORTED": "This settings file uses an unsupported version.",
+    "ERROR_OWNER_MISMATCH": "The settings file belongs to another identity.",
+    "ERROR_FILE_UNSAFE": "The settings path is not a regular file.",
+    "ERROR_LIMITS_EXCEEDED": "The settings limit was reached. No changes were saved.",
+    "ERROR_PAYLOAD_INVALID": "The column layout is invalid.",
+    "ERROR_ID_INVALID": "A table or column identifier is invalid.",
+    "ERROR_IO_ERROR": "The settings file could not be read or written.",
+    "TABLE_USERS": "Users",
+    "TABLE_PLAYLIST_INPUTS": "Playlist inputs",
+    "TABLE_PLAYLIST_TARGETS": "Playlist targets",
+    "TABLE_CONFIG_API_SERVERS": "API servers",
+    "TABLE_CONFIG_USER_PLANS": "User plans",
+    "TABLE_RBAC_USERS": "Web UI users",
+    "TABLE_RBAC_GROUPS": "Groups",
+    "TABLE_RECORDING_LIBRARY": "Recordings",
+    "TABLE_RECORDING_RULES": "Recording rules",
+    "TABLE_STREAM_HISTORY_RECORDS": "Stream history",
+    "TABLE_STREAM_HISTORY_PROVIDERS": "Provider summary",
+    "TABLE_STREAM_HISTORY_QOS_SUMMARY": "Quality summary",
+    "TABLE_STREAM_HISTORY_QOS_DETAILS": "Quality details",
+    "TABLE_CONFIG_LIBRARY_DIRECTORIES": "Library directories",
+    "TABLE_CONFIG_SCHEDULES": "Schedules",
+    "TABLE_RBAC_PERMISSION_MATRIX": "Permissions",
+    "TABLE_PLAYLIST_ACCOUNTS_CSV": "Accounts CSV"
+
   }
 }

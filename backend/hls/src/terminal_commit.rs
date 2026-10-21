@@ -30,14 +30,36 @@ const HLS_TERMINAL_COMMIT_LIVE_CLOCK: u64 = u64::MAX;
 
 pub(super) struct HlsTerminalCommitClock {
     fixed_now_ms: AtomicU64,
+    /// When set, `now_ms` is driven by tokio's clock instead of the wall clock.
+    ///
+    /// Scheduling here is expressed as wall-clock milliseconds while the waits
+    /// are tokio timers. That is consistent in production, where both advance
+    /// together, but not under `start_paused`: `tokio::time::advance` moves the
+    /// timers and leaves the wall clock behind, so a loop that sleeps until a
+    /// wall-clock deadline never reaches it and spins until its budget is gone.
+    /// Anchoring both to tokio's clock makes such a test deterministic.
+    #[cfg(test)]
+    virtual_origin: std::sync::Mutex<Option<(u64, tokio::time::Instant)>>,
 }
 
 impl Default for HlsTerminalCommitClock {
-    fn default() -> Self { Self { fixed_now_ms: AtomicU64::new(HLS_TERMINAL_COMMIT_LIVE_CLOCK) } }
+    fn default() -> Self {
+        Self {
+            fixed_now_ms: AtomicU64::new(HLS_TERMINAL_COMMIT_LIVE_CLOCK),
+            #[cfg(test)]
+            virtual_origin: std::sync::Mutex::new(None),
+        }
+    }
 }
 
 impl HlsTerminalCommitClock {
     pub(super) fn now_ms(&self) -> u64 {
+        #[cfg(test)]
+        if let Some((base_ms, origin)) = *self.virtual_origin.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            let elapsed = tokio::time::Instant::now().saturating_duration_since(origin).as_millis();
+            return base_ms.saturating_add(u64::try_from(elapsed).unwrap_or(u64::MAX));
+        }
         let fixed_now_ms = self.fixed_now_ms.load(Ordering::Acquire);
         if fixed_now_ms == HLS_TERMINAL_COMMIT_LIVE_CLOCK {
             current_time_millis()
@@ -46,12 +68,26 @@ impl HlsTerminalCommitClock {
         }
     }
 
+    /// Anchor this clock to tokio's, so `tokio::time::advance` moves it too.
+    #[cfg(test)]
+    pub(super) fn follow_tokio_clock(&self, base_ms: u64) {
+        *self.virtual_origin.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((base_ms, tokio::time::Instant::now()));
+    }
+
     #[cfg(test)]
     pub(super) fn set_fixed_now_ms(&self, now_ms: u64) { self.fixed_now_ms.store(now_ms, Ordering::Release); }
 
+    #[cfg(test)]
+    fn follows_tokio_clock(&self) -> bool {
+        self.virtual_origin.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some()
+    }
+
     pub(super) fn initial_attempt_now_ms(&self, supplied_now_ms: u64) -> u64 {
+        // A clock anchored to tokio advances on its own, so it behaves like the
+        // live one; only a frozen test clock defers to the supplied value.
         #[cfg(test)]
-        if self.fixed_now_ms.load(Ordering::Acquire) == HLS_TERMINAL_COMMIT_LIVE_CLOCK {
+        if !self.follows_tokio_clock() && self.fixed_now_ms.load(Ordering::Acquire) == HLS_TERMINAL_COMMIT_LIVE_CLOCK {
             return supplied_now_ms;
         }
         self.now_ms().max(supplied_now_ms)
@@ -118,6 +154,7 @@ pub(super) type HlsTerminalCommitAttemptFn =
 #[derive(Debug, Clone)]
 pub enum HlsTerminalLeaseDecision {
     Tail(Arc<HlsTerminalTailPlan>),
+    CustomResponse(Arc<crate::late_custom_response::HlsLateCustomResponsePlan>),
     Unavailable(HlsTerminalTailCompatibility),
     UnavailableAfterOwnerFailure(HlsTerminalTailCompatibility),
 }
@@ -267,6 +304,16 @@ impl HlsTerminalCommitCommand {
         self.preparation.cutover_timing.latest_safe_terminal_commit_at.as_millis_since_epoch()
     }
 
+    fn submission_deadline_ms(&self, now_ms: u64) -> u64 {
+        if self.has_independent_commit_deadline() {
+            // No live media is spliced by this decision. It gets one bounded CAS budget,
+            // even when the media deadline has already elapsed; repeated submissions cannot renew it.
+            now_ms.saturating_add(terminal_commit_retry_schedule_budget_ms())
+        } else {
+            self.latest_safe_terminal_commit_at_ms()
+        }
+    }
+
     /// Monotonic session/lease evidence used to prevent a late stale request
     /// from replacing a newer command for the same lease decision generation.
     fn evidence_version(&self) -> [u64; 7] {
@@ -281,8 +328,11 @@ impl HlsTerminalCommitCommand {
         ]
     }
 
-    fn is_unavailable_after_owner_failure(&self) -> bool {
-        matches!(&self.decision, HlsTerminalLeaseDecision::UnavailableAfterOwnerFailure(_))
+    fn has_independent_commit_deadline(&self) -> bool {
+        matches!(
+            &self.decision,
+            HlsTerminalLeaseDecision::CustomResponse(_) | HlsTerminalLeaseDecision::UnavailableAfterOwnerFailure(_)
+        )
     }
 
     fn may_replace(&self, current: &Self) -> bool {
@@ -293,8 +343,8 @@ impl HlsTerminalCommitCommand {
             return self.session_incarnation > current.session_incarnation;
         }
         let evidence_order = self.evidence_version().cmp(&current.evidence_version());
-        if self.is_unavailable_after_owner_failure()
-            && !current.is_unavailable_after_owner_failure()
+        if self.has_independent_commit_deadline()
+            && !current.has_independent_commit_deadline()
             && evidence_order != std::cmp::Ordering::Less
         {
             return true;
@@ -323,6 +373,7 @@ impl std::fmt::Debug for HlsTerminalCommitCommand {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let decision_kind = match &self.decision {
             HlsTerminalLeaseDecision::Tail(_) => "tail",
+            HlsTerminalLeaseDecision::CustomResponse(_) => "custom-response",
             HlsTerminalLeaseDecision::Unavailable(_) => "unavailable",
             HlsTerminalLeaseDecision::UnavailableAfterOwnerFailure(_) => "unavailable-after-owner-failure",
         };
@@ -620,7 +671,7 @@ impl HlsTerminalCommitRetryCoordinator {
             return HlsTerminalCommitSubmissionDecision::Cancelled;
         }
         let key = command.key.clone();
-        let incoming_deadline_ms = command.latest_safe_terminal_commit_at_ms();
+        let incoming_deadline_ms = command.submission_deadline_ms(now_ms);
         if let Some(existing) = state.owners.get(&key).map(HlsTerminalCommitExistingOwner::snapshot) {
             return self.submit_existing(&mut state, command, &key, now_ms, incoming_deadline_ms, existing);
         }
@@ -636,8 +687,21 @@ impl HlsTerminalCommitRetryCoordinator {
         incoming_deadline_ms: u64,
         existing: HlsTerminalCommitExistingOwner,
     ) -> HlsTerminalCommitSubmissionDecision {
-        let effective_deadline_ms = existing.effective_deadline_ms.min(incoming_deadline_ms);
-        if !command.may_replace(&existing.command) {
+        let may_replace = command.may_replace(&existing.command);
+        let changes_deadline_kind =
+            command.has_independent_commit_deadline() != existing.command.has_independent_commit_deadline();
+        let replaces_splice_with_independent_commit =
+            changes_deadline_kind && may_replace && command.has_independent_commit_deadline();
+        let effective_deadline_ms = if changes_deadline_kind {
+            if may_replace {
+                incoming_deadline_ms
+            } else {
+                existing.effective_deadline_ms
+            }
+        } else {
+            existing.effective_deadline_ms.min(incoming_deadline_ms)
+        };
+        if !may_replace {
             let deadline_tightened = effective_deadline_ms < existing.effective_deadline_ms;
             let tightened_scheduled_at_ms = if deadline_tightened {
                 terminal_commit_scheduled_before_deadline(existing.scheduled_at_ms, now_ms, effective_deadline_ms)
@@ -696,7 +760,8 @@ impl HlsTerminalCommitRetryCoordinator {
         if let Some(owner) = state.owners.get_mut(key) {
             owner.owner_token = owner_token;
             owner.command = Arc::clone(&command);
-            owner.attempts_completed = existing.attempts_completed.max(1);
+            owner.attempts_completed =
+                if replaces_splice_with_independent_commit { 1 } else { existing.attempts_completed.max(1) };
             owner.effective_deadline_ms = effective_deadline_ms;
             owner.scheduled_at_ms = now_ms;
             owner.scheduling_sequence = scheduling_sequence;
@@ -1326,6 +1391,7 @@ mod tests {
             terminal_media_preparation: HlsTerminalMediaPreparationState::Failed { key: None },
             reserve,
             manifest_snapshot: HlsLeaseManifestSnapshot {
+                startup_revisions: None,
                 delivery_mode: HlsManifestDeliveryMode::NormalCacheTimeline,
                 source_commit_identity: HlsManifestCommitIdentity::new(1),
                 uri_materialization: None,
@@ -1545,7 +1611,7 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_after_owner_failure_retains_the_exclusive_media_tail_deadline() {
+    fn unavailable_after_owner_failure_has_a_separate_bounded_cas_deadline() {
         let mut command = retry_command("failed-closed-unavailable", 10_000, 1, 1);
         let media_tail_deadline =
             command.preparation.cutover_timing.latest_safe_terminal_commit_at.as_millis_since_epoch();
@@ -1554,10 +1620,11 @@ mod tests {
         command.decision =
             HlsTerminalLeaseDecision::UnavailableAfterOwnerFailure(HlsTerminalTailCompatibility::TerminalMediaNotReady);
         assert_eq!(command.latest_safe_terminal_commit_at_ms(), media_tail_deadline);
+        assert_eq!(command.submission_deadline_ms(20_000), 20_000 + super::terminal_commit_retry_schedule_budget_ms());
     }
 
     #[test]
-    fn failed_media_tail_owner_cannot_be_replaced_at_the_exclusive_deadline() {
+    fn failed_media_tail_owner_can_finish_unavailable_at_the_exclusive_deadline() {
         let coordinator = HlsTerminalCommitRetryCoordinator::default();
         let command = retry_command("failed-owner-replacement", 10_000, 1, 1);
         let key = command.key.clone();
@@ -1571,7 +1638,7 @@ mod tests {
         coordinator.fail_owner(&key, owner_token, HlsTerminalCommitOutcome::SafeCommitDeadlineElapsed);
 
         let replacement = HlsTerminalCommitCommand {
-            key,
+            key: key.clone(),
             session,
             session_incarnation,
             preparation,
@@ -1585,8 +1652,11 @@ mod tests {
         };
         assert!(matches!(
             coordinator.submit(replacement, failed_at_ms),
-            HlsTerminalCommitSubmissionDecision::Failed(HlsTerminalCommitOutcome::SafeCommitDeadlineElapsed)
+            HlsTerminalCommitSubmissionDecision::Attempt { .. }
         ));
+        let owner = coordinator.owner_snapshot(&key).expect("unavailable CAS owner");
+        assert_eq!(owner.effective_deadline_ms, failed_at_ms + super::terminal_commit_retry_schedule_budget_ms());
+        assert_eq!(owner.attempts_completed, 1);
     }
 
     #[test]
@@ -1859,5 +1929,36 @@ mod tests {
         ));
         assert!(!coordinator.owner_snapshot(&first_key).expect("released worker owner").in_flight);
         assert!(coordinator.owner_snapshot(&second_key).expect("unrelated client owner").in_flight);
+    }
+
+    #[test]
+    fn unavailable_cas_budget_is_neither_renewed_by_polls_nor_poisoned_by_stale_media_deadlines() {
+        let coordinator = HlsTerminalCommitRetryCoordinator::default();
+        let mut initial = retry_command("bounded-unavailable", 10_000, 1, 1);
+        initial.decision =
+            HlsTerminalLeaseDecision::UnavailableAfterOwnerFailure(HlsTerminalTailCompatibility::TerminalMediaNotReady);
+        let session = Arc::clone(&initial.session);
+        let key = initial.key.clone();
+        assert!(matches!(coordinator.submit(initial, 10_000), HlsTerminalCommitSubmissionDecision::Attempt { .. }));
+        let deadline = coordinator.owner_snapshot(&key).expect("initial owner").effective_deadline_ms;
+        let mut stale_media = retry_command("bounded-unavailable", 10_000, 2, 1);
+        stale_media.session = Arc::clone(&session);
+        assert!(matches!(
+            coordinator.submit(stale_media, 10_100),
+            HlsTerminalCommitSubmissionDecision::PendingExisting { .. }
+        ));
+        assert_eq!(
+            coordinator.owner_snapshot(&key).expect("unavailable owner survives stale media").effective_deadline_ms,
+            deadline
+        );
+        let mut duplicate = retry_command("bounded-unavailable", 10_000, 3, 1);
+        duplicate.session = session;
+        duplicate.decision =
+            HlsTerminalLeaseDecision::UnavailableAfterOwnerFailure(HlsTerminalTailCompatibility::TerminalMediaNotReady);
+        assert!(matches!(
+            coordinator.submit(duplicate, deadline),
+            HlsTerminalCommitSubmissionDecision::Failed(HlsTerminalCommitOutcome::SafeCommitDeadlineElapsed)
+        ));
+        assert_eq!(coordinator.owner_snapshot(&key).expect("bounded owner").effective_deadline_ms, deadline);
     }
 }

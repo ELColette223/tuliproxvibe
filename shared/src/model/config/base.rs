@@ -2,18 +2,13 @@ use crate::{
     defaults::{
         default_as_true, default_connect_timeout_secs, default_custom_stream_response_error_status,
         default_custom_stream_response_path, default_default_user_agent, default_event_channel_capacity,
-        default_interner_gc_interval_secs, default_interner_gc_min_pool_size, default_main_backup_dir,
-        default_main_mapping_path, default_main_storage_dir, default_main_template_path, default_main_user_config_dir,
-        default_supported_video_extensions, is_blank_or_default_backup_dir,
+        default_interner_gc_interval_secs, default_interner_gc_min_pool_size, is_blank_or_default_backup_dir,
         is_blank_or_default_custom_stream_response_path, is_blank_or_default_mapping_path,
         is_blank_or_default_storage_dir, is_blank_or_default_template_path, is_blank_or_default_user_config_dir,
         is_default_connect_timeout_secs, is_default_custom_stream_response_error_status,
         is_default_event_channel_capacity, is_default_interner_gc_interval_secs, is_default_interner_gc_min_pool_size,
-        is_false, is_none_or_empty_metadata_update, is_none_or_empty_video, is_true, is_zero_u32,
-        normalize_optional_config_file_path, normalize_optional_dir, DEFAULT_BACKUP_DIR,
-        DEFAULT_CUSTOM_STREAM_RESPONSE_PATH, DEFAULT_STORAGE_DIR, DEFAULT_USER_CONFIG_DIR, MAPPING_FILE, TEMPLATE_FILE,
+        is_false, is_none_or_empty_metadata_update, is_true, is_zero_u32,
     },
-    error::TuliproxError,
     model::{
         ConfigApiDto, HdHomeRunConfigDto, IpCheckConfigDto, LibraryConfigDto, LogConfigDto, MessagingConfigDto,
         MetadataUpdateConfigDto, ProxyConfigDto, ReverseProxyConfigDto, ScheduleConfigDto, VideoConfigDto,
@@ -23,8 +18,7 @@ use crate::{
 };
 
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ConfigDto {
     #[serde(default, skip_serializing_if = "is_false")]
     pub process_parallel: bool,
@@ -65,7 +59,7 @@ pub struct ConfigDto {
         skip_serializing_if = "is_default_custom_stream_response_error_status"
     )]
     pub custom_stream_response_error_status: u16,
-    #[serde(default, skip_serializing_if = "is_none_or_empty_video")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video: Option<VideoConfigDto>,
     #[serde(default, skip_serializing_if = "is_none_or_empty_metadata_update")]
     pub metadata_update: Option<MetadataUpdateConfigDto>,
@@ -155,618 +149,123 @@ impl Default for ConfigDto {
     }
 }
 
-// This MainConfigDto is a copy of ConfigDto simple fields for form editing.
-// It has no other purpose than editing and saving the simple config values
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct MainConfigDto {
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub process_parallel: bool,
-    #[serde(default = "default_main_storage_dir", skip_serializing_if = "is_blank_or_default_storage_dir")]
-    pub storage_dir: Option<String>,
-    #[serde(default = "default_default_user_agent", skip_serializing_if = "is_blank_optional_string")]
-    pub default_user_agent: Option<String>,
-    #[serde(default = "default_main_backup_dir", skip_serializing_if = "is_blank_or_default_backup_dir")]
-    pub backup_dir: Option<String>,
-    #[serde(default = "default_main_user_config_dir", skip_serializing_if = "is_blank_or_default_user_config_dir")]
-    pub user_config_dir: Option<String>,
-    #[serde(default = "default_main_mapping_path", skip_serializing_if = "is_blank_or_default_mapping_path")]
-    pub mapping_path: Option<String>,
-    #[serde(default = "default_main_template_path", skip_serializing_if = "is_blank_or_default_template_path")]
-    pub template_path: Option<String>,
-    #[serde(default, skip_serializing_if = "is_blank_optional_string")]
-    pub custom_stream_response_path: Option<String>,
-    #[serde(default, skip_serializing_if = "is_zero_u32")]
-    pub custom_stream_response_timeout_secs: u32,
-    #[serde(default = "default_as_true", skip_serializing_if = "is_true")]
-    pub custom_stream_response_enabled: bool,
-    #[serde(
-        default = "default_custom_stream_response_error_status",
-        skip_serializing_if = "is_default_custom_stream_response_error_status"
-    )]
-    pub custom_stream_response_error_status: u16,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub user_access_control: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub disk_based_processing: bool,
-    #[serde(default = "default_connect_timeout_secs", skip_serializing_if = "is_default_connect_timeout_secs")]
-    pub connect_timeout_secs: u32,
-    #[serde(
-        default = "default_interner_gc_interval_secs",
-        skip_serializing_if = "is_default_interner_gc_interval_secs"
-    )]
-    pub interner_gc_interval_secs: u32,
-    #[serde(
-        default = "default_interner_gc_min_pool_size",
-        skip_serializing_if = "is_default_interner_gc_min_pool_size"
-    )]
-    pub interner_gc_min_pool_size: u32,
-    #[serde(default = "default_event_channel_capacity", skip_serializing_if = "is_default_event_channel_capacity")]
-    pub event_channel_capacity: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sleep_timer_mins: Option<u32>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub update_on_boot: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub config_hot_reload: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub accept_insecure_ssl_certificates: bool,
-}
-
-impl Default for MainConfigDto {
-    fn default() -> Self {
-        MainConfigDto {
-            process_parallel: false,
-            disk_based_processing: false,
-            storage_dir: default_main_storage_dir(),
-            default_user_agent: default_default_user_agent(),
-            backup_dir: default_main_backup_dir(),
-            user_config_dir: default_main_user_config_dir(),
-            mapping_path: default_main_mapping_path(),
-            template_path: default_main_template_path(),
-            custom_stream_response_path: None,
-            custom_stream_response_timeout_secs: 0,
-            custom_stream_response_enabled: true,
-            custom_stream_response_error_status: default_custom_stream_response_error_status(),
-            user_access_control: false,
-            connect_timeout_secs: default_connect_timeout_secs(),
-            interner_gc_interval_secs: default_interner_gc_interval_secs(),
-            event_channel_capacity: default_event_channel_capacity(),
-            interner_gc_min_pool_size: default_interner_gc_min_pool_size(),
-            sleep_timer_mins: None,
-            update_on_boot: false,
-            config_hot_reload: false,
-            accept_insecure_ssl_certificates: false,
-        }
-    }
-}
-
-impl From<&ConfigDto> for MainConfigDto {
-    fn from(config: &ConfigDto) -> Self {
-        Self {
-            process_parallel: config.process_parallel,
-            disk_based_processing: config.disk_based_processing,
-            storage_dir: config.storage_dir.clone(),
-            default_user_agent: config.default_user_agent.clone(),
-            backup_dir: config.backup_dir.clone(),
-            user_config_dir: config.user_config_dir.clone(),
-            mapping_path: config.mapping_path.clone(),
-            template_path: config.template_path.clone(),
-            custom_stream_response_path: config.custom_stream_response_path.clone(),
-            custom_stream_response_timeout_secs: config.custom_stream_response_timeout_secs,
-            custom_stream_response_enabled: config.custom_stream_response_enabled,
-            custom_stream_response_error_status: config.custom_stream_response_error_status,
-            user_access_control: config.user_access_control,
-            connect_timeout_secs: config.connect_timeout_secs,
-            interner_gc_interval_secs: config.interner_gc_interval_secs,
-            event_channel_capacity: config.event_channel_capacity,
-            interner_gc_min_pool_size: config.interner_gc_min_pool_size,
-            sleep_timer_mins: config.sleep_timer_mins,
-            update_on_boot: config.update_on_boot,
-            config_hot_reload: config.config_hot_reload,
-            accept_insecure_ssl_certificates: config.accept_insecure_ssl_certificates,
-        }
-    }
-}
-
-// This SchedulesConfigDto is a copy of ConfigDto schedules fields for form editing.
-// It has no other purpose than editing and saving the schedules
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, PartialEq)]
-pub struct SchedulesConfigDto {
-    #[serde(default)]
-    pub schedules: Option<Vec<ScheduleConfigDto>>,
-}
-
-impl SchedulesConfigDto {
-    // Clippy's method-path suggestion here names a private module and does not
-    // compile; the closure is kept deliberately.
-    #[allow(clippy::redundant_closure_for_method_calls)]
-    pub fn is_empty(&self) -> bool { self.schedules.as_deref().is_none_or(|s| s.is_empty()) }
-}
-
-impl From<&ConfigDto> for SchedulesConfigDto {
-    fn from(config: &ConfigDto) -> Self { Self { schedules: config.schedules.clone() } }
-}
-
-pub struct HdHomeRunDeviceOverview {
-    pub enabled: bool,
-    pub devices: Vec<String>,
-}
-
-impl ConfigDto {
-    pub fn prepare(&mut self, include_computed: bool) -> Result<(), TuliproxError> {
-        self.api.prepare();
-
-        if is_blank_optional_string(&self.default_user_agent) {
-            self.default_user_agent = default_default_user_agent();
-        }
-        if is_blank_or_default_storage_dir(&self.storage_dir) {
-            self.storage_dir = default_main_storage_dir();
-        }
-        if is_blank_or_default_backup_dir(&self.backup_dir) {
-            self.backup_dir = default_main_backup_dir();
-        }
-        if is_blank_or_default_user_config_dir(&self.user_config_dir) {
-            self.user_config_dir = default_main_user_config_dir();
-        }
-        if is_blank_or_default_mapping_path(&self.mapping_path) {
-            self.mapping_path = default_main_mapping_path();
-        }
-        if is_blank_or_default_template_path(&self.template_path) {
-            self.template_path = default_main_template_path();
+// Hand-written deserialization keeps the top-level schema strict while
+// preserving the project-specific defaults used by the configuration form.
+impl<'de> serde::Deserialize<'de> for ConfigDto {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            #[serde(default, skip_serializing_if = "is_false")]
+            process_parallel: bool,
+            api: ConfigApiDto,
+            #[serde(default, alias = "working_dir")]
+            storage_dir: Option<String>,
+            #[serde(default = "default_default_user_agent")]
+            default_user_agent: Option<String>,
+            #[serde(default)]
+            backup_dir: Option<String>,
+            #[serde(default)]
+            user_config_dir: Option<String>,
+            #[serde(default)]
+            mapping_path: Option<String>,
+            #[serde(default)]
+            template_path: Option<String>,
+            #[serde(default = "default_custom_stream_response_path")]
+            custom_stream_response_path: Option<String>,
+            #[serde(default)]
+            custom_stream_response_timeout_secs: u32,
+            #[serde(default = "default_as_true")]
+            custom_stream_response_enabled: bool,
+            #[serde(default = "default_custom_stream_response_error_status")]
+            custom_stream_response_error_status: u16,
+            #[serde(default = "default_event_channel_capacity")]
+            event_channel_capacity: u32,
+            #[serde(default)]
+            video: Option<VideoConfigDto>,
+            #[serde(default)]
+            metadata_update: Option<MetadataUpdateConfigDto>,
+            #[serde(default)]
+            schedules: Option<Vec<ScheduleConfigDto>>,
+            #[serde(default)]
+            log: Option<LogConfigDto>,
+            #[serde(default)]
+            user_access_control: bool,
+            #[serde(default = "default_connect_timeout_secs")]
+            connect_timeout_secs: u32,
+            #[serde(default = "default_interner_gc_interval_secs")]
+            interner_gc_interval_secs: u32,
+            #[serde(default = "default_interner_gc_min_pool_size")]
+            interner_gc_min_pool_size: u32,
+            #[serde(default)]
+            sleep_timer_mins: Option<u32>,
+            #[serde(default)]
+            update_on_boot: bool,
+            #[serde(default)]
+            config_hot_reload: bool,
+            #[serde(default)]
+            disk_based_processing: bool,
+            #[serde(default)]
+            accept_insecure_ssl_certificates: bool,
+            #[serde(default)]
+            web_ui: Option<WebUiConfigDto>,
+            #[serde(default)]
+            messaging: Option<MessagingConfigDto>,
+            #[serde(default)]
+            reverse_proxy: Option<ReverseProxyConfigDto>,
+            #[serde(default)]
+            hdhomerun: Option<HdHomeRunConfigDto>,
+            #[serde(default)]
+            proxy: Option<ProxyConfigDto>,
+            #[serde(default)]
+            ipcheck: Option<IpCheckConfigDto>,
+            #[serde(default)]
+            library: Option<LibraryConfigDto>,
         }
 
-        if let Some(mins) = self.sleep_timer_mins {
-            if mins == 0 {
-                return Err(TuliproxError::ConfigBase("`sleep_timer_mins` must be > 0 when specified".to_string()));
-            }
-        }
-        if self.interner_gc_interval_secs == 0 {
-            return Err(TuliproxError::ConfigBase("`interner_gc_interval_secs` must be > 0".to_string()));
-        }
-        if self.interner_gc_min_pool_size == 0 {
-            return Err(TuliproxError::ConfigBase("`interner_gc_min_pool_size` must be > 0".to_string()));
-        }
+        let raw = Raw::deserialize(deserializer)?;
 
-        if self.custom_stream_response_error_status == 0 {
-            self.custom_stream_response_error_status = default_custom_stream_response_error_status();
-        } else if !(400..=599).contains(&self.custom_stream_response_error_status) {
-            return Err(TuliproxError::ConfigBase(format!(
-                "`custom_stream_response_error_status` must be a 4xx or 5xx HTTP status, got {}",
-                self.custom_stream_response_error_status
-            )));
-        }
-
-        self.prepare_web()?;
-        self.prepare_hdhomerun(include_computed)?;
-        self.prepare_video_config()?;
-        self.prepare_metadata_update_config()?;
-
-        if let Some(reverse_proxy) = self.reverse_proxy.as_mut() {
-            reverse_proxy.prepare(self.storage_dir.as_deref().unwrap_or_default())?;
-        }
-        if let Some(proxy) = &mut self.proxy {
-            proxy.prepare()?;
-        }
-        if let Some(ipcheck) = self.ipcheck.as_mut() {
-            ipcheck.prepare()?;
-        }
-
-        if let Some(messaging) = &mut self.messaging {
-            messaging.prepare(include_computed)?;
-        }
-        if let Some(library) = &mut self.library {
-            library.playlist.prepare();
-        }
-
-        Ok(())
-    }
-
-    fn prepare_web(&mut self) -> Result<(), TuliproxError> {
-        if let Some(web_ui_config) = self.web_ui.as_mut() {
-            web_ui_config.prepare()?;
-        }
-        Ok(())
-    }
-
-    fn prepare_hdhomerun(&mut self, include_computed: bool) -> Result<(), TuliproxError> {
-        if let Some(hdhomerun) = &mut self.hdhomerun {
-            if hdhomerun.enabled {
-                hdhomerun.prepare(self.api.port, include_computed)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn prepare_video_config(&mut self) -> Result<(), TuliproxError> {
-        match &mut self.video {
-            None => {
-                self.video = Some(VideoConfigDto {
-                    extensions: default_supported_video_extensions(),
-                    download: None,
-                    web_search: None,
-                });
-            }
-            Some(video) => match video.prepare() {
-                Ok(()) => {}
-                Err(err) => return Err(err),
-            },
-        }
-        Ok(())
-    }
-
-    fn prepare_metadata_update_config(&mut self) -> Result<(), TuliproxError> {
-        let mut metadata_update = self.metadata_update.clone().unwrap_or_default();
-
-        metadata_update.prepare()?;
-
-        if metadata_update.is_empty() {
-            self.metadata_update = None;
-        } else {
-            self.metadata_update = Some(metadata_update);
-        }
-
-        Ok(())
-    }
-
-    pub fn is_valid(&self) -> bool {
-        if self.api.host.is_empty() {
-            return false;
-        }
-
-        if let Some(video) = &self.video {
-            if let Some(download) = &video.download {
-                if let Some(episode_pattern) = &download.episode_pattern {
-                    if !episode_pattern.is_empty() {
-                        let re = crate::model::REGEX_CACHE.get_or_compile(episode_pattern);
-                        if re.is_err() {
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-        true
-    }
-
-    pub fn get_hdhr_device_overview(&self) -> Option<HdHomeRunDeviceOverview> {
-        self.hdhomerun.as_ref().map(|hdhr| HdHomeRunDeviceOverview {
-            enabled: hdhr.enabled,
-            devices: hdhr.devices.iter().map(|d| d.name.clone()).collect::<Vec<String>>(),
+        Ok(Self {
+            process_parallel: raw.process_parallel,
+            api: raw.api,
+            storage_dir: raw.storage_dir,
+            default_user_agent: raw.default_user_agent,
+            backup_dir: raw.backup_dir,
+            user_config_dir: raw.user_config_dir,
+            mapping_path: raw.mapping_path,
+            template_path: raw.template_path,
+            custom_stream_response_path: raw.custom_stream_response_path,
+            custom_stream_response_timeout_secs: raw.custom_stream_response_timeout_secs,
+            custom_stream_response_enabled: raw.custom_stream_response_enabled,
+            custom_stream_response_error_status: raw.custom_stream_response_error_status,
+            video: raw.video,
+            metadata_update: raw.metadata_update,
+            schedules: raw.schedules,
+            log: raw.log,
+            user_access_control: raw.user_access_control,
+            connect_timeout_secs: raw.connect_timeout_secs,
+            event_channel_capacity: raw.event_channel_capacity,
+            interner_gc_interval_secs: raw.interner_gc_interval_secs,
+            interner_gc_min_pool_size: raw.interner_gc_min_pool_size,
+            sleep_timer_mins: raw.sleep_timer_mins,
+            update_on_boot: raw.update_on_boot,
+            config_hot_reload: raw.config_hot_reload,
+            disk_based_processing: raw.disk_based_processing,
+            accept_insecure_ssl_certificates: raw.accept_insecure_ssl_certificates,
+            web_ui: raw.web_ui,
+            messaging: raw.messaging,
+            reverse_proxy: raw.reverse_proxy,
+            hdhomerun: raw.hdhomerun,
+            proxy: raw.proxy,
+            ipcheck: raw.ipcheck,
+            library: raw.library,
         })
     }
-
-    pub fn update_from_main_config(&mut self, main_config: &MainConfigDto) {
-        self.process_parallel = main_config.process_parallel;
-        self.disk_based_processing = main_config.disk_based_processing;
-        self.storage_dir = normalize_optional_dir(&main_config.storage_dir, DEFAULT_STORAGE_DIR);
-        self.default_user_agent = main_config.default_user_agent.clone();
-        self.backup_dir = normalize_optional_dir(&main_config.backup_dir, DEFAULT_BACKUP_DIR);
-        self.user_config_dir = normalize_optional_dir(&main_config.user_config_dir, DEFAULT_USER_CONFIG_DIR);
-        self.mapping_path = normalize_optional_config_file_path(&main_config.mapping_path, MAPPING_FILE);
-        self.template_path = normalize_optional_config_file_path(&main_config.template_path, TEMPLATE_FILE);
-        self.custom_stream_response_path =
-            normalize_optional_dir(&main_config.custom_stream_response_path, DEFAULT_CUSTOM_STREAM_RESPONSE_PATH);
-        self.custom_stream_response_timeout_secs = main_config.custom_stream_response_timeout_secs;
-        self.custom_stream_response_enabled = main_config.custom_stream_response_enabled;
-        self.custom_stream_response_error_status = main_config.custom_stream_response_error_status;
-        self.user_access_control = main_config.user_access_control;
-        self.connect_timeout_secs = main_config.connect_timeout_secs;
-        self.interner_gc_interval_secs = main_config.interner_gc_interval_secs;
-        self.interner_gc_min_pool_size = main_config.interner_gc_min_pool_size;
-        self.sleep_timer_mins = main_config.sleep_timer_mins;
-        self.update_on_boot = main_config.update_on_boot;
-        self.config_hot_reload = main_config.config_hot_reload;
-        self.accept_insecure_ssl_certificates = main_config.accept_insecure_ssl_certificates;
-    }
-
-    pub fn is_geoip_enabled(&self) -> bool {
-        self.reverse_proxy.as_ref().is_some_and(|r| r.geoip.as_ref().is_some_and(|g| g.enabled))
-    }
-
-    pub fn is_library_enabled(&self) -> bool { self.library.as_ref().is_some_and(|l| l.enabled) }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::defaults::{default_supported_video_extensions, CONFIG_PATH};
-    use serde_json::json;
+mod tests;
 
-    #[test]
-    fn default_uses_connect_timeout_default_value() {
-        let cfg = ConfigDto::default();
-        assert_eq!(cfg.connect_timeout_secs, default_connect_timeout_secs());
-        assert_eq!(cfg.interner_gc_interval_secs, default_interner_gc_interval_secs());
-        assert_eq!(cfg.interner_gc_min_pool_size, default_interner_gc_min_pool_size());
-    }
-
-    #[test]
-    fn custom_video_stream_defaults_are_true_and_502() {
-        let cfg = ConfigDto::default();
-        assert!(cfg.custom_stream_response_enabled);
-        assert_eq!(cfg.custom_stream_response_error_status, 502);
-    }
-
-    #[test]
-    fn prepare_rejects_non_4xx_5xx_custom_stream_response_error_status() {
-        for bad in [200u16, 100, 399, 600, 1000] {
-            let mut cfg = ConfigDto { custom_stream_response_error_status: bad, ..ConfigDto::default() };
-            let err = cfg.prepare(false).expect_err(&format!("status {bad} must be rejected"));
-            let msg = format!("{err}");
-            assert!(msg.contains("custom_stream_response_error_status"), "status {bad} msg: {msg}");
-        }
-    }
-
-    #[test]
-    fn prepare_accepts_4xx_and_5xx_custom_stream_response_error_status() {
-        for ok in [400u16, 404, 500, 502, 503, 599] {
-            let mut cfg = ConfigDto { custom_stream_response_error_status: ok, ..ConfigDto::default() };
-            assert!(cfg.prepare(false).is_ok(), "status {ok} must be accepted");
-        }
-    }
-
-    #[test]
-    fn prepare_clamps_zero_custom_stream_response_error_status_to_default() {
-        let mut cfg = ConfigDto { custom_stream_response_error_status: 0, ..ConfigDto::default() };
-        cfg.prepare(false).expect("zero must be silently clamped, not rejected");
-        assert_eq!(cfg.custom_stream_response_error_status, 502);
-    }
-
-    #[test]
-    fn serializing_skips_video_for_default_values() {
-        let cfg = ConfigDto {
-            video: Some(VideoConfigDto {
-                extensions: default_supported_video_extensions(),
-                download: None,
-                web_search: None,
-            }),
-            ..ConfigDto::default()
-        };
-
-        let serialized = serde_json::to_string(&cfg).expect("config serialization should succeed");
-        assert!(!serialized.contains("\"video\""), "expected no video field, got: {serialized}");
-    }
-
-    #[test]
-    fn serializing_keeps_video_for_non_default_values() {
-        let cfg = ConfigDto {
-            video: Some(VideoConfigDto {
-                extensions: default_supported_video_extensions(),
-                download: None,
-                web_search: Some("https://example.org?q={}".to_string()),
-            }),
-            ..ConfigDto::default()
-        };
-
-        let serialized = serde_json::to_string(&cfg).expect("config serialization should succeed");
-        assert!(serialized.contains("\"video\""), "expected video field, got: {serialized}");
-    }
-
-    #[test]
-    fn serializing_skips_default_storage_backup_and_user_config_dirs() {
-        let cfg = ConfigDto {
-            storage_dir: Some(DEFAULT_STORAGE_DIR.to_string()),
-            backup_dir: Some(DEFAULT_BACKUP_DIR.to_string()),
-            user_config_dir: Some(DEFAULT_USER_CONFIG_DIR.to_string()),
-            ..ConfigDto::default()
-        };
-
-        let serialized = serde_json::to_string(&cfg).expect("config serialization should succeed");
-        assert!(
-            !serialized.contains("\"storage_dir\""),
-            "expected no storage_dir field for default value, got: {serialized}"
-        );
-        assert!(
-            !serialized.contains("\"backup_dir\""),
-            "expected no backup_dir field for default value, got: {serialized}"
-        );
-        assert!(
-            !serialized.contains("\"user_config_dir\""),
-            "expected no user_config_dir field for default value, got: {serialized}"
-        );
-    }
-
-    #[test]
-    fn serializing_keeps_non_default_storage_and_backup_dirs() {
-        let cfg = ConfigDto {
-            storage_dir: Some("custom-storage".to_string()),
-            backup_dir: Some("custom-backup".to_string()),
-            user_config_dir: Some("custom-user-config".to_string()),
-            ..ConfigDto::default()
-        };
-
-        let serialized = serde_json::to_string(&cfg).expect("config serialization should succeed");
-        assert!(
-            serialized.contains("\"storage_dir\""),
-            "expected storage_dir field for non-default value, got: {serialized}"
-        );
-        assert!(
-            serialized.contains("\"backup_dir\""),
-            "expected backup_dir field for non-default value, got: {serialized}"
-        );
-        assert!(
-            serialized.contains("\"user_config_dir\""),
-            "expected user_config_dir field for non-default value, got: {serialized}"
-        );
-    }
-
-    #[test]
-    fn main_config_from_applies_default_storage_backup_and_user_config_dirs() {
-        let mut cfg = ConfigDto::default();
-        cfg.prepare(false).expect("prepare should succeed");
-        let main = MainConfigDto::from(&cfg);
-        assert_eq!(main.storage_dir.as_deref(), Some(DEFAULT_STORAGE_DIR));
-        assert_eq!(main.backup_dir.as_deref(), Some(DEFAULT_BACKUP_DIR));
-        assert_eq!(main.user_config_dir.as_deref(), Some(DEFAULT_USER_CONFIG_DIR));
-        assert_eq!(main.mapping_path.as_deref(), Some(format!("./{CONFIG_PATH}/{MAPPING_FILE}").as_str()));
-        assert_eq!(main.template_path.as_deref(), Some(format!("./{CONFIG_PATH}/{TEMPLATE_FILE}").as_str()));
-    }
-
-    #[test]
-    fn update_from_main_config_omits_default_optional_paths() {
-        let mut cfg = ConfigDto::default();
-        let main = MainConfigDto {
-            storage_dir: Some(DEFAULT_STORAGE_DIR.to_string()),
-            backup_dir: Some(DEFAULT_BACKUP_DIR.to_string()),
-            user_config_dir: Some(DEFAULT_USER_CONFIG_DIR.to_string()),
-            mapping_path: Some(format!("./{CONFIG_PATH}/{MAPPING_FILE}")),
-            template_path: Some(format!("./{CONFIG_PATH}/{TEMPLATE_FILE}")),
-            ..MainConfigDto::default()
-        };
-
-        cfg.update_from_main_config(&main);
-        assert!(cfg.storage_dir.is_none());
-        assert!(cfg.backup_dir.is_none());
-        assert!(cfg.user_config_dir.is_none());
-        assert!(cfg.mapping_path.is_none());
-        assert!(cfg.template_path.is_none());
-    }
-
-    #[test]
-    fn prepare_sets_default_optional_paths() {
-        let mut cfg = ConfigDto {
-            storage_dir: None,
-            backup_dir: None,
-            user_config_dir: None,
-            mapping_path: None,
-            template_path: None,
-            ..ConfigDto::default()
-        };
-        cfg.prepare(false).expect("prepare should succeed");
-        assert_eq!(cfg.storage_dir.as_deref(), Some(DEFAULT_STORAGE_DIR));
-        assert_eq!(cfg.backup_dir.as_deref(), Some(DEFAULT_BACKUP_DIR));
-        assert_eq!(cfg.user_config_dir.as_deref(), Some(DEFAULT_USER_CONFIG_DIR));
-        assert_eq!(cfg.mapping_path.as_deref(), Some(format!("./{CONFIG_PATH}/{MAPPING_FILE}").as_str()));
-        assert_eq!(cfg.template_path.as_deref(), Some(format!("./{CONFIG_PATH}/{TEMPLATE_FILE}").as_str()));
-    }
-
-    #[test]
-    fn deserializing_rejects_legacy_video_ffprobe_fields() {
-        let raw = json!({
-            "api": {
-                "host": "127.0.0.1",
-                "port": 8901,
-                "web_root": "./web"
-            },
-            "storage_dir": ".",
-            "video": {
-                "extensions": ["mp4"],
-                "ffprobe_enabled": true
-            }
-        });
-
-        let result: Result<ConfigDto, _> = serde_json::from_value(raw);
-        assert!(result.is_err(), "legacy ffprobe field under video must fail");
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("ffprobe_enabled"), "unexpected error text: {err}");
-    }
-
-    #[test]
-    fn deserializing_rejects_legacy_data_dir_alias() {
-        let raw = json!({
-            "api": {
-                "host": "127.0.0.1",
-                "port": 8901,
-                "web_root": "./web"
-            },
-            "data_dir": "."
-        });
-
-        let result: Result<ConfigDto, _> = serde_json::from_value(raw);
-        assert!(result.is_err(), "data_dir should not deserialize");
-    }
-
-    #[test]
-    fn deserializing_accepts_legacy_working_dir_alias() {
-        let raw = json!({
-            "api": {
-                "host": "127.0.0.1",
-                "port": 8901,
-                "web_root": "./web"
-            },
-            "working_dir": "."
-        });
-
-        let cfg: ConfigDto = serde_json::from_value(raw).expect("working_dir should deserialize as legacy alias");
-        assert_eq!(cfg.storage_dir.as_deref(), Some("."));
-    }
-
-    #[test]
-    fn deserializing_accepts_missing_storage_dir() {
-        let raw = json!({
-            "api": {
-                "host": "127.0.0.1",
-                "port": 8901,
-                "web_root": "./web"
-            }
-        });
-
-        let cfg: ConfigDto = serde_json::from_value(raw).expect("missing storage_dir should deserialize");
-        assert!(cfg.storage_dir.is_none());
-    }
-
-    #[test]
-    fn stream_history_defaults_to_disabled_and_safe() {
-        let cfg = ConfigDto::default();
-
-        assert!(cfg.reverse_proxy.is_none());
-    }
-
-    #[test]
-    fn stream_history_deserializes_under_reverse_proxy() {
-        let raw = r"
-api:
-  host: 127.0.0.1
-  port: 8901
-  web_root: ./web
-reverse_proxy:
-  rewrite_secret: 00112233445566778899aabbccddeeff
-  stream_history:
-    stream_history_enabled: true
-    stream_history_batch_size: 64
-    stream_history_retention_days: 14
-    stream_history_directory: /var/lib/tuliprox/history
-";
-
-        let cfg: ConfigDto = serde_saphyr::from_str(raw).expect("config should deserialize");
-        let reverse_proxy = cfg.reverse_proxy.expect("reverse_proxy should deserialize");
-        let stream_history = reverse_proxy.stream_history.expect("stream_history should deserialize");
-
-        assert!(stream_history.stream_history_enabled);
-        assert_eq!(stream_history.stream_history_batch_size, 64);
-        assert_eq!(stream_history.stream_history_retention_days, 14);
-        assert_eq!(stream_history.stream_history_directory, "/var/lib/tuliprox/history");
-    }
-
-    #[test]
-    fn stream_history_missing_values_keep_disabled_without_reverse_proxy() {
-        let raw = r"
-api:
-  host: 127.0.0.1
-  port: 8901
-  web_root: ./web
-";
-
-        let cfg: ConfigDto = serde_saphyr::from_str(raw).expect("config should deserialize");
-
-        assert!(cfg.reverse_proxy.is_none());
-    }
-
-    #[test]
-    fn stream_history_defaults_to_none_when_reverse_proxy_present_but_stream_history_omitted() {
-        let raw = r#"
-api:
-  host: 127.0.0.1
-  port: 8901
-  web_root: ./web
-reverse_proxy:
-  resource_rewrite_disabled: false
-  rewrite_secret: "00112233445566778899aabbccddeeff"
-"#;
-
-        let cfg: ConfigDto = serde_saphyr::from_str(raw).expect("config should deserialize");
-
-        assert!(cfg.reverse_proxy.is_some());
-        assert!(cfg.reverse_proxy.as_ref().and_then(|rp| rp.stream_history.as_ref()).is_none());
-    }
-}
+mod prepare;
+mod views;
+pub use views::{HdHomeRunDeviceOverview, MainConfigDto, SchedulesConfigDto};

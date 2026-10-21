@@ -21,7 +21,7 @@ use serde::Deserialize;
 use std::{str::FromStr, sync::Arc};
 use tuliprox_hls::api::{
     finite_hls_immutable_media_response, resolve_hls_standalone_custom_segment, HlsAccessLeaseId,
-    HlsStandaloneCustomSegmentAccess, HlsStandaloneCustomSegmentError,
+    HlsMediaActivityCommitOutcome, HlsStandaloneCustomSegmentAccess, HlsStandaloneCustomSegmentError,
 };
 use url::form_urlencoded;
 
@@ -286,7 +286,9 @@ async fn cvs_standalone_hls_segment_response(
         asset_fingerprint,
         index,
         now_ms,
-    ) {
+    )
+    .await
+    {
         Ok(access) => access,
         Err(
             HlsStandaloneCustomSegmentError::InvalidIndex
@@ -299,13 +301,28 @@ async fn cvs_standalone_hls_segment_response(
     {
         return *response;
     }
-    finite_hls_immutable_media_response(
-        access.bytes,
+    let response = finite_hls_immutable_media_response(
+        access.bytes.clone(),
         headers.get(header::RANGE),
         HLS_CVS_CONTENT_TYPE,
         HLS_CVS_IMMUTABLE_CACHE_CONTROL,
         method == Method::HEAD,
-    )
+    );
+    if response.status().is_success() {
+        match app_state
+            .hls
+            .proxy
+            .record_standalone_custom_segment_activity(&access_lease, &access, current_time_millis())
+            .await
+        {
+            HlsMediaActivityCommitOutcome::Committed => {}
+            HlsMediaActivityCommitOutcome::StaleLeaseIdentity => return StatusCode::NOT_FOUND.into_response(),
+            HlsMediaActivityCommitOutcome::DeferredLockContention => {
+                return super::hls_terminal_response::hls_temporary_resource_unavailable_response(1_000)
+            }
+        }
+    }
+    response
 }
 
 async fn validate_hls_standalone_custom_access(
@@ -317,7 +334,8 @@ async fn validate_hls_standalone_custom_access(
 ) -> Result<(), Box<Response>> {
     if let Some(shared_lease) = access.shared_lease.as_ref() {
         let lease = app_state
-            .hls_proxy
+            .hls
+            .proxy
             .access_lease_response_snapshot(access_lease_id, &shared_lease.proxy_session_id, now_ms)
             .await;
         if !lease.is_some_and(|lease| {
@@ -507,12 +525,11 @@ mod tests {
     use super::{cvs_api_register, parse_cvs_standalone_hls_segment_file};
     use crate::{
         api::model::{
-            build_hls_standalone_custom_plan, empty_resource_client_set,
-            hls_custom_video_manifest_response_for_access_lease, ActiveProviderManager, ActiveUserManager, AppState,
-            CancelTokens, ConnectionManager, CustomVideoStreamType, DownloadQueue, EventManager, HlsAccessLease,
-            HlsAccessLeaseId, HlsPlaybackFamilyKey, HlsProvisioningState, HlsProxyManager, HlsRuntimeCustomTailReason,
-            HlsStandaloneCustomAccess, MetadataUpdateManager, PlaylistStorageState, ProxySessionId,
-            SharedStreamManager, TransportStreamBuffer, UpdateGuard,
+            build_hls_standalone_custom_plan, hls_custom_video_manifest_response_for_access_lease,
+            ActiveProviderManager, ActiveUserManager, AppState, CancelTokens, ConnectionManager, CustomVideoStreamType,
+            EventManager, HlsAccessLease, HlsAccessLeaseId, HlsPlaybackFamilyKey, HlsProxyManager,
+            HlsRuntimeCustomTailReason, HlsStandaloneCustomAccess, MetadataUpdateManager, PlaylistStorageState,
+            ProxySessionId, RecordingQueue, SharedStreamManager, TransportStreamBuffer,
         },
         model::{
             ApiProxyConfig, ApiProxyServerInfo, AppConfig, Config, ConfigInput, ConfigSource, ConfigTarget,
@@ -534,7 +551,6 @@ mod tests {
         model::{ConfigPaths, InputFetchMethod, InputType, ProcessingOrder},
     };
     use std::{collections::HashMap, sync::Arc};
-    use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
 
@@ -585,6 +601,7 @@ mod tests {
                 ))
                 .to_vec(),
             )),
+            maintenance: None,
             panel_api_provisioning_hls_segments: Vec::new(),
         }
     }
@@ -606,6 +623,7 @@ mod tests {
             ..ConfigInput::default()
         });
         let target = Arc::new(ConfigTarget {
+            curation: None,
             id: 1,
             enabled: true,
             name: "target".to_string(),
@@ -708,47 +726,35 @@ mod tests {
             provider_dns: CancellationToken::new(),
             metadata: CancellationToken::new(),
             qos_aggregation: CancellationToken::new(),
-            downloads: CancellationToken::new(),
+            recordings: CancellationToken::new(),
             hls_cache: CancellationToken::new(),
         };
         let metadata_manager = Arc::new(MetadataUpdateManager::new(tokens.metadata.clone()));
-        let (manual_update_sender, _) = mpsc::channel::<crate::api::model::ManualPlaylistUpdateRequest>(1);
 
         Arc::new(AppState {
-            forced_targets: Arc::new(ArcSwap::from_pointee(crate::model::ProcessTargets {
-                enabled: false,
-                inputs: Vec::new(),
-                targets: Vec::new(),
-                target_names: Vec::new(),
-            })),
+            recording_capacity: crate::api::model::recording_runtime::ProviderCapacityAdapter::new(
+                Arc::clone(&active_provider),
+                Arc::clone(&connection_manager),
+                crate::api::model::create_test_maintenance(""),
+            ),
             app_config: app_cfg,
-            http_client: Arc::new(ArcSwap::from_pointee(reqwest::Client::new())),
-            http_client_no_redirect: Arc::new(ArcSwap::from_pointee(reqwest::Client::new())),
-            public_http_client_no_redirect: Arc::new(ArcSwap::from_pointee(reqwest::Client::new())),
-            resource_clients: empty_resource_client_set(),
-            downloads: Arc::new(DownloadQueue::new()),
+            http_clients: Arc::default(),
+            recordings: Arc::new(RecordingQueue::new()),
             cache: Arc::new(ArcSwapOption::default()),
             shared_stream_manager,
-            hls_proxy: Arc::new(HlsProxyManager::new()),
-            hls_provisioning: Arc::new(HlsProvisioningState::new()),
-            stalker_resolve_coordinator: Arc::default(),
+            hls: crate::api::model::HlsState::new(Arc::new(HlsProxyManager::new())),
+            stalker_resolve_coordinator: crate::api::model::StalkerResolveCoordinator::default(),
             active_users,
             active_provider,
             connection_manager,
             event_manager,
-            cancel_tokens: Arc::new(ArcSwap::from_pointee(tokens)),
+            cancel_tokens: ArcSwap::from_pointee(tokens),
             playlists: Arc::new(PlaylistStorageState::new()),
             geoip,
-            update_guard: UpdateGuard::new(),
             metadata_manager,
-            identity_registry: Arc::new(tuliprox_repository::identity_registry::IdentityRegistry::empty(
-                std::path::PathBuf::new(),
-            )),
-            login_throttle: Arc::new(crate::auth::LoginThrottle::new()),
-            token_revocations: Arc::new(tuliprox_repository::token_revocations::TokenRevocations::empty(
-                std::path::PathBuf::new(),
-            )),
-            manual_update_sender,
+            auth: crate::api::model::AuthState::for_tests(),
+            playlist_updates: crate::api::model::PlaylistUpdateControl::for_tests(),
+            maintenance: crate::api::model::create_test_maintenance(""),
         })
     }
 
@@ -1043,7 +1049,7 @@ mod tests {
             now_ms,
             60_000,
         );
-        app_state.hls_proxy.prepare_access_lease(lease.clone()).await;
+        app_state.hls.proxy.prepare_access_lease(lease.clone()).await;
         let user = app_state.app_config.get_user_credentials("viewer").expect("test user");
         let response = hls_custom_video_manifest_response_for_access_lease(
             &app_state,
@@ -1064,7 +1070,7 @@ mod tests {
             StatusCode::OK
         );
 
-        app_state.hls_proxy.access_leases().write().await.remove_access_lease(&lease_id);
+        app_state.hls.proxy.access_leases().write().await.remove_access_lease(&lease_id);
         let replacement = HlsAccessLease::pending(
             lease_id.clone(),
             HlsPlaybackFamilyKey::new("viewer", "client"),
@@ -1077,7 +1083,7 @@ mod tests {
             now_ms.saturating_add(1),
             60_000,
         );
-        app_state.hls_proxy.prepare_access_lease(replacement).await;
+        app_state.hls.proxy.prepare_access_lease(replacement).await;
 
         assert_eq!(
             standalone_segment_response(app_state, url, Method::GET, None).await.status(),

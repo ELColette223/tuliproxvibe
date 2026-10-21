@@ -20,7 +20,7 @@ use super::{
     recording_reconciliation::{ReconcilableTask, MIN_TOMBSTONE_HORIZON_SECS},
     recording_service::{CreateRecordingInput, RecordingService, RecordingSourceInput},
 };
-use crate::download::{DownloadState, FileDownload};
+use crate::recording::recording_queue::{RecordingTask, RecordingTaskState};
 use chrono::{DateTime, Utc};
 use log::{debug, error};
 use shared::model::{
@@ -260,6 +260,7 @@ async fn materialize_due_rules<E: EventSink + Clone + 'static>(ctx: &RecordingCt
             },
             channel_id: candidate.channel_id,
             channel_name: candidate.channel_name,
+            group: None,
             provenance: RecordingProvenance {
                 rule_id: Some(candidate.rule_id),
                 occurrence_key: Some(candidate.occurrence_key),
@@ -305,38 +306,43 @@ fn warn_about_inert_new_episode_rules(rules: &[RecordingRule], epg_programmes: &
 
 pub async fn reconcilable_tasks<E: EventSink + Clone + 'static>(ctx: &RecordingCtx<E>) -> Vec<ReconcilableTask> {
     let mut tasks = Vec::new();
-    for task in ctx.downloads.queue.lock().await.iter() {
+    for task in ctx.recordings.queue.lock().await.iter() {
         push_reconcilable(&mut tasks, task);
     }
-    for task in ctx.downloads.scheduled.read().await.iter() {
+    for task in ctx.recordings.scheduled.read().await.iter() {
         push_reconcilable(&mut tasks, task);
     }
-    if let Some(task) = ctx.downloads.active.read().await.as_ref() {
+    for task in ctx.recordings.active.read().await.iter() {
         push_reconcilable(&mut tasks, task);
     }
-    for task in ctx.downloads.finished.read().await.iter() {
+    for task in ctx.recordings.finished.read().await.iter() {
         push_reconcilable(&mut tasks, task);
     }
     tasks
 }
 
-fn push_reconcilable(tasks: &mut Vec<ReconcilableTask>, task: &FileDownload) {
-    let Some(meta) = task.recording.as_ref() else {
-        return;
-    };
+fn push_reconcilable(tasks: &mut Vec<ReconcilableTask>, task: &RecordingTask) {
+    let meta = &task.recording;
     tasks.push(ReconcilableTask {
         uuid: task.uuid.clone(),
         rule_id: meta.provenance.rule_id.clone(),
         occurrence_key: meta.provenance.occurrence_key.clone(),
-        terminal: matches!(task.state, DownloadState::Completed | DownloadState::Failed | DownloadState::Cancelled),
-        active: matches!(task.state, DownloadState::Downloading),
-        editable: matches!(task.state, DownloadState::Scheduled | DownloadState::Queued | DownloadState::Paused),
+        terminal: matches!(
+            task.state,
+            RecordingTaskState::Completed | RecordingTaskState::Failed | RecordingTaskState::Cancelled
+        ),
+        active: matches!(task.state, RecordingTaskState::Running),
+        editable: matches!(
+            task.state,
+            RecordingTaskState::Scheduled | RecordingTaskState::Queued | RecordingTaskState::Paused
+        ),
     });
 }
 
 fn scheduler_claims(owner_id: shared::model::UserId, visibility: RuleVisibility) -> Claims {
     let mut permissions = PermissionSet::new();
-    permissions.set(Permission::RecordingWrite);
+    permissions.set(Permission::RecordingCreate);
+    permissions.set(Permission::RecordingManage);
     let roles = if visibility == RuleVisibility::Shared { RoleSet::ADMIN } else { RoleSet::new() };
     let now = Utc::now().timestamp();
     Claims {
@@ -436,7 +442,7 @@ mod tests {
         let key = occurrence_key("r1", &source(), "ch-1", 1_000, "t:my show");
         let tasks = vec![task("r1", &key)];
         let out = plan_materializations(&rules, &programmes, &tasks, &TombstoneSet::default(), 0, Some(10_000));
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[test]
@@ -444,7 +450,7 @@ mod tests {
         let rules = vec![new_episode_rule()];
         let programmes = vec![epg_programme("My Show", -1, 100)];
         let out = plan_materializations(&rules, &programmes, &[], &TombstoneSet::default(), 0, Some(10_000));
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[test]
@@ -452,7 +458,7 @@ mod tests {
         let rules = vec![new_episode_rule()];
         let programmes = vec![epg_programme("My Show", 5_000, 6_000)];
         let out = plan_materializations(&rules, &programmes, &[], &TombstoneSet::default(), 0, Some(2_000));
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[test]
@@ -462,7 +468,7 @@ mod tests {
         p.previously_shown = true;
         let programmes = vec![p];
         let out = plan_materializations(&rules, &programmes, &[], &TombstoneSet::default(), 0, Some(10_000));
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[test]
@@ -472,7 +478,7 @@ mod tests {
         let rules = vec![r];
         let programmes = vec![epg_programme("My Show", 1_000, 2_000)];
         let out = plan_materializations(&rules, &programmes, &[], &TombstoneSet::default(), 0, Some(10_000));
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[test]
@@ -496,7 +502,7 @@ mod tests {
         // Set the EPG horizon to 1 hour — the next Sunday is
         // days away.
         let out = plan_materializations(&rules, &[], &[], &TombstoneSet::default(), now, Some(3_600));
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 
     #[test]
@@ -508,6 +514,6 @@ mod tests {
 
         let out = plan_materializations(&[rule], &[], &[], &TombstoneSet::default(), 0, None);
 
-        assert!(out.is_empty());
+        assert_eq!(out.len(), 0);
     }
 }

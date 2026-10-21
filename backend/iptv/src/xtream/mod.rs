@@ -6,9 +6,9 @@ use shared::{
     error::TuliproxError,
     model::{
         EventMessage, EventSink, InputType, PlaylistEntry, PlaylistGroup, PlaylistItem, PlaylistItemType,
-        ProviderAccountEvent, ProviderAccountState, ProviderId, ProxyUserStatus, SeriesStreamProperties,
-        StreamProperties, UpdateQualityPolicy, VideoStreamProperties, XtreamCluster, XtreamLoginInfo,
-        XtreamPlaylistItem, XtreamSeriesInfo, XtreamVideoInfo, XtreamVideoInfoDoc,
+        ProviderAccountEvent, ProviderAccountIdentity, ProviderAccountState, ProviderId, ProxyUserStatus,
+        SeriesStreamProperties, StreamProperties, UpdateQualityPolicy, VideoStreamProperties, XtreamCluster,
+        XtreamLoginInfo, XtreamPlaylistItem, XtreamSeriesInfo, XtreamVideoInfo, XtreamVideoInfoDoc,
     },
     utils::{
         extract_extension_from_url, get_i64_from_serde_value, get_string_from_serde_value, sanitize_sensitive_info,
@@ -22,7 +22,7 @@ use tuliprox_core::{
         ClusterForceUpdate, ConfigInput, ConfigInputFlags, ConfigTarget, InputSource, ProxyUserCredentials,
         XtreamTargetOutput,
     },
-    utils::request,
+    utils::{prepare_xtream_resource_hosts, request},
 };
 use tuliprox_parser::{xtream, xtream::parse_xtream_series_info};
 use tuliprox_repository::{
@@ -87,6 +87,7 @@ pub async fn get_xtream_stream_info(
     let app_config = &app_config;
     let encrypt_secret = app_config.get_encrypt_secret();
     let options = xtream_mapping_option_from_target_options(target, xtream_output, app_config, user, encrypt_secret)?;
+    prepare_xtream_resource_hosts(pli, &options).await;
 
     if let Some(content) = pli.get_resolved_info_document(&options) {
         return serde_json::to_string(&content).map_err(|err| TuliproxError::ApiXtream(format!("{err}")));
@@ -148,7 +149,9 @@ pub async fn get_xtream_stream_info(
                                     target,
                                     xtream_output,
                                     &vod_pli,
-                                ) {
+                                )
+                                .await
+                                {
                                     return value;
                                 }
                             }
@@ -293,7 +296,9 @@ pub async fn get_xtream_stream_info(
                                                 target,
                                                 xtream_output,
                                                 &series_pli,
-                                            ) {
+                                            )
+                                            .await
+                                            {
                                                 return value;
                                             }
                                         }
@@ -318,7 +323,7 @@ pub async fn get_xtream_stream_info(
     )))
 }
 
-fn xtream_resolve_stream_info(
+async fn xtream_resolve_stream_info(
     app_config: &Arc<AppConfig>,
     _playlists: &PlaylistStorageState,
     user: &ProxyUserCredentials,
@@ -333,6 +338,7 @@ fn xtream_resolve_stream_info(
             Ok(options) => options,
             Err(err) => return Some(Err(err)),
         };
+    prepare_xtream_resource_hosts(pli, &options).await;
     if let Some(content) = pli.get_resolved_info_document(&options) {
         return Some(
             serde_json::to_string(&content)
@@ -377,6 +383,29 @@ const ACTIONS: [(XtreamCluster, &str, &str); 3] = [
     ),
 ];
 
+/// The configured root or alias account a login for `input`/`username` belongs to.
+pub fn login_account_identity(
+    app_config: &AppConfig,
+    input: &InputSource,
+    username: &str,
+) -> Option<(Arc<str>, ProviderAccountIdentity)> {
+    let sources = app_config.sources.load();
+    let is_login_account = |name: &Arc<str>, user: Option<&str>, pass: &Option<String>| {
+        *name == input.name && user == Some(username) && *pass == input.password
+    };
+    sources.inputs.iter().find_map(|configured| {
+        if is_login_account(&configured.name, configured.username.as_deref(), &configured.password) {
+            return Some((Arc::clone(&configured.name), configured.account_identity()));
+        }
+        configured
+            .aliases
+            .iter()
+            .flatten()
+            .find(|alias| is_login_account(&alias.name, alias.username.as_deref(), &alias.password))
+            .map(|alias| (Arc::clone(&alias.name), alias.account_identity()))
+    })
+}
+
 pub async fn xtream_login<E: EventSink>(
     app_config: &Arc<AppConfig>,
     client: &reqwest::Client,
@@ -384,6 +413,9 @@ pub async fn xtream_login<E: EventSink>(
     input: &InputSource,
     username: &str,
 ) -> Result<Option<XtreamLoginInfo>, TuliproxError> {
+    // Captured before the request: a response must never be attributed to an account whose URL or
+    // credentials changed while the request was in flight.
+    let account = login_account_identity(app_config, input, username);
     let content = if let Ok(content) = request::get_input_json_content(app_config, client, input, None, false).await {
         content
     } else {
@@ -429,6 +461,11 @@ pub async fn xtream_login<E: EventSink>(
         }
     }
 
+    if login_info.exp_date.is_some() || login_info.status.is_some() {
+        if let Some((name, identity)) = account {
+            events.observe_provider_account(name, identity, login_info.status, login_info.exp_date);
+        }
+    }
     if login_info.exp_date.is_none() && login_info.status.is_none() {
         Ok(None)
     } else {
@@ -643,16 +680,20 @@ where
     Ok(())
 }
 
-fn catalog_source_for_input(input: &ConfigInput) -> Option<InputSource> {
-    let mut source: InputSource = input.into();
-    if is_input_expired(input.exp_date) {
-        let alias = input.get_enabled_aliases()?.into_iter().find(|alias| !is_input_expired(alias.exp_date))?;
-        source.url.clone_from(&alias.url);
-        source.username.clone_from(&alias.username);
-        source.password.clone_from(&alias.password);
-        source.provider = input.get_resolve_provider(&alias.url);
+async fn verify_xtream_playlist_account<E: EventSink>(
+    app_config: &Arc<AppConfig>,
+    client: &reqwest::Client,
+    events: &E,
+    source: &InputSource,
+    username: &str,
+) -> Result<(), TuliproxError> {
+    let info = xtream_login(app_config, client, events, source, username).await?;
+    if info.is_some_and(|info| info.status.is_some_and(|status| !status.is_usable()) || is_input_expired(info.exp_date))
+    {
+        return Err(TuliproxError::ConfigInput(format!("Provider account {} is blocked or expired", source.name)));
     }
-    Some(source)
+    Ok(())
+
 }
 
 /// Downloads xtream clusters from a single source (either main input or staged input).
@@ -681,7 +722,7 @@ async fn download_xtream_from_source<E: EventSink>(
     let base_url = get_xtream_stream_url_base(&base_input_url, username, password);
     let input_source_login = input_source.with_url(base_url.clone());
 
-    if let Err(err) = xtream_login(app_config, client, events, &input_source_login, username).await {
+    if let Err(err) = verify_xtream_playlist_account(app_config, client, events, &input_source_login, username).await {
         error!("Could not log in with xtream user {username} for provider {}. {err}", input.name);
         return PlaylistFetch { failed_clusters: clusters.to_vec(), ..PlaylistFetch::failed(err) };
     }
@@ -783,15 +824,16 @@ async fn download_xtream_playlist_with_scope<E: EventSink>(
 
     if !main_clusters.is_empty() {
         check_alias_user_state(events, input);
-        let Some(source) = catalog_source_for_input(input) else {
+        let Some(account) = input.playlist_account() else {
             return PlaylistFetch {
-                failed_clusters: main_clusters.clone(),
+                failed_clusters: main_clusters,
                 ..PlaylistFetch::failed(TuliproxError::ConfigInput(format!(
-                    "No unexpired account available to fetch Xtream catalog for '{}'",
+                    "No available provider account for {}",
                     input.name
                 )))
             };
         };
+        let source: InputSource = account.as_ref().into();
         let mut source_fetch = download_xtream_from_source(
             app_config,
             client,
@@ -932,7 +974,7 @@ pub fn create_vod_info_from_item(pli: &XtreamPlaylistItem) -> String {
 mod tests {
     use super::{
         apply_cluster_update_quality, apply_disk_cluster_publish_result, apply_in_memory_cluster_download,
-        catalog_source_for_input, create_vod_info_from_item, disk_cluster_quality_policy, input_btree_provider_id,
+        create_vod_info_from_item, disk_cluster_quality_policy, input_btree_provider_id,
         requested_clusters, XtreamDownloadScope,
     };
     use crate::provider::PlaylistFetch;
@@ -997,14 +1039,14 @@ mod tests {
         let sink = RecordingSink::default();
         // One second before the window opens.
         super::notify_account_expire_at(EXPIRY - super::THREE_DAYS_IN_SECS - 1, Some(EXPIRY), &sink, "u", "p");
-        assert!(sink.states().is_empty());
+        assert_eq!(sink.states().len(), 0);
     }
 
     #[test]
     fn no_expiry_date_emits_nothing() {
         let sink = RecordingSink::default();
         super::notify_account_expire_at(EXPIRY, None, &sink, "user", "provider");
-        assert!(sink.states().is_empty());
+        assert_eq!(sink.states().len(), 0);
     }
 
     #[test]
@@ -1037,13 +1079,16 @@ mod tests {
             ]),
             ..ConfigInput::default()
         };
-        let source = catalog_source_for_input(&input).expect("unexpired alias");
-        assert_eq!(source.name.as_ref(), input.name.as_ref());
-        assert_eq!(source.username.as_deref(), Some("active"));
-        assert_eq!(source.password.as_deref(), Some("alias-password"));
+        let account = input.playlist_account().expect("unexpired alias");
+        // The expired root is skipped; the first usable alias supplies the credentials.
+        // The fetch itself still runs under the original input identity.
+        assert_eq!(account.name.as_ref(), "active-alias");
+        assert_eq!(account.username.as_deref(), Some("active"));
+        assert_eq!(account.password.as_deref(), Some("alias-password"));
+        assert_eq!(input.name.as_ref(), "erizadez79");
 
         let no_alias = ConfigInput { aliases: None, ..input };
-        assert!(catalog_source_for_input(&no_alias).is_none());
+        assert!(no_alias.playlist_account().is_none());
     }
 
     fn options_with_flags(flags: &[ConfigInputFlags]) -> ConfigInputOptions {
@@ -1171,7 +1216,7 @@ mod tests {
         assert_eq!(baseline_reads.load(Ordering::SeqCst), 0);
         assert_eq!(direct_fetch.groups.len(), 1);
         assert_eq!(direct_fetch.groups[0].channels.len(), 89);
-        assert!(direct_fetch.quality_rejections.is_empty());
+        assert_eq!(direct_fetch.quality_rejections.len(), 0);
 
         let mut update_fetch = PlaylistFetch::default();
         apply_in_memory_cluster_download(
@@ -1239,7 +1284,7 @@ mod tests {
         .expect("deduplicated candidate should be accepted");
 
         assert_eq!(baseline_reads.load(Ordering::SeqCst), 1);
-        assert!(fetch.quality_rejections.is_empty());
+        assert_eq!(fetch.quality_rejections.len(), 0);
         assert_eq!(
             fetch.quality_acceptances,
             vec![ClusterUpdateAcceptance {
@@ -1317,8 +1362,8 @@ mod tests {
         assert_eq!(baseline_reads.load(Ordering::SeqCst), 0);
         assert_eq!(direct_fetch.groups.iter().map(|group| group.channels.len()).sum::<usize>(), 2);
         assert_eq!(disabled_fetch.groups.iter().map(|group| group.channels.len()).sum::<usize>(), 2);
-        assert!(direct_fetch.quality_rejections.is_empty());
-        assert!(disabled_fetch.quality_rejections.is_empty());
+        assert_eq!(direct_fetch.quality_rejections.len(), 0);
+        assert_eq!(disabled_fetch.quality_rejections.len(), 0);
     }
 
     #[tokio::test]
@@ -1357,7 +1402,7 @@ mod tests {
         .expect("forced candidate should be accepted");
 
         assert_eq!(baseline_reads.load(Ordering::SeqCst), 0);
-        assert!(fetch.quality_rejections.is_empty());
+        assert_eq!(fetch.quality_rejections.len(), 0);
         assert_eq!(fetch.groups.len(), 1);
         assert_eq!(fetch.groups[0].channels.len(), 2);
         assert_eq!(fetch.groups[0].channels[0].header.name.as_ref(), "winning-duplicate");
@@ -1407,7 +1452,7 @@ mod tests {
             vec![candidate_group(XtreamCluster::Live, 1, 1)],
         );
         assert_eq!(disabled.groups[0].channels.len(), 1);
-        assert!(disabled.quality_rejections.is_empty());
+        assert_eq!(disabled.quality_rejections.len(), 0);
 
         let mut bootstrap = PlaylistFetch::default();
         apply_cluster_update_quality(
@@ -1418,7 +1463,7 @@ mod tests {
             vec![candidate_group(XtreamCluster::Video, 2, 3)],
         );
         assert_eq!(bootstrap.groups[0].channels.len(), 3);
-        assert!(bootstrap.quality_rejections.is_empty());
+        assert_eq!(bootstrap.quality_rejections.len(), 0);
 
         let mut empty_bootstrap = PlaylistFetch::default();
         apply_cluster_update_quality(&mut empty_bootstrap, XtreamCluster::Series, None, 90, Vec::new());

@@ -5,11 +5,11 @@ mod cluster_flags;
 mod config;
 mod connection_denied;
 mod custom_video_stream_type;
-mod download;
+
 mod epg;
+mod epg_grid;
 mod epg_request;
 mod event;
-mod identity_registry;
 mod ids;
 mod info_doc_utils;
 mod input_refresh_policy;
@@ -18,6 +18,7 @@ mod ip_check;
 mod item_field;
 mod library_request;
 mod log;
+mod maintenance;
 mod mapping;
 mod media_properties;
 mod messaging;
@@ -28,7 +29,6 @@ mod pagination;
 mod playlist;
 mod playlist_categories;
 mod playlist_document;
-mod playlist_groups_changed;
 mod playlist_info_document;
 mod playlist_request;
 mod playlist_update_run;
@@ -67,7 +67,9 @@ mod target_type;
 mod transfer;
 mod ui_playlist_item;
 mod user_command;
+mod user_id;
 mod user_lifecycle;
+mod user_settings;
 mod uuidtype;
 pub mod view_type;
 mod watch_health;
@@ -77,17 +79,18 @@ pub mod xtream_const;
 
 pub use self::{
     active_user_connection_change::*, auth::*, auth_audit::*, cluster_flags::*, config::*, connection_denied::*,
-    custom_video_stream_type::*, download::*, epg::*, epg_request::*, event::*, identity_registry::*,
-    input_refresh_policy::*, input_update_action::*, ip_check::*, item_field::*, library_request::*, log::*,
-    mapping::*, media_properties::*, messaging::*, metadata_update_failure::*, notification::*,
-    notification_dead_letter::*, pagination::*, playlist::*, playlist_categories::*, playlist_groups_changed::*,
-    playlist_info_document::*, playlist_request::*, playlist_update_run::*, playlist_update_status::*,
-    processing_order::*, progress::*, provider_fetch_failure::*, provider_pool::*, recording::*, recording_math::*,
-    regex_cache::*, resource::*, scheduled_task_failure::*, search_fields::*, search_request::*, server_lifecycle::*,
-    short_epg::*, stalker::*, stalker_item::*, stats::*, status_check::*, stream_history::*, stream_history_record::*,
-    stream_info::*, stream_meter::*, stream_probe_failure::*, stream_properties::*, strm_export_style::*,
-    system_info::*, target_bouquet::*, target_type::*, transfer::*, ui_playlist_item::*, user_command::*,
-    user_lifecycle::*, uuidtype::*, watch_health::*, web_socket::*, xtream::*,
+    custom_video_stream_type::*, epg::*, epg_grid::*, epg_request::*, event::*, input_refresh_policy::*,
+    input_update_action::*, ip_check::*, item_field::*, library_request::*, log::*, maintenance::*, mapping::*,
+    media_properties::*, messaging::*, metadata_update_failure::*, notification::*, notification_dead_letter::*,
+    pagination::*, playlist::*, playlist_categories::*, playlist_info_document::*, playlist_request::*,
+    playlist_update_run::*, playlist_update_status::*, processing_order::*, progress::*, provider_fetch_failure::*,
+    provider_pool::*, recording::*, recording_math::*, regex_cache::*, resource::*, scheduled_task_failure::*,
+    search_fields::*, search_request::*, server_lifecycle::*, short_epg::*, stalker::*, stalker_item::*, stats::*,
+    status_check::*, stream_history::*, stream_history_record::*, stream_info::*, stream_meter::*,
+    stream_probe_failure::*, stream_properties::*, strm_export_style::*, system_info::*, target_bouquet::*,
+    target_type::*, transfer::*, ui_playlist_item::*, user_command::*, user_id::*, user_lifecycle::*, uuidtype::*,
+    watch_health::*, web_socket::*, xtream::*,
 };
 pub use ids::*;
 pub use prepare::*;
+pub use user_settings::*;

@@ -4,33 +4,11 @@ use crate::{
         is_true, is_zero_u16,
     },
     error::TuliproxError,
-    foundation::{get_filter, Filter},
     model::{
-        ClusterFlags, ConfigFavouritesDto, ConfigRenameDto, ConfigSortDto, HdHomeRunDeviceOverview, PatternTemplate,
-        Prepare, PrepareAll, ProcessingOrder, StrmExportStyle, TargetType, TraktConfigDto,
+        ConfigFavouritesDto, ConfigRenameDto, ConfigSortDto, ConfigWatchDto, CurationConfigDto,
+        HdHomeRunDeviceOverview, PatternTemplate, Prepare, PrepareAll, ProcessingOrder, TargetType,
     },
-    utils::is_blank_optional_string,
 };
-
-#[derive(Debug, Clone, Default)]
-pub struct ConfigTargetFilterDto {
-    pub processing: Option<String>,
-    pub persist: Option<String>,
-    pub t_processing: Option<Filter>,
-    pub t_persist: Option<Filter>,
-}
-
-impl PartialEq for ConfigTargetFilterDto {
-    fn eq(&self, other: &Self) -> bool { self.processing == other.processing && self.persist == other.persist }
-}
-
-impl From<String> for ConfigTargetFilterDto {
-    fn from(processing: String) -> Self { Self { processing: Some(processing), ..Self::default() } }
-}
-
-impl From<&str> for ConfigTargetFilterDto {
-    fn from(processing: &str) -> Self { processing.to_string().into() }
-}
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,369 +17,6 @@ struct StagedTargetFilterDto {
     processing: Option<String>,
     #[serde(default)]
     persist: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(untagged)]
-enum TargetFilterRepr {
-    Processing(String),
-    Staged(StagedTargetFilterDto),
-}
-
-impl<'de> serde::Deserialize<'de> for ConfigTargetFilterDto {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        match <TargetFilterRepr as serde::Deserialize>::deserialize(deserializer)? {
-            TargetFilterRepr::Processing(processing) => Ok(processing.into()),
-            TargetFilterRepr::Staged(staged) => {
-                if staged.processing.is_none() && staged.persist.is_none() {
-                    return Err(serde::de::Error::custom("staged target filter requires at least one stage"));
-                }
-                Ok(Self { processing: staged.processing, persist: staged.persist, ..Self::default() })
-            }
-        }
-    }
-}
-
-impl ConfigTargetFilterDto {
-    pub const fn is_empty(&self) -> bool { self.processing.is_none() && self.persist.is_none() }
-
-    fn prepare(&mut self, templates: Option<&[PatternTemplate]>) -> Result<(), TuliproxError> {
-        fn compile_filter(
-            value: Option<&str>,
-            templates: Option<&[PatternTemplate]>,
-        ) -> Result<Option<Filter>, TuliproxError> {
-            value
-                .map(str::trim)
-                .filter(|filter| !filter.is_empty())
-                .map(|filter| get_filter(filter, templates))
-                .transpose()
-        }
-
-        self.t_processing = compile_filter(self.processing.as_deref(), templates)?;
-        self.t_persist = compile_filter(self.persist.as_deref(), templates)?;
-        Ok(())
-    }
-}
-
-impl serde::Serialize for ConfigTargetFilterDto {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-
-        if self.persist.is_none() {
-            return serializer.serialize_str(self.processing.as_deref().unwrap_or_default());
-        }
-        let field_count = usize::from(self.processing.is_some()) + usize::from(self.persist.is_some());
-        let mut state = serializer.serialize_struct("ConfigTargetFilterDto", field_count)?;
-        if let Some(processing) = self.processing.as_ref() {
-            state.serialize_field("processing", processing)?;
-        }
-        if let Some(persist) = self.persist.as_ref() {
-            state.serialize_field("persist", persist)?;
-        }
-        state.end()
-    }
-}
-
-#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct ConfigTargetShareLiveStreams {
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub hls: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub mpeg_ts: bool,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(untagged)]
-enum ConfigTargetShareLiveStreamsCompat {
-    Legacy(bool),
-    Structured(ConfigTargetShareLiveStreams),
-}
-
-fn deserialize_share_live_streams<'de, D>(deserializer: D) -> Result<ConfigTargetShareLiveStreams, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(match <ConfigTargetShareLiveStreamsCompat as serde::Deserialize>::deserialize(deserializer)? {
-        ConfigTargetShareLiveStreamsCompat::Legacy(enabled) => {
-            ConfigTargetShareLiveStreams { hls: false, mpeg_ts: enabled }
-        }
-        ConfigTargetShareLiveStreamsCompat::Structured(config) => config,
-    })
-}
-
-impl ConfigTargetShareLiveStreams {
-    pub fn is_empty(&self) -> bool { !self.hls && !self.mpeg_ts }
-}
-
-/// Controls optional canonicalization of EPG data emitted for a target.
-#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct EpgOutputOptions {
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub lowercase_ids: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub lowercase_xmltv_display_names: bool,
-}
-
-impl EpgOutputOptions {
-    pub const fn is_empty(&self) -> bool { !self.lowercase_ids && !self.lowercase_xmltv_display_names }
-}
-
-#[derive(Debug, Copy, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DeduplicateMatchBy {
-    #[default]
-    Caption,
-    Name,
-    Title,
-}
-
-#[derive(Debug, Copy, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DeduplicateKeep {
-    #[default]
-    BestQuality,
-    First,
-}
-
-/// Quality-aware duplicate removal: channels with the same normalized match
-/// value (quality tokens stripped) collapse to a single entry.
-#[derive(Debug, Copy, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct DeduplicateConfig {
-    #[serde(default)]
-    pub match_by: DeduplicateMatchBy,
-    #[serde(default)]
-    pub keep: DeduplicateKeep,
-    /// Normalize accented characters in match keys ("Café HD" matches "Cafe FHD").
-    #[serde(default)]
-    pub match_as_ascii: bool,
-}
-
-#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct ConfigTargetOptions {
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub ignore_logo: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    #[serde(alias = "required_epg")]
-    pub clear_invalid_epg_ids: bool,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_share_live_streams",
-        skip_serializing_if = "ConfigTargetShareLiveStreams::is_empty"
-    )]
-    pub share_live_streams: ConfigTargetShareLiveStreams,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub remove_duplicates: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deduplicate: Option<DeduplicateConfig>,
-    #[serde(default, skip_serializing_if = "EpgOutputOptions::is_empty")]
-    pub epg_output: EpgOutputOptions,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub force_redirect: Option<ClusterFlags>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub preserve_stream_ids: bool,
-}
-
-impl ConfigTargetOptions {
-    pub fn is_empty(&self) -> bool {
-        !self.ignore_logo
-            && !self.clear_invalid_epg_ids
-            && self.share_live_streams.is_empty()
-            && !self.remove_duplicates
-            && self.deduplicate.is_none()
-            && self.epg_output.is_empty()
-            && self.force_redirect.is_none_or(|f| f.has_full_flags() || f.is_empty())
-            && !self.preserve_stream_ids
-    }
-
-    pub const fn lowercase_epg_ids(&self) -> bool { self.epg_output.lowercase_ids }
-
-    pub const fn lowercase_xmltv_display_names(&self) -> bool { self.epg_output.lowercase_xmltv_display_names }
-
-    pub const fn clear_invalid_epg_ids(&self) -> bool { self.clear_invalid_epg_ids }
-
-    pub fn share_live_hls_enabled(&self) -> bool { self.share_live_streams.hls }
-
-    pub fn share_live_mpeg_ts_enabled(&self) -> bool { self.share_live_streams.mpeg_ts }
-
-    pub fn share_live_any_enabled(&self) -> bool { self.share_live_hls_enabled() || self.share_live_mpeg_ts_enabled() }
-
-    pub const fn preserve_stream_ids(&self) -> bool { self.preserve_stream_ids }
-}
-
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct XtreamTargetOutputDto {
-    #[serde(default = "default_as_true", skip_serializing_if = "is_true")]
-    pub skip_live_direct_source: bool,
-    #[serde(default = "default_as_true", skip_serializing_if = "is_true")]
-    pub skip_video_direct_source: bool,
-    #[serde(default = "default_as_true", skip_serializing_if = "is_true")]
-    pub skip_series_direct_source: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trakt: Option<TraktConfigDto>,
-    #[serde(default, skip_serializing_if = "is_blank_optional_string")]
-    pub filter: Option<String>,
-    #[serde(skip)]
-    pub t_filter: Option<Filter>,
-}
-
-impl Default for XtreamTargetOutputDto {
-    fn default() -> Self {
-        XtreamTargetOutputDto {
-            skip_live_direct_source: default_as_true(),
-            skip_video_direct_source: default_as_true(),
-            skip_series_direct_source: default_as_true(),
-            trakt: None,
-            filter: None,
-            t_filter: None,
-        }
-    }
-}
-
-impl XtreamTargetOutputDto {
-    pub fn has_any_option(&self) -> bool {
-        self.skip_live_direct_source
-            || self.skip_video_direct_source
-            || self.skip_series_direct_source
-            || self.trakt.is_some()
-            || self.filter.is_some()
-    }
-}
-
-impl Prepare for XtreamTargetOutputDto {
-    type Ctx<'a> = Option<&'a [PatternTemplate]>;
-
-    fn prepare(&mut self, templates: Self::Ctx<'_>) -> Result<(), TuliproxError> {
-        if let Some(raw_filter) = &self.filter {
-            self.t_filter = Some(get_filter(raw_filter, templates)?);
-        }
-        if let Some(trakt) = &mut self.trakt {
-            trakt.prepare()?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct M3uTargetOutputDto {
-    #[serde(default, skip_serializing_if = "is_blank_optional_string")]
-    pub filename: Option<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub include_type_in_url: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub mask_redirect_url: bool,
-    #[serde(default, skip_serializing_if = "is_blank_optional_string")]
-    pub filter: Option<String>,
-    #[serde(skip)]
-    pub t_filter: Option<Filter>,
-}
-
-impl M3uTargetOutputDto {
-    pub fn has_any_option(&self) -> bool {
-        self.filename.is_some() || self.include_type_in_url || self.mask_redirect_url || self.filter.is_some()
-    }
-}
-
-impl Prepare for M3uTargetOutputDto {
-    type Ctx<'a> = Option<&'a [PatternTemplate]>;
-
-    fn prepare(&mut self, templates: Self::Ctx<'_>) -> Result<(), TuliproxError> {
-        if let Some(raw_filter) = &self.filter {
-            self.t_filter = Some(get_filter(raw_filter, templates)?);
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct StrmTargetOutputDto {
-    pub directory: String,
-    #[serde(default, skip_serializing_if = "is_blank_optional_string")]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub style: StrmExportStyle,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub flat: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub underscore_whitespace: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub cleanup: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub strm_props: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "is_blank_optional_string")]
-    pub filter: Option<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub add_quality_to_filename: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub use_metadata: bool,
-
-    // New Fields for Metadata and Probe
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub probe_probe_size_bytes: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub probe_analyze_duration: Option<u64>,
-
-    #[serde(skip)]
-    pub t_filter: Option<Filter>,
-}
-
-impl Prepare for StrmTargetOutputDto {
-    type Ctx<'a> = Option<&'a [PatternTemplate]>;
-
-    fn prepare(&mut self, templates: Self::Ctx<'_>) -> Result<(), TuliproxError> {
-        if let Some(raw_filter) = &self.filter {
-            self.t_filter = Some(get_filter(raw_filter, templates)?);
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct HdHomeRunTargetOutputDto {
-    pub device: String,
-    pub username: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub use_output: Option<TargetType>,
-}
-
-impl Default for HdHomeRunTargetOutputDto {
-    fn default() -> Self { Self { device: String::new(), username: String::new(), use_output: Some(TargetType::M3u) } }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-#[serde(deny_unknown_fields, tag = "type", rename_all = "lowercase")]
-pub enum TargetOutputDto {
-    Xtream(XtreamTargetOutputDto),
-    M3u(M3uTargetOutputDto),
-    Strm(StrmTargetOutputDto),
-    HdHomeRun(HdHomeRunTargetOutputDto),
-}
-
-impl Prepare for TargetOutputDto {
-    type Ctx<'a> = Option<&'a [PatternTemplate]>;
-
-    fn prepare(&mut self, templates: Self::Ctx<'_>) -> Result<(), TuliproxError> {
-        match self {
-            TargetOutputDto::Xtream(output) => output.prepare(templates),
-            TargetOutputDto::M3u(output) => output.prepare(templates),
-            TargetOutputDto::Strm(output) => output.prepare(templates),
-            TargetOutputDto::HdHomeRun(_) => Ok(()),
-        }
-    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -422,6 +37,8 @@ pub struct ConfigTargetDto {
     #[serde(default)]
     pub output: Vec<TargetOutputDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curation: Option<CurationConfigDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rename: Option<Vec<ConfigRenameDto>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mapping: Option<Vec<String>>,
@@ -430,7 +47,7 @@ pub struct ConfigTargetDto {
     #[serde(default, skip_serializing_if = "is_default_processing_order")]
     pub processing_order: ProcessingOrder,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub watch: Option<Vec<String>>,
+    pub watch: Option<Vec<ConfigWatchDto>>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub use_memory_cache: bool,
 }
@@ -445,6 +62,7 @@ impl Default for ConfigTargetDto {
             sort: None,
             filter: ConfigTargetFilterDto::default(),
             output: Vec::new(),
+            curation: None,
             rename: None,
             mapping: None,
             favourites: None,
@@ -456,7 +74,6 @@ impl Default for ConfigTargetDto {
 }
 
 impl ConfigTargetDto {
-    #[allow(clippy::too_many_lines)]
     pub fn prepare(
         &mut self,
         id: u16,
@@ -470,6 +87,10 @@ impl ConfigTargetDto {
         self.name = self.name.trim().to_string();
         if self.name.is_empty() {
             return Err(TuliproxError::ConfigTarget("target name required".to_string()));
+        }
+
+        if let Some(curation) = &mut self.curation {
+            curation.prepare(&self.output)?;
         }
 
         let mut m3u_cnt = 0;
@@ -615,13 +236,7 @@ impl ConfigTargetDto {
 
         self.favourites.prepare(templates)?;
 
-        if let Some(watch) = &self.watch {
-            for pat in watch {
-                if let Err(err) = crate::model::REGEX_CACHE.get_or_compile(pat) {
-                    return Err(TuliproxError::ConfigTarget(format!("Invalid watch regular expression: {err}")));
-                }
-            }
-        }
+        self.watch.prepare_all(())?;
 
         self.filter.prepare(templates)?;
         self.rename.prepare_all(templates)?;
@@ -633,372 +248,16 @@ impl ConfigTargetDto {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        ConfigTargetDto, ConfigTargetFilterDto, ConfigTargetOptions, ConfigTargetShareLiveStreams, EpgOutputOptions,
-        M3uTargetOutputDto, StrmTargetOutputDto, TargetOutputDto, XtreamTargetOutputDto,
-    };
-
-    fn target_with_outputs(output: Vec<TargetOutputDto>) -> ConfigTargetDto {
-        ConfigTargetDto {
-            name: "target".to_string(),
-            filter: "Group ~ \".*\"".into(),
-            output,
-            ..ConfigTargetDto::default()
-        }
-    }
-
-    fn strm_with_username() -> TargetOutputDto {
-        TargetOutputDto::Strm(StrmTargetOutputDto {
-            directory: "/tmp/strm".to_string(),
-            username: Some("alice".to_string()),
-            ..StrmTargetOutputDto::default()
-        })
-    }
-
-    fn strm_without_username() -> TargetOutputDto {
-        TargetOutputDto::Strm(StrmTargetOutputDto {
-            directory: "/tmp/strm".to_string(),
-            ..StrmTargetOutputDto::default()
-        })
-    }
-
-    fn xtream_output() -> TargetOutputDto { TargetOutputDto::Xtream(XtreamTargetOutputDto::default()) }
-
-    #[test]
-    fn target_filter_string_roundtrips_as_string() {
-        let dto = serde_saphyr::from_str::<ConfigTargetDto>(
-            r#"
-name: target
-filter: 'Group ~ ".*"'
-output:
-  - type: m3u
-"#,
-        )
-        .expect("legacy target filter should deserialize");
-
-        assert_eq!(dto.filter.processing.as_deref(), Some(r#"Group ~ ".*""#));
-        assert_eq!(dto.filter.persist, None);
-        let serialized = serde_saphyr::to_string(&dto).expect("target should serialize");
-        assert!(serialized.contains("filter: Group ~"), "expected scalar filter, got: {serialized}");
-        assert!(!serialized.contains("processing:"), "processing-only filter must stay scalar: {serialized}");
-    }
-
-    #[test]
-    fn target_without_filter_defaults_to_no_stages_and_omits_filter() {
-        let dto = serde_saphyr::from_str::<ConfigTargetDto>(
-            r"
-name: target
-output:
-  - type: m3u
-",
-        )
-        .expect("target without filter should deserialize");
-
-        assert!(dto.filter.is_empty());
-        let serialized = serde_saphyr::to_string(&dto).expect("target should serialize");
-        assert!(!serialized.contains("filter:"), "empty filter should be omitted: {serialized}");
-    }
-
-    #[test]
-    fn target_filter_stages_roundtrip_as_mapping() {
-        let dto = serde_saphyr::from_str::<ConfigTargetDto>(
-            r#"
-name: target
-filter:
-  processing: 'Group ~ ".*"'
-  persist: 'EpgId ~ ".+"'
-output:
-  - type: m3u
-"#,
-        )
-        .expect("staged target filter should deserialize");
-
-        assert_eq!(dto.filter.processing.as_deref(), Some(r#"Group ~ ".*""#));
-        assert_eq!(dto.filter.persist.as_deref(), Some(r#"EpgId ~ ".+""#));
-        let serialized = serde_saphyr::to_string(&dto).expect("target should serialize");
-        assert!(serialized.contains("processing:"), "expected staged filter mapping: {serialized}");
-        assert!(serialized.contains("persist:"), "expected persist filter: {serialized}");
-    }
-
-    #[test]
-    fn staged_target_filter_rejects_empty_mapping() {
-        let result = serde_saphyr::from_str::<ConfigTargetFilterDto>("{}\n");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn staged_target_filter_accepts_missing_processing_stage() {
-        let filter = serde_saphyr::from_str::<ConfigTargetFilterDto>(
-            r#"persist: 'EpgId ~ ".+"'
-"#,
-        )
-        .expect("persist-only filter should deserialize");
-
-        assert_eq!(filter.processing, None);
-        assert_eq!(filter.persist.as_deref(), Some(r#"EpgId ~ ".+""#));
-    }
-
-    #[test]
-    fn target_filter_treats_empty_and_whitespace_stages_as_match_all() {
-        for value in ["", " \t\r\n "] {
-            let mut filter = ConfigTargetFilterDto {
-                processing: Some(value.to_string()),
-                persist: Some(value.to_string()),
-                ..ConfigTargetFilterDto::default()
-            };
-
-            filter.prepare(None).expect("blank filter stages should prepare");
-
-            assert!(filter.t_processing.is_none());
-            assert!(filter.t_persist.is_none());
-        }
-    }
-
-    #[test]
-    fn processing_only_mapping_serializes_as_scalar() {
-        let filter = serde_saphyr::from_str::<ConfigTargetFilterDto>(
-            r#"processing: 'Group ~ ".*"'
-"#,
-        )
-        .expect("processing-only mapping should deserialize");
-
-        let serialized = serde_saphyr::to_string(&filter).expect("processing filter should serialize");
-        assert!(!serialized.contains("processing:"), "processing-only filter must become scalar: {serialized}");
-        assert!(serialized.contains("Group ~"));
-    }
-
-    #[test]
-    fn target_filter_persist_roundtrips_as_mapping() {
-        let filter = ConfigTargetFilterDto {
-            processing: None,
-            persist: Some(r#"EpgId ~ ".+""#.to_string()),
-            ..ConfigTargetFilterDto::default()
-        };
-
-        let serialized = serde_saphyr::to_string(&filter).expect("target filter should serialize");
-        assert!(!serialized.contains("processing:"));
-        assert!(serialized.contains("persist:"));
-        let reparsed =
-            serde_saphyr::from_str::<ConfigTargetFilterDto>(&serialized).expect("target filter should deserialize");
-        assert_eq!(reparsed, filter);
-    }
-
-    #[test]
-    fn strm_with_username_is_allowed_with_m3u_output() {
-        let mut target =
-            target_with_outputs(vec![TargetOutputDto::M3u(M3uTargetOutputDto::default()), strm_with_username()]);
-
-        assert!(target.prepare(1, None, None).is_ok());
-    }
-
-    #[test]
-    fn strm_with_username_is_allowed_with_xtream_output() {
-        let mut target = target_with_outputs(vec![xtream_output(), strm_with_username()]);
-
-        assert!(target.prepare(1, None, None).is_ok());
-    }
-
-    #[test]
-    fn strm_without_username_is_allowed_with_m3u_output() {
-        let mut target =
-            target_with_outputs(vec![TargetOutputDto::M3u(M3uTargetOutputDto::default()), strm_without_username()]);
-
-        assert!(target.prepare(1, None, None).is_ok());
-    }
-
-    #[test]
-    fn strm_with_username_requires_m3u_or_xtream_output() {
-        let mut target = target_with_outputs(vec![strm_with_username()]);
-
-        let err = target.prepare(1, None, None).expect_err("STRM username without stream output should fail");
-
-        assert!(err.to_string().contains("xtream or m3u output"));
-    }
-
-    #[test]
-    fn strm_without_username_requires_m3u_or_xtream_output() {
-        let mut target = target_with_outputs(vec![strm_without_username()]);
-
-        let err = target.prepare(1, None, None).expect_err("STRM without stream output should fail");
-
-        assert!(err.to_string().contains("xtream or m3u output"));
-    }
-
-    #[test]
-    fn target_options_deserialize_structured_share_live_streams() {
-        let yaml = r"
-share_live_streams:
-  hls: true
-  mpeg_ts: true
-";
-
-        let options: ConfigTargetOptions =
-            serde_saphyr::from_str(yaml).expect("structured share_live_streams should deserialize");
-
-        assert!(options.share_live_hls_enabled());
-        assert!(options.share_live_mpeg_ts_enabled());
-        assert!(options.share_live_any_enabled());
-    }
-
-    #[test]
-    fn target_options_maps_legacy_true_share_live_streams_to_both_modes() {
-        let yaml = r"
-share_live_streams: true
-";
-
-        let options = serde_saphyr::from_str::<ConfigTargetOptions>(yaml);
-
-        assert!(options.is_ok(), "legacy boolean should deserialize: {options:?}");
-        if let Ok(options) = options {
-            assert_eq!(options.share_live_streams, ConfigTargetShareLiveStreams { hls: false, mpeg_ts: true });
-        }
-    }
-
-    #[test]
-    fn target_options_maps_legacy_false_share_live_streams_to_both_modes() {
-        let yaml = r"
-share_live_streams: false
-";
-
-        let options: ConfigTargetOptions =
-            serde_saphyr::from_str(yaml).expect("legacy false share_live_streams should deserialize");
-
-        assert_eq!(options.share_live_streams, ConfigTargetShareLiveStreams { hls: false, mpeg_ts: false });
-    }
-
-    #[test]
-    fn target_options_omit_default_share_live_streams() {
-        let options = ConfigTargetOptions::default();
-
-        assert!(options.is_empty());
-        assert!(!options.clear_invalid_epg_ids());
-
-        let serialized = serde_saphyr::to_string(&options).expect("default options should serialize");
-        assert!(
-            !serialized.contains("share_live_streams"),
-            "default share_live_streams should be omitted, got: {serialized}"
-        );
-    }
-
-    #[test]
-    fn target_options_round_trips_partial_share_live_streams() {
-        let options = ConfigTargetOptions {
-            share_live_streams: ConfigTargetShareLiveStreams { hls: true, mpeg_ts: false },
-            ..ConfigTargetOptions::default()
-        };
-
-        let serialized = serde_saphyr::to_string(&options).expect("partial share_live_streams should serialize");
-        let reparsed: ConfigTargetOptions =
-            serde_saphyr::from_str(&serialized).expect("partial share_live_streams should deserialize");
-
-        assert_eq!(reparsed.share_live_streams, options.share_live_streams);
-    }
-
-    #[test]
-    fn target_options_clear_invalid_epg_ids_roundtrips_and_accepts_legacy_alias() {
-        let options = serde_saphyr::from_str::<ConfigTargetOptions>("required_epg: true\n")
-            .expect("legacy required_epg should deserialize");
-
-        assert!(options.clear_invalid_epg_ids());
-        assert!(!options.is_empty());
-
-        let serialized = serde_saphyr::to_string(&options).expect("clear_invalid_epg_ids should serialize");
-        assert!(serialized.contains("clear_invalid_epg_ids: true"));
-        assert!(!serialized.contains("required_epg:"));
-    }
-
-    #[test]
-    fn target_options_default_epg_output_is_disabled_and_omitted() {
-        let options = serde_saphyr::from_str::<ConfigTargetOptions>("{}")
-            .expect("target options without epg_output should deserialize");
-
-        assert!(!options.lowercase_epg_ids());
-        assert!(!options.lowercase_xmltv_display_names());
-        assert!(options.epg_output.is_empty());
-        assert!(options.is_empty());
-
-        let serialized = serde_saphyr::to_string(&options).expect("default target options should serialize");
-        assert!(!serialized.contains("epg_output"), "default epg_output should be omitted, got: {serialized}");
-    }
-
-    #[test]
-    fn target_options_epg_output_roundtrips() {
-        let yaml = r"
-epg_output:
-  lowercase_ids: true
-  lowercase_xmltv_display_names: true
-";
-
-        let options =
-            serde_saphyr::from_str::<ConfigTargetOptions>(yaml).expect("configured epg_output should deserialize");
-
-        assert!(options.lowercase_epg_ids());
-        assert!(options.lowercase_xmltv_display_names());
-        assert!(!options.is_empty());
-
-        let serialized = serde_saphyr::to_string(&options).expect("configured epg_output should serialize");
-        let roundtripped = serde_saphyr::from_str::<ConfigTargetOptions>(&serialized)
-            .expect("serialized epg_output should deserialize");
-        assert_eq!(roundtripped, options);
-    }
-
-    #[test]
-    fn target_options_epg_output_makes_options_nonempty() {
-        let lowercase_ids = ConfigTargetOptions {
-            epg_output: EpgOutputOptions { lowercase_ids: true, ..EpgOutputOptions::default() },
-            ..ConfigTargetOptions::default()
-        };
-        let lowercase_display_names = ConfigTargetOptions {
-            epg_output: EpgOutputOptions { lowercase_xmltv_display_names: true, ..EpgOutputOptions::default() },
-            ..ConfigTargetOptions::default()
-        };
-
-        assert!(!lowercase_ids.is_empty());
-        assert!(!lowercase_display_names.is_empty());
-    }
-
-    #[test]
-    fn target_options_reject_unknown_epg_output_fields() {
-        let yaml = r"
-epg_output:
-  lowercase_id: true
-";
-
-        let result = serde_saphyr::from_str::<ConfigTargetOptions>(yaml);
-
-        assert!(result.is_err(), "unknown epg_output fields must be rejected");
-    }
-
-    #[test]
-    fn target_options_mpeg_ts_helper_keeps_existing_stream_share_semantics() {
-        let hls_only = ConfigTargetOptions {
-            share_live_streams: ConfigTargetShareLiveStreams { hls: true, mpeg_ts: false },
-            ..Default::default()
-        };
-        let mpeg_ts = ConfigTargetOptions {
-            share_live_streams: ConfigTargetShareLiveStreams { hls: false, mpeg_ts: true },
-            ..Default::default()
-        };
-
-        assert!(hls_only.share_live_hls_enabled());
-        assert!(!hls_only.share_live_mpeg_ts_enabled());
-        assert!(mpeg_ts.share_live_mpeg_ts_enabled());
-    }
-
-    #[test]
-    fn target_options_preserve_stream_ids_roundtrips() {
-        let yaml = "preserve_stream_ids: true\n";
-        let options = serde_saphyr::from_str::<ConfigTargetOptions>(yaml)
-            .expect("configured preserve_stream_ids should deserialize");
-
-        assert!(options.preserve_stream_ids());
-        assert!(!options.is_empty());
-
-        let serialized = serde_saphyr::to_string(&options).expect("configured preserve_stream_ids should serialize");
-        assert!(serialized.contains("preserve_stream_ids: true"));
-        let roundtripped = serde_saphyr::from_str::<ConfigTargetOptions>(&serialized)
-            .expect("serialized preserve_stream_ids should deserialize");
-        assert_eq!(roundtripped, options);
-    }
-}
+mod tests;
+
+mod filter;
+mod options;
+mod output;
+pub use filter::ConfigTargetFilterDto;
+pub use options::{
+    ConfigTargetOptions, ConfigTargetShareLiveStreams, DeduplicateConfig, DeduplicateKeep, DeduplicateMatchBy,
+    EpgOutputOptions,
+};
+pub use output::{
+    HdHomeRunTargetOutputDto, M3uTargetOutputDto, StrmTargetOutputDto, TargetOutputDto, XtreamTargetOutputDto,
+};

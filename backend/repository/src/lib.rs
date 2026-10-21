@@ -5,11 +5,13 @@ mod target_id_mapping;
 // Both read repository storage directly, so they belong here rather than in
 // `utils`, which must not depend on this layer.
 mod alias_repository;
+mod api_user_recovery;
 mod db_viewer;
+mod epg_group_index;
 mod epg_repository;
 mod geoip;
-pub mod identity_registry;
 mod library_repository;
+mod lineup_guide_index;
 mod live_stream_metadata_repository;
 mod m3u_playlist_iterator;
 mod m3u_repository;
@@ -26,6 +28,7 @@ mod playlist_stream;
 mod provider_dns_repository;
 mod qos_snapshot_repository;
 pub mod raw_group_catalog_repository;
+pub mod recording_repository;
 pub mod recording_rule_repository;
 pub mod stalker_generation_repository;
 pub mod stalker_repository;
@@ -41,9 +44,11 @@ mod xtream_repository;
 
 pub use alias_repository::*;
 pub use db_viewer::*;
+pub use epg_group_index::*;
 pub use epg_repository::*;
 pub use geoip::*;
 pub use library_repository::*;
+pub use lineup_guide_index::*;
 pub use live_stream_metadata_repository::{
     load_input_live_bitrate_bps, persist_input_live_bitrate_bps, LiveBitratePersistenceOutcome,
 };
@@ -60,6 +65,9 @@ pub use playlist_stream::*;
 pub use provider_dns_repository::*;
 pub use qos_snapshot_repository::*;
 pub use raw_group_catalog_repository::*;
+pub use recording_repository::{
+    PersistedRecordingTask, RecordingPartition, RecordingRepository, RecordingRepositorySnapshot,
+};
 pub use stalker_repository::*;
 pub use startup_migration::*;
 pub use storage::*;
@@ -75,3 +83,5 @@ pub use tuliprox_btree::*;
 pub use user_repository::*;
 pub use xtream_playlist_iterator::*;
 pub use xtream_repository::*;
+
+pub mod user_settings_repository;

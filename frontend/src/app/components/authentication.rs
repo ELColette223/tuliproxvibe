@@ -3,8 +3,9 @@ use crate::{
         components::{login::Login, LoadingScreen},
         AppRoute,
     },
-    hooks::use_service_context,
+    hooks::{use_service_context, Services},
     i18n::use_translation,
+    model::EventMessage,
 };
 use gloo_timers::callback::Timeout;
 use shared::model::permission::Permission;
@@ -13,8 +14,28 @@ use yew::{prelude::*, suspense::use_future};
 use yew_hooks::{use_async_with_options, UseAsyncOptions};
 use yew_router::prelude::use_navigator;
 
-fn should_connect_websocket(success: bool, setup_mode: bool, can_read_system: bool) -> bool {
-    success && !setup_mode && can_read_system
+/// The socket carries server status for `system.read` and the recording
+/// snapshot for `recording.read`; the server checks each message on its own.
+/// The recording library is fed by the socket only, so a recording-only user
+/// needs it too.
+fn should_connect_websocket(success: bool, setup_mode: bool, can_read_system: bool, can_read_recordings: bool) -> bool {
+    success && !setup_mode && (can_read_system || can_read_recordings)
+}
+
+/// Enables or disables the websocket for the current auth state.
+/// Idempotent, so it can run both from the auth signal and synchronously after
+/// a token refresh, before the authenticated children mount and send requests.
+fn sync_websocket_connection(services: &Services, success: bool) {
+    if should_connect_websocket(
+        success,
+        services.config.ui_config.setup_mode,
+        services.auth.has_permission(Permission::SystemRead),
+        services.auth.has_permission(Permission::RecordingRead),
+    ) {
+        services.websocket.connect_ws_with_backoff();
+    } else {
+        services.websocket.disconnect();
+    }
 }
 
 const SESSION_EXPIRY_SKEW_SECS: i64 = 30;
@@ -46,16 +67,29 @@ pub fn Authentication(props: &AuthenticationProps) -> Html {
                 .auth
                 .auth_subscribe(&mut |success| {
                     authenticated_state.set(success);
-                    if should_connect_websocket(
-                        success,
-                        services_ctx.config.ui_config.setup_mode,
-                        services_ctx.auth.has_permission(Permission::SystemRead),
-                    ) {
-                        services_ctx.websocket.connect_ws_with_backoff();
-                    }
+                    sync_websocket_connection(&services_ctx, success);
                     future::ready(())
                 })
                 .await;
+        });
+    }
+
+    {
+        let services_ctx = services.clone();
+        use_effect_with((), move |()| {
+            let auth = services_ctx.auth.clone();
+            let websocket = services_ctx.websocket.clone();
+            let subid = services_ctx.event.subscribe(move |msg| {
+                if msg == EventMessage::Unauthorized {
+                    // auth_subscribe reacts asynchronously; close the socket now so no further messages are processed.
+                    websocket.disconnect();
+                    auth.logout();
+                }
+            });
+            move || {
+                services_ctx.event.unsubscribe(subid);
+                services_ctx.websocket.disconnect();
+            }
         });
     }
 
@@ -67,6 +101,9 @@ pub fn Authentication(props: &AuthenticationProps) -> Html {
             async move {
                 let result = services_ctx.auth.refresh().await;
                 let success = result.is_ok();
+                // The auth signal fires on a later poll; enable the socket before the children mount
+                // so their initial requests are queued instead of dropped.
+                sync_websocket_connection(&services_ctx, success);
                 authenticated_state.set(success);
                 loading_state.set(false);
                 result
@@ -98,6 +135,7 @@ pub fn Authentication(props: &AuthenticationProps) -> Html {
                     let now_secs = js_sys::Date::now() / 1000.0;
                     let delay_ms = compute_session_expiry_delay_ms(exp, now_secs as i64, SESSION_EXPIRY_SKEW_SECS);
                     timeout = Some(Timeout::new(delay_ms, move || {
+                        services_ctx.websocket.disconnect();
                         services_ctx.auth.logout();
                         services_ctx.toastr.warning(translate.t("MESSAGES.SESSION.EXPIRED"));
                     }));
@@ -125,11 +163,12 @@ mod tests {
     use super::{compute_session_expiry_delay_ms, should_connect_websocket, SESSION_EXPIRY_SKEW_SECS};
 
     #[test]
-    fn websocket_connects_only_for_authenticated_non_setup_users_with_system_read() {
-        assert!(should_connect_websocket(true, false, true));
-        assert!(!should_connect_websocket(false, false, true));
-        assert!(!should_connect_websocket(true, true, true));
-        assert!(!should_connect_websocket(true, false, false));
+    fn websocket_connects_for_authenticated_non_setup_users_with_system_or_recording_read() {
+        assert!(should_connect_websocket(true, false, true, false));
+        assert!(should_connect_websocket(true, false, false, true), "a recording-only user needs the snapshot");
+        assert!(!should_connect_websocket(false, false, true, true));
+        assert!(!should_connect_websocket(true, true, true, true));
+        assert!(!should_connect_websocket(true, false, false, false));
     }
 
     #[test]

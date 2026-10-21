@@ -473,6 +473,14 @@ fn input_dedupe_key(input_config: &ConfigInputDto) -> Option<String> {
     }
 }
 
+fn output_has_target_curation(state: &EditorState, output_id: BlockId) -> bool {
+    state.connections.iter().filter(|connection| connection.to == output_id).any(|connection| {
+        state
+            .get_block(connection.from)
+            .is_some_and(|block| matches!(&block.instance, BlockInstance::Target(target) if target.curation.is_some()))
+    })
+}
+
 fn editor_state_to_sources_config(base_sources: &SourcesConfigDto, editor_state: &EditorState) -> SourcesConfigDto {
     let mut sources_config = base_sources.clone();
     let mut gen_sources: Vec<ConfigSourceDto> = Vec::new();
@@ -1806,11 +1814,10 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
                     }
                 }
 
-                // Bind the computed params first so the shared borrow from the
-                // scrutinee is dropped before `move_blocks` borrows the state
-                // mutably (an `if let` scrutinee borrow lives through the block).
-                let drag_move_params = compute_drag_move_params(&editor_state_ref.borrow(), mouse_x, mouse_y);
-                if let Some(move_it) = drag_move_params {
+                // Bind first: an if-let scrutinee temporary would keep the borrow alive
+                // across move_blocks.emit, which needs borrow_mut.
+                let move_params = compute_drag_move_params(&editor_state_ref.borrow(), mouse_x, mouse_y);
+                if let Some(move_it) = move_params {
                     move_blocks.emit(move_it);
                     // Drag updates are applied directly to DOM for smoothness.
                     // Avoid full re-render on every mouse move while dragging blocks.
@@ -1942,11 +1949,8 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
                         let touch_x = client_x - rect.left() as f32;
                         let touch_y = client_y - rect.top() as f32;
 
-                        // Drop the shared borrow before `move_blocks` borrows the
-                        // state mutably (an `if let` scrutinee borrow lives through
-                        // the whole statement).
-                        let drag_move = compute_drag_move_params(&editor_state_ref.borrow(), touch_x, touch_y);
-                        if let Some(move_it) = drag_move {
+                        let move_params = compute_drag_move_params(&editor_state_ref.borrow(), touch_x, touch_y);
+                        if let Some(move_it) = move_params {
                             move_blocks.emit(move_it);
                         } else {
                             force_update.set(*force_update + 1);
@@ -2205,6 +2209,10 @@ pub fn SourceEditor(props: &SourceEditorProps) -> Html {
         filter_rules: (*filter_rules).clone(),
         open_target_bouquet,
         bouquet_revision: *bouquet_revision,
+        output_curation_managed: match &*edit_mode {
+            EditMode::Active(block) => output_has_target_curation(&editor_state_ref.borrow(), block.id),
+            EditMode::Inactive => false,
+        },
         edit_mode: edit_mode.clone(),
         allow_write: can_write_sources,
     };
@@ -2482,6 +2490,27 @@ fn update_pending_line(line: &Element, from: Position, to: Position) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_editor_preserves_yaml_curation_when_rebuilding_target_outputs() {
+        let target: ConfigTargetDto = serde_json::from_value(serde_json::json!({"name": "discovery", "curation": {"enabled": false, "catalog_selection": "curated", "tmdb": {"enabled": false, "api": {"access_token": "test-token"}, "trending": [
+            {"kind": "movie", "time_window": "week", "limit": 37, "category_name": "Saved", "create_xtream_category": false},
+            {"kind": "tv", "time_window": "day", "limit": 100, "category_name": "Shows"},
+            {"kind": "movie", "time_window": "day", "category_name": "Movies"}
+        ]}}})).unwrap();
+        let mut state = EditorState::default();
+        state.blocks.push(create_block(1, BlockType::Target, BlockInstance::Target(Rc::new(target.clone()))));
+        state.blocks.push(create_block(2, BlockType::OutputXtream, create_instance(BlockType::OutputXtream)));
+        state.connections.push(Connection { from: 1, to: 2 });
+        assert!(output_has_target_curation(&state, 2), "disabled declarations still own policy");
+        assert!(!output_has_target_curation(&state, 1));
+        let result = editor_state_to_sources_config(&SourcesConfigDto::default(), &state);
+        let saved = &result.sources[0].targets[0];
+        assert_eq!(saved.curation, target.curation);
+        assert!(matches!(&saved.output[0], TargetOutputDto::Xtream(output) if output.trakt.is_none()));
+        let restored: SourcesConfigDto = serde_json::from_value(serde_json::to_value(&result).unwrap()).unwrap();
+        assert_eq!(restored.sources[0].targets[0].curation, target.curation);
+    }
 
     #[test]
     fn media_server_blocks_create_matching_input_types() {

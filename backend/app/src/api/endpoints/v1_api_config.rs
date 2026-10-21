@@ -7,11 +7,14 @@ use crate::{
     },
     auth::{verify_token, AuthBearer},
     config_loader::{
-        persist_messaging_templates, plans_file_path, prepare_sources_batch, prepare_users, read_api_proxy_file,
-        read_plans_file, save_plans,
+        persist_messaging_templates, plans_file_path, prepare_sources_batch, prepare_users,
+        read_api_proxy_file_with_templates, read_plans_file, save_plans,
     },
     iptv::xtream::{get_xtream_stream_url_base, xtream_login},
-    model::{validate_library_paths_from_dto, ApiProxyConfig, InputSource, UserPlan},
+    model::{
+        recording_reload_outcome, validate_library_paths_from_dto, ApiProxyConfig, InputSource, RecordingReloadOutcome,
+        UserPlan,
+    },
     utils::request::download_text_content,
 };
 use axum::{
@@ -320,6 +323,30 @@ async fn intern_save_config_main(file_path: &str, backup_dir: &str, cfg: &Config
     None
 }
 
+/// Decide what an incoming config does to the recording block.
+///
+/// Counting the queue is the root check: an entry only exists while a
+/// recording it points at is expected to be found.
+async fn recording_reload_for(app_state: &Arc<AppState>, incoming: &ConfigDto) -> RecordingReloadOutcome {
+    let current = app_state.app_config.config.load();
+    let Some(current_recording) = current.recording() else {
+        return RecordingReloadOutcome::Unchanged;
+    };
+    let incoming_recording = incoming.video.as_ref().and_then(|video| video.recording.as_ref());
+    let Some(incoming_recording) = incoming_recording else {
+        return RecordingReloadOutcome::Unchanged;
+    };
+    let mut incoming_recording = tuliprox_core::model::RecordingConfig::from(incoming_recording);
+    // The running config holds the prepared (home-resolved) directory, the
+    // incoming DTO the raw configured one; compare like with like.
+    incoming_recording.directory = tuliprox_core::model::resolve_recording_directory(
+        &incoming_recording.directory,
+        &app_state.app_config.paths.load().home_path,
+    );
+    let existing = app_state.recordings.committed_snapshot().await.1.len();
+    recording_reload_outcome(current_recording, &incoming_recording, existing)
+}
+
 async fn save_config_main(
     axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
     headers: HeaderMap,
@@ -359,8 +386,13 @@ async fn save_config_main(
         return (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()}))).into_response();
     }
     if !cfg.is_valid() {
-        (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"error": "Invalid content"}))).into_response()
-    } else if let Err(err) = validate_library_paths_from_dto(&cfg) {
+        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"error": "Invalid content"}))).into_response();
+    }
+    let reload = recording_reload_for(&app_state, &cfg).await;
+    if let RecordingReloadOutcome::Refused(refusal) = &reload {
+        return (axum::http::StatusCode::CONFLICT, axum::Json(json!({"error": refusal.to_string()}))).into_response();
+    }
+    if let Err(err) = validate_library_paths_from_dto(&cfg) {
         (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()}))).into_response()
     } else {
         if let Err(err) = persist_messaging_templates(&app_state.app_config, &mut cfg).await {
@@ -380,7 +412,20 @@ async fn save_config_main(
                 return internal_server_error!();
             }
         };
-        response_with_revision_header(StatusCode::OK.into_response(), HEADER_CONFIG_MAIN_REVISION, &updated_revision)
+        // A setting that will not take effect until a restart has to say so,
+        // or the operator reads the 200 as "applied" and waits forever.
+        let pending: Vec<String> = match &reload {
+            RecordingReloadOutcome::Applied { restart_required, .. } => {
+                restart_required.iter().map(|field| format!("{field:?}")).collect()
+            }
+            _ => Vec::new(),
+        };
+        let body = if pending.is_empty() {
+            StatusCode::OK.into_response()
+        } else {
+            (StatusCode::OK, axum::Json(json!({"restart_required": pending}))).into_response()
+        };
+        response_with_revision_header(body, HEADER_CONFIG_MAIN_REVISION, &updated_revision)
     }
 }
 
@@ -570,7 +615,11 @@ async fn get_config_api_proxy_config_public(
             return internal_server_error!();
         }
     };
-    match read_api_proxy_file(api_proxy_file_path.as_str(), true) {
+    match read_api_proxy_file_with_templates(
+        api_proxy_file_path.as_str(),
+        true,
+        app_state.app_config.api_proxy.load().as_ref().and_then(|config| config.templates.as_deref()),
+    ) {
         Ok(Some(mut api_proxy_dto)) => {
             filter_api_proxy_by_permissions(&mut api_proxy_dto, PermissionSet::new());
             let response = axum::response::Json(api_proxy_dto).into_response();
@@ -632,7 +681,7 @@ async fn save_config_api_proxy_config(
     // and users referencing missing servers, which per-row validate() cannot see
     let stored_plans = updated_api_proxy.plans.clone();
     let mut updated_api_proxy_dto = ApiProxyConfigDto::from(&updated_api_proxy);
-    if let Err(err) = updated_api_proxy_dto.prepare() {
+    if let Err(err) = updated_api_proxy_dto.prepare_with_templates(updated_api_proxy.templates.as_deref()) {
         return (axum::http::StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()}))).into_response();
     }
 
@@ -642,7 +691,8 @@ async fn save_config_api_proxy_config(
     }
     // Persist succeeded — now update in‑memory state with the prepared config.
     // Plans live in plans.yml, so re-inject them (the DTO round-trip drops them).
-    let mut stored_api_proxy = ApiProxyConfig::from(&updated_api_proxy_dto);
+    let mut stored_api_proxy =
+        ApiProxyConfig::from_dto_with_templates(&updated_api_proxy_dto, updated_api_proxy.templates.clone());
     stored_api_proxy.set_plans(stored_plans);
     app_state.app_config.api_proxy.store(Some(Arc::new(stored_api_proxy)));
 
@@ -762,7 +812,11 @@ async fn get_config_api_proxy_config(
             return internal_server_error!();
         }
     };
-    match read_api_proxy_file(api_proxy_file_path.as_str(), true) {
+    match read_api_proxy_file_with_templates(
+        api_proxy_file_path.as_str(),
+        true,
+        app_state.app_config.api_proxy.load().as_ref().and_then(|config| config.templates.as_deref()),
+    ) {
         Ok(Some(mut api_proxy_dto)) => {
             filter_api_proxy_by_permissions(&mut api_proxy_dto, permissions);
             let response = axum::response::Json(api_proxy_dto).into_response();
@@ -789,7 +843,7 @@ async fn config_batch_content(
             let input_source = InputSource::from(&*config_input).with_url(batch_url.to_owned());
             return match download_text_content(
                 &app_state.app_config,
-                &app_state.http_client.load(),
+                &app_state.http_clients.default.load(),
                 &input_source,
                 None,
                 None,
@@ -845,18 +899,7 @@ async fn get_xtream_login_info(
             return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()}))).into_response();
         }
     };
-    let global_client = app_state.http_client.load();
-    let http_client = match tuliprox_core::utils::request::create_input_http_client(
-        &app_state.app_config,
-        &global_client,
-        input_source.proxy.as_ref(),
-    ) {
-        Ok(client) => client,
-        Err(err) => {
-            error!("Failed to prepare Xtream input proxy: {err}");
-            return (StatusCode::BAD_REQUEST, axum::Json(json!({"error": err.to_string()}))).into_response();
-        }
-    };
+    let http_client = app_state.http_clients.default.load();
     match xtream_login(&app_state.app_config, &http_client, &app_state.event_manager, &input_source, &request.username)
         .await
     {
@@ -1074,7 +1117,7 @@ async fn test_messaging(
     };
 
     let event = tuliprox_messaging::test_event(event_id);
-    let client = app_state.http_client.load();
+    let client = app_state.http_clients.default.load();
     let results = tuliprox_messaging::render_and_send_test(
         &app_state.app_config,
         &client,
@@ -1108,7 +1151,10 @@ mod tests {
         require_matching_revision,
     };
     use crate::model::ConfigProvider;
-    use axum::http::{HeaderMap, HeaderValue, StatusCode};
+    use axum::{
+        http::{HeaderMap, HeaderValue, StatusCode},
+        response::IntoResponse,
+    };
     use shared::{
         model::{
             ApiProxyConfigDto, ApiProxyServerInfoDto, AppConfigDto, ConfigDto, ConfigProviderDto, Permission,
@@ -1175,7 +1221,7 @@ mod tests {
 
         let api_proxy = app_config.api_proxy.expect("api proxy should remain present");
         assert_eq!(api_proxy.server.len(), 1);
-        assert!(api_proxy.user.is_empty());
+        assert_eq!(api_proxy.user, [] as [shared::model::TargetUserDto; 0]);
         assert!(api_proxy.use_user_db);
     }
 
@@ -1188,11 +1234,11 @@ mod tests {
 
         assert_eq!(api_proxy.server.len(), 1);
         assert_eq!(api_proxy.server[0].name, "main");
-        assert!(api_proxy.server[0].protocol.is_empty());
-        assert!(api_proxy.server[0].host.is_empty());
+        assert_eq!(api_proxy.server[0].protocol.len(), 0);
+        assert_eq!(api_proxy.server[0].host.len(), 0);
         assert!(api_proxy.server[0].port.is_none());
-        assert!(api_proxy.server[0].timezone.is_empty());
-        assert!(api_proxy.server[0].message.is_empty());
+        assert_eq!(api_proxy.server[0].timezone.len(), 0);
+        assert_eq!(api_proxy.server[0].message.len(), 0);
         assert!(api_proxy.server[0].path.is_none());
         assert_eq!(api_proxy.user.len(), 1);
         assert!(!api_proxy.use_user_db);
@@ -1208,8 +1254,8 @@ mod tests {
 
         assert_eq!(api_proxy.server.len(), 1);
         assert_eq!(api_proxy.server[0].name, "main");
-        assert!(api_proxy.server[0].host.is_empty());
-        assert!(api_proxy.user.is_empty());
+        assert_eq!(api_proxy.server[0].host.len(), 0);
+        assert_eq!(api_proxy.user.len(), 0);
     }
 
     #[test]
@@ -1219,8 +1265,8 @@ mod tests {
 
         filter_api_proxy_by_permissions(&mut api_proxy, permissions);
 
-        assert!(api_proxy.server.is_empty());
-        assert!(api_proxy.user.is_empty());
+        assert_eq!(api_proxy.server.len(), 0);
+        assert_eq!(api_proxy.user.len(), 0);
         assert!(!api_proxy.use_user_db);
         assert_eq!(api_proxy.auth_error_status, 403);
     }
@@ -1242,6 +1288,12 @@ mod tests {
                         id: 1,
                         enabled: false,
                         name: String::from("Default"),
+                        curation: Some(
+                            serde_json::from_value(
+                                serde_json::json!({"tmdb": {"api": {"access_token": "discovery-secret"}}}),
+                            )
+                            .unwrap(),
+                        ),
                         output: vec![shared::model::TargetOutputDto::M3u(shared::model::M3uTargetOutputDto {
                             filename: Some(String::from("secret.m3u")),
                             ..Default::default()
@@ -1250,7 +1302,7 @@ mod tests {
                             processing: Some(String::from("group ~ 'secret'")),
                             ..Default::default()
                         },
-                        watch: Some(vec![String::from("watch-expr")]),
+                        watch: Some(vec![shared::model::ConfigWatchDto::channels("watch-expr")]),
                         mapping: Some(vec![String::from("mapping-name")]),
                         ..Default::default()
                     }],
@@ -1266,20 +1318,21 @@ mod tests {
         filter_app_config_by_permissions(&mut app_config, Some(permissions));
 
         assert_eq!(app_config.config.storage_dir, None);
-        assert!(app_config.sources.inputs.is_empty());
+        assert_eq!(app_config.sources.inputs.len(), 0);
         assert!(app_config.sources.provider.is_none());
         assert!(app_config.sources.templates.is_none());
         assert!(app_config.mappings.is_none());
         assert!(app_config.templates.is_none());
         assert_eq!(app_config.sources.sources.len(), 1);
-        assert!(app_config.sources.sources[0].inputs.is_empty());
+        assert_eq!(app_config.sources.sources[0].inputs.len(), 0);
         assert_eq!(app_config.sources.sources[0].targets.len(), 1);
 
         let target = &app_config.sources.sources[0].targets[0];
         assert_eq!(target.name, "Default");
         assert_eq!(target.id, 1);
         assert_eq!(target.enabled, shared::model::ConfigTargetDto::default().enabled);
-        assert!(target.output.is_empty());
+        assert_eq!(target.output.len(), 0);
+        assert!(target.curation.is_none(), "identity-only access must not disclose discovery credentials");
         assert!(target.filter.is_empty());
         assert!(target.options.is_none());
         assert!(target.sort.is_none());
@@ -1291,7 +1344,7 @@ mod tests {
         let api_proxy = app_config.api_proxy.expect("api proxy should remain present");
         assert_eq!(api_proxy.server.len(), 1);
         assert_eq!(api_proxy.server[0].name, "main");
-        assert!(api_proxy.server[0].host.is_empty());
+        assert_eq!(api_proxy.server[0].host.len(), 0);
         assert_eq!(api_proxy.user.len(), 1);
     }
 
@@ -1408,6 +1461,7 @@ mod tests {
             url: "http://example.com/playlist.m3u".to_string(),
             ..Default::default()
         };
+        let curation: shared::model::CurationConfigDto = serde_json::from_value(serde_json::json!({"enabled": false, "catalog_selection": "curated", "tmdb": {"api": {"access_token": "discovery-test-token"}, "trending": [{"kind": "movie", "time_window": "week", "limit": 37, "create_xtream_category": false}]}})).unwrap();
         let initial_sources = SourcesConfigDto {
             inputs: vec![input_dto.clone()],
             sources: vec![shared::model::ConfigSourceDto {
@@ -1415,6 +1469,7 @@ mod tests {
                 targets: vec![shared::model::ConfigTargetDto {
                     id: 1,
                     name: "target_1".to_string(),
+                    curation: Some(curation.clone()),
                     output: vec![shared::model::TargetOutputDto::M3u(shared::model::M3uTargetOutputDto::default())],
                     ..Default::default()
                 }],
@@ -1466,6 +1521,7 @@ mod tests {
                 targets: vec![shared::model::ConfigTargetDto {
                     id: 1,
                     name: "target_renamed".to_string(),
+                    curation: Some(curation.clone()),
                     output: vec![shared::model::TargetOutputDto::M3u(shared::model::M3uTargetOutputDto::default())],
                     ..Default::default()
                 }],
@@ -1489,11 +1545,17 @@ mod tests {
             .await
             .expect("save_config_sources must not deadlock");
 
-        use axum::response::IntoResponse;
         assert_eq!(response.into_response().status(), StatusCode::OK);
         assert!(!tuliprox_repository::target_bouquet_exists(temp_dir.path(), "target_1").await);
         assert!(!tuliprox_repository::target_bouquet_exists(temp_dir.path(), "target_renamed").await);
         let runtime_sources = app_state.app_config.sources.load();
         assert_eq!(runtime_sources.sources[0].targets[0].name, "target_renamed");
+        assert_eq!(
+            shared::model::CurationConfigDto::from(runtime_sources.sources[0].targets[0].curation.as_ref().unwrap()),
+            curation
+        );
+        let saved: SourcesConfigDto =
+            serde_saphyr::from_str(&tokio::fs::read_to_string(&sources_file).await.unwrap()).unwrap();
+        assert_eq!(saved.sources[0].targets[0].curation.as_ref(), Some(&curation));
     }
 }

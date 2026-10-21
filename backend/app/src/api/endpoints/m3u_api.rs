@@ -1,20 +1,22 @@
 use crate::{
     api::{
         api_utils::{
-            admission_failure_response, coalesce_byte_stream, create_m3u_catchup_session_key,
+            admission_failure_response, blocks_new_playback, coalesce_byte_stream, create_m3u_catchup_session_key,
             create_playback_session_fingerprint, create_session_fingerprint, force_provider_stream_response,
-            get_session_reservation_ttl_secs, get_user_target, get_user_target_by_credentials,
+            get_session_reservation_ttl_secs, get_user_target, get_user_target_by_credentials, is_running_playback,
             is_seekable_media_request, is_session_based_playback, is_stream_share_enabled, local_stream_response,
-            log_resource_rejection, redirect, redirect_response, reentry_suppressed_response, rejection_status,
-            resolve_initial_stalker_playback_url, resolve_resource, resource_response, separate_number_and_remainder,
-            shared_live_mpeg_ts_key, should_allow_exhausted_shared_reconnect, stream_response_with_shared_key,
-            try_option_bad_request, try_result_bad_request, try_result_not_found, try_unwrap_body, RedirectParams,
-            ResourceFetchOptions,
+            maintenance_rejection_response, redirect_response, reentry_suppressed_response,
+            resolve_initial_stalker_playback_url, resource_proxy_response, resource_redirect_or_proxy,
+            separate_number_and_remainder, shared_live_mpeg_ts_key, should_allow_exhausted_shared_reconnect,
+            stream_response_with_provider_handle, stream_response_with_shared_key, try_option_bad_request,
+            try_result_bad_request, try_result_not_found,
+            try_unwrap_body, RedirectParams,
         },
         endpoints::{
             hls_api::{
                 build_virtual_hls_entry_path, handle_hls_stream_request, hls_admission_failure_manifest_response,
-                hls_custom_video_manifest_response, m3u_archive_epg_reference_ts, HlsEntryStreamContext,
+                hls_custom_video_manifest_response, m3u_archive_epg_reference_ts, user_allows_entry_content,
+                HlsEntryOutputScope, HlsEntryStreamContext, HlsRequestStage,
             },
             xtream_api::{ApiStreamContext, ApiStreamRequest},
         },
@@ -38,8 +40,8 @@ use shared::{
     defaults::HLS_EXT,
     error::TuliproxError,
     model::{
-        is_resource_field_name, CatchupProperties, ConnectFailureReason, FieldGetAccessor, PlaylistEntry,
-        PlaylistItemType, StreamProperties, TargetType, UserConnectionPermission,
+        CatchupProperties, ConnectFailureReason, FieldGetAccessor, PlaylistEntry, PlaylistItemType, StreamProperties,
+        TargetType, UserConnectionPermission,
     },
     utils::{concat_path, extract_extension_from_url, sanitize_sensitive_info},
 };
@@ -153,6 +155,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
     input: Arc<crate::model::ConfigInput>,
     stream_ext: Option<&str>,
     archive_discriminator: Option<&str>,
+    provider_allocation_id: Option<u64>,
 ) -> impl IntoResponse + Send {
     let target_name = &target.name;
     if !target.has_output(TargetType::M3u) {
@@ -162,9 +165,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
 
     let is_hls_manifest_request = effective_playback_extension(pli.item_type, &pli.url, stream_ext) == Some(HLS_EXT);
 
-    if !user.allows_item_type(pli.item_type)
-        || !(user.t_filter.is_none() || user.allows_content(&shared::model::PlaylistItem::from(&pli)))
-    {
+    if !user_allows_entry_content(&user, HlsEntryOutputScope::ItemType(pli.item_type), &pli) {
         if is_hls_manifest_request {
             return hls_custom_video_manifest_response(
                 app_state,
@@ -252,6 +253,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
     pli.url = match resolve_initial_stalker_playback_url(
         app_state,
         &input,
+        &user,
         pli.get_provider_id().unwrap_or_default(),
         cluster,
         pli.item_type,
@@ -264,6 +266,16 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
             error!("Failed to resolve initial Stalker playback URL: {}", sanitize_sensitive_info(&err.to_string()));
             return axum::http::StatusCode::BAD_GATEWAY.into_response();
         }
+    };
+
+    let stream_channel = || {
+        let mut channel = pli.to_stream_channel(target.id);
+        if input.input_type == shared::model::InputType::Xtream && pli.item_type == PlaylistItemType::Video {
+            if let Some(provider_id) = pli.get_input_stream_id().and_then(|id| id.parse().ok()) {
+                channel.provider_id = provider_id;
+            }
+        }
+        channel
     };
 
     debug_if_enabled!("M3U playback for virtual_id={virtual_id}, item_type={}", pli.item_type);
@@ -311,7 +323,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
                     app_state,
                     fingerprint,
                     &user,
-                    pli.to_stream_channel(target.id),
+                    stream_channel(),
                     session.provider.clone(),
                     req_headers,
                     ConnectFailureReason::UserConnectionsExhausted,
@@ -322,7 +334,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
                 app_state,
                 fingerprint,
                 &user,
-                pli.to_stream_channel(target.id),
+                stream_channel(),
                 session.provider.clone(),
                 req_headers,
                 ConnectFailureReason::UserConnectionsExhausted,
@@ -335,7 +347,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
                     app_state,
                     fingerprint,
                     &user,
-                    pli.to_stream_channel(target.id),
+                    stream_channel(),
                     session.provider.clone(),
                     req_headers,
                     ConnectFailureReason::ProviderConnectionsExhausted,
@@ -346,7 +358,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
                 app_state,
                 fingerprint,
                 &user,
-                pli.to_stream_channel(target.id),
+                stream_channel(),
                 session.provider.clone(),
                 req_headers,
                 ConnectFailureReason::ProviderConnectionsExhausted,
@@ -358,7 +370,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
                 fingerprint,
                 app_state,
                 session,
-                pli.to_stream_channel(target.id),
+                stream_channel(),
                 crate::api::api_utils::ForceStreamRequestContext {
                     req_headers,
                     input: &input,
@@ -382,6 +394,19 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
     } else {
         pli.url.clone()
     };
+
+    if !is_running_playback(user_session.as_ref()) && blocks_new_playback(app_state, &input, &user, false) {
+        return maintenance_rejection_response(
+            app_state,
+            fingerprint,
+            &user,
+            stream_channel(),
+            &input,
+            req_headers,
+            extension == HLS_EXT,
+        )
+        .await;
+    }
 
     let (connection_admission, grace_mode, request_class) = crate::api::api_utils::resolve_playback_request_admission(
         &app_state.admission_ctx(),
@@ -411,7 +436,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
                 app_state,
                 fingerprint,
                 &user,
-                pli.to_stream_channel(target.id),
+                stream_channel(),
                 input.name.clone(),
                 req_headers,
                 ConnectFailureReason::UserConnectionsExhausted,
@@ -422,7 +447,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
             app_state,
             fingerprint,
             &user,
-            pli.to_stream_channel(target.id),
+            stream_channel(),
             input.name.clone(),
             req_headers,
             ConnectFailureReason::UserConnectionsExhausted,
@@ -468,6 +493,12 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
     });
     // Reverse proxy mode — only route genuine HLS into the HLS handler, not DASH
     if is_session_request && extension == shared::defaults::HLS_EXT {
+        // HLS owns capacity per manifest/segment session rather than for one
+        // long-lived provider body. Release the worker's admission reservation
+        // before the HLS machinery performs its own concrete acquisition.
+        if let Some(allocation_id) = provider_allocation_id {
+            app_state.active_provider.complete_release(allocation_id);
+        }
         let Some(stream_context) = HlsEntryStreamContext::from_playlist_item(&pli) else {
             error!("HLS input stream identity missing for virtual_id={}; refresh target playlist", pli.virtual_id);
             return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -488,6 +519,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
             connection_permission,
             Some(connection_kind),
             &original_hls_entry_path,
+            HlsRequestStage::Entry,
         )
         .await
         .into_response();
@@ -495,13 +527,21 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
 
     let pinned_provider =
         user_session.as_ref().filter(|_| pli.item_type.requires_provider_affinity()).map(|session| &session.provider);
+    let preacquired_provider_handle = if let Some(allocation_id) = provider_allocation_id {
+        let Some(handle) = app_state.active_provider.claim_download_connection(allocation_id, &input.name) else {
+            return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+        };
+        Some(tuliprox_session::ManagedProviderHandle::new(Arc::clone(&app_state.active_provider), handle))
+    } else {
+        None
+    };
 
     stream_response_with_shared_key(
         fingerprint,
         app_state,
         &session_key,
         Some(request_class),
-        pli.to_stream_channel(target.id).with_epg_reference_ts(archive_reference),
+        stream_channel().with_epg_reference_ts(archive_reference),
         &session_url,
         pinned_provider,
         req_headers,
@@ -512,6 +552,7 @@ pub(in crate::api) async fn m3u_api_stream_loaded(
         connection_kind,
         allow_exhausted_shared_reconnect,
         grace_mode,
+        preacquired_provider_handle,
         Some(&shared_key),
     )
     .await
@@ -684,6 +725,7 @@ async fn m3u_api_stream(
             input,
             Some(archive.extension()),
             Some(&discriminator),
+            None,
         )
         .await
         .into_response();
@@ -734,6 +776,7 @@ async fn m3u_api_stream(
         input,
         stream_ext,
         archive_discriminator.as_deref(),
+        None,
     )
     .await
     .into_response()
@@ -809,6 +852,7 @@ async fn m3u_api_stream_nested(
         input,
         stream_ext,
         archive_discriminator.as_deref(),
+        None,
     )
     .await
     .into_response()
@@ -876,6 +920,7 @@ async fn m3u_api_catchup(
         input,
         None,
         Some(&archive_discriminator),
+        None,
     )
     .await
     .into_response()
@@ -941,32 +986,21 @@ async fn m3u_api_resource(
         return axum::http::StatusCode::NOT_FOUND.into_response();
     }
 
-    if !is_resource_field_name(&resource) {
+    if !shared::model::is_resource_field_name(&resource) {
         return axum::http::StatusCode::NOT_FOUND.into_response();
     }
+
     let stream_url = m3u_item.get_field(resource.as_str());
     match stream_url {
         None => axum::http::StatusCode::NOT_FOUND.into_response(),
-        Some(value) => {
-            let resolved = match resolve_resource(&app_state.app_config, &value, Some(&m3u_item.input_name)) {
-                Ok(resolved) => resolved,
-                Err(err) => {
-                    log_resource_rejection(Some(m3u_item.input_name.as_ref()), &err, &value);
-                    return rejection_status(&err).into_response();
-                }
-            };
-            let url = resolved.url;
+        Some(url) => {
             if user.proxy.is_redirect(m3u_item.item_type) || target.is_force_redirect(m3u_item.item_type) {
-                let input = resolved
-                    .authorization
-                    .input_name
-                    .as_ref()
-                    .and_then(|input_name| app_state.app_config.get_input_by_name(input_name));
+                let input = app_state.app_config.get_input_by_name(&m3u_item.input_name);
                 let redirect_url = crate::api::api_utils::resolve_redirect_location(input.as_deref(), &url);
                 match redirect_url {
                     Ok(redirect_url) => {
-                        debug!("Redirecting stream request to {}", sanitize_sensitive_info(redirect_url.as_ref()));
-                        redirect(redirect_url.as_ref()).into_response()
+                        resource_redirect_or_proxy(&app_state, redirect_url.as_ref(), &req_headers, input.as_deref())
+                            .await
                     }
                     Err(err) => {
                         error!("Failed to resolve redirect url: {}", sanitize_sensitive_info(&err.to_string()));
@@ -974,15 +1008,10 @@ async fn m3u_api_resource(
                     }
                 }
             } else {
-                resource_response(
-                    &app_state,
-                    ResourceFetchOptions::cached(resolved.authorization),
-                    &url,
-                    &req_headers,
-                    None,
-                )
-                .await
-                .into_response()
+                // The response narrows the input to the resource origin itself; passing the input of
+                // the item keeps that decision in one place.
+                let input = app_state.app_config.get_input_by_name(&m3u_item.input_name);
+                resource_proxy_response(&app_state, &url, &req_headers, input.as_deref()).await
             }
         }
     }

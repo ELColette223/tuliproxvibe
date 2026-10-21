@@ -1,6 +1,6 @@
 mod api_playlist_utils;
 pub(in crate::api) mod custom_video_stream_api;
-pub(in crate::api) mod download_api;
+pub(in crate::api) mod epg_grid_api;
 mod extract_accept_header;
 pub(in crate::api) mod hdhomerun_api;
 pub(in crate::api) mod hls_api;
@@ -8,6 +8,7 @@ mod hls_terminal_response;
 mod library_api;
 pub(in crate::api) mod log_ws_api;
 pub(in crate::api) mod m3u_api;
+mod maintenance_api;
 pub(in crate::api) mod provider_resolve_api;
 mod rbac_api;
 pub(in crate::api) mod recording_api;
@@ -19,9 +20,11 @@ mod user_visibility;
 pub(in crate::api) mod v1_api;
 mod v1_api_config;
 pub(in crate::api) mod v1_api_playlist;
-mod v1_api_user;
+pub(in crate::api) mod v1_api_user;
 pub(in crate::api) mod web_index;
 pub(in crate::api) mod websocket_api;
 pub(in crate::api) mod xmltv_api;
 pub(in crate::api) mod xtream_api;
 pub(in crate::api) mod xtream_url;
+
+mod user_settings_api;

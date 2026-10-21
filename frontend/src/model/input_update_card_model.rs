@@ -221,7 +221,7 @@ mod tests {
         let cards = build_input_update_card_models(&sources, &status);
         let card = cards.iter().find(|card| card.input_id == 40).expect("card without targets");
 
-        assert!(card.targets.is_empty());
+        assert_eq!(card.targets.len(), 0);
     }
 
     #[test]
@@ -237,7 +237,7 @@ mod tests {
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0].input_id, 7);
         assert_eq!(cards[0].input_type, InputType::Xtream);
-        assert!(cards[0].targets.is_empty());
+        assert_eq!(cards[0].targets.len(), 0);
     }
 
     #[test]
@@ -284,7 +284,7 @@ mod tests {
                 .filter(|card| card.capabilities.supports(InputRefreshPolicy::NORMAL))
                 .map(|card| card.input_id)
                 .collect::<Vec<_>>(),
-            vec![1, 5, 6, 10]
+            vec![1, 5, 6, 10, 11, 12]
         );
     }
 

@@ -48,6 +48,7 @@ mod gc;
 pub mod header_policy;
 mod headers;
 mod ids;
+mod late_custom_response;
 mod lease;
 mod lifecycle;
 mod manager;
@@ -63,11 +64,15 @@ mod master_playlist;
 mod media_reserve;
 mod observability;
 mod origin;
+mod origin_account_runtime;
+mod origin_attempt;
 mod origin_progress;
 mod paths;
 mod post_refresh_availability;
 mod prefetch;
 mod prepared_terminal_bundle;
+mod progressive_budget;
+mod progressive_startup;
 mod qos;
 mod recovery_timing;
 mod refresh;
@@ -78,10 +83,14 @@ mod response;
 mod runtime_custom_tail;
 mod segment_fetcher;
 mod segment_repair;
+mod segment_revision;
 mod segment_watchdog;
 mod session;
 mod session_store;
+mod short_manifest;
 mod startup_observability;
+mod startup_policy;
+mod sync_ext;
 mod terminal_commit;
 mod terminal_pending;
 mod terminal_tail;
@@ -119,10 +128,11 @@ pub mod api {
         deadline::hls_object_body_deadline,
         gc::exec_hls_cache_gc,
         headers::{
-            extract_hls_provider_session_headers, force_identity_without_range, scrub_hls_origin_headers,
-            should_remove_hls_origin_header,
+            append_hls_provider_session_headers, extract_hls_provider_session_headers, force_identity_without_range,
+            scrub_hls_origin_headers, should_remove_hls_origin_header,
         },
         ids::{build_proxy_session_id, HlsSessionKey, ProxySessionId, HLS_ACCESS_LEASE_ID_PLACEHOLDER},
+        late_custom_response::HlsLateCustomResponsePlan,
         lease::{
             new_hls_access_lease_id, HlsAccessLease, HlsAccessLeaseActivation, HlsAccessLeaseId,
             HlsAccessLeasePendingDeadline, HlsAccessLeaseState, HlsAccessLeaseTiming, HlsAccessLeaseTouch,
@@ -141,6 +151,7 @@ pub mod api {
             derive_hls_lease_manifest_snapshot, HlsLeaseManifestSnapshotInput, HlsTransientManifestTemplate,
         },
         map::{MapCacheStatus, MapEntry, OriginMapKey, ProxyMapId},
+        map_fetcher::MapFetchContext,
         master_playlist::{
             HlsBandwidthPersistenceOutcome, HlsMasterBandwidth, HlsMasterBandwidthSelection,
             HlsSingleVariantMasterPlaylist,
@@ -157,6 +168,9 @@ pub mod api {
             HlsEffectiveOriginAcquirePolicy, HlsOriginAccountBinding, HlsOriginAccountBindingMode,
             HlsOriginAccountDetachedReason, HlsOriginAccountStatus, HlsOriginIoContext, HlsOriginSource,
             HlsOriginSourceKind, HlsOriginWorkClass,
+        },
+        origin_account_runtime::{
+            HlsOriginAccountRuntime, HlsOriginAccountSnapshot, HlsOriginAccountWork, HlsPreparedOriginAccount,
         },
         origin_progress::publication_late_after_ms,
         paths::{HlsMapFile, HlsSegmentFile, TransientResourceFile},
@@ -324,7 +338,14 @@ pub use self::{
         HlsTerminalTailCompatibility, HLS_TERMINAL_TAIL_SEGMENT_COUNT,
     },
 };
+pub use cache::{HlsRevisionDiskReservation, HlsRevisionFilePin};
 pub use hls_ctx::{HlsCtx, WeakHlsCtx};
+pub use progressive_budget::ProgressiveBudgetManager;
+pub use segment_revision::{
+    SegmentRevision, SegmentRevisionGuard, SegmentRevisionId, SegmentRevisionKey, SegmentRevisionKind,
+    SegmentRevisionState, SegmentRevisionStore,
+};
+pub use startup_policy::{HlsManifestRevisions, HlsSessionStartup};
 pub use tuliprox_mpegts::ts_inspector::{
     evaluate_mpeg_ts_splice_boundary, hls_aes128_cbc_iv, inspect_mpeg_ts_async, inspect_mpeg_ts_media_evidence_async,
     HlsTrackEvidenceResolution, HlsTsMediaEvidence, HlsTsProbeBudget, HlsTsProbeProtection, HlsTsProtectionReason,

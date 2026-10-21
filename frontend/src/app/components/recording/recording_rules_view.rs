@@ -23,7 +23,7 @@ use yew::prelude::*;
 
 /// Permission gate: may the principal see the recurring-rule
 /// section at all? Any user with `recording.read` can list rules; creation
-/// needs `recording.write`.
+/// needs `recording.manage`.
 #[allow(dead_code)]
 pub fn can_show_rules_section(has_recording_read: bool) -> bool { has_recording_read }
 
@@ -31,21 +31,21 @@ pub fn can_show_rules_section(has_recording_read: bool) -> bool { has_recording_
 /// can create private rules; only administrators can create shared
 /// rules.
 #[allow(dead_code)]
-pub fn can_create_rule(has_recording_write: bool) -> bool { has_recording_write }
+pub fn can_create_rule(has_recording_manage: bool) -> bool { has_recording_manage }
 
 /// Permission gate: may the principal create a *shared* rule?
-/// Administrators with `recording.write` only.
+/// Administrators with `recording.manage` only.
 #[allow(dead_code)]
-pub fn can_create_shared_rule(has_recording_write: bool, is_admin_role: bool) -> bool {
-    has_recording_write && is_admin_role
+pub fn can_create_shared_rule(has_recording_manage: bool, is_admin_role: bool) -> bool {
+    has_recording_manage && is_admin_role
 }
 
 /// Permission gate: may the principal edit this rule?
-/// - Private rule: owner with `recording.write`.
-/// - Shared rule: administrator with `recording.write`.
+/// - Private rule: owner with `recording.manage`.
+/// - Shared rule: administrator with `recording.manage`.
 #[allow(dead_code)]
-pub fn can_edit_rule(has_recording_write: bool, is_admin_role: bool, is_owner: bool, is_shared: bool) -> bool {
-    if !has_recording_write {
+pub fn can_edit_rule(has_recording_manage: bool, is_admin_role: bool, is_owner: bool, is_shared: bool) -> bool {
+    if !has_recording_manage {
         return false;
     }
     if is_shared {
@@ -58,8 +58,8 @@ pub fn can_edit_rule(has_recording_write: bool, is_admin_role: bool, is_owner: b
 /// Permission gate: may the principal delete this rule?
 /// Same matrix as edit.
 #[allow(dead_code)]
-pub fn can_delete_rule(has_recording_write: bool, is_admin_role: bool, is_owner: bool, is_shared: bool) -> bool {
-    can_edit_rule(has_recording_write, is_admin_role, is_owner, is_shared)
+pub fn can_delete_rule(has_recording_manage: bool, is_admin_role: bool, is_owner: bool, is_shared: bool) -> bool {
+    can_edit_rule(has_recording_manage, is_admin_role, is_owner, is_shared)
 }
 
 /// The delete future-policy options exposed to the user. The API
@@ -121,13 +121,19 @@ pub fn reconciliation_error_to_i18n_key(primary: &str, secondary: &str) -> Strin
     format!("MESSAGES.RECORDING.PARTIAL_OPERATION/{primary}/{secondary}")
 }
 
-const RULE_HEADERS: &[&str] = &[
-    "LABEL.RECORDING_RULE_COLUMN_TARGET",
-    "LABEL.RECORDING_RULE_COLUMN_VISIBILITY",
-    "LABEL.RECORDING_RULE_COLUMN_SCHEDULE",
-    "LABEL.RECORDING_RULE_COLUMN_ENABLED",
-    "LABEL.RECORDING_COLUMN_ACTIONS",
-];
+crate::app::components::define_table_columns! {
+    enum RuleColumn {
+        Target => ("recording_rule_column_target", "LABEL.RECORDING_RULE_COLUMN_TARGET") { sortable: true },
+        Visibility => ("recording_rule_column_visibility", "LABEL.RECORDING_RULE_COLUMN_VISIBILITY") { sortable: true },
+        Schedule => ("recording_rule_column_schedule", "LABEL.RECORDING_RULE_COLUMN_SCHEDULE") { sortable: true },
+        Enabled => ("recording_rule_column_enabled", "LABEL.RECORDING_RULE_COLUMN_ENABLED"),
+        Actions => ("actions", "TABLE_COLUMNS.ACTIONS") {
+            can_hide: false,
+            content: false,
+            header_label: Some("LABEL.RECORDING_COLUMN_ACTIONS"),
+        },
+    }
+}
 
 pub fn rule_summary(rule: &RecordingRuleResponse) -> String {
     let s = &rule.rule.source;
@@ -167,39 +173,62 @@ pub fn rule_schedule_label(translate: &YewI18n, rule: &RecordingRuleResponse) ->
 /// Translate a rule-service failure for display.
 fn error_message(translate: &YewI18n, error: &RecordingError) -> String { translate.t(error.i18n_key()) }
 
+pub const fn should_fetch_recording_rules(active: bool, recording_enabled: bool, has_loaded: bool) -> bool {
+    active && recording_enabled && !has_loaded
+}
+
+#[derive(Properties, Clone, PartialEq, Debug)]
+pub struct RecordingRulesViewProps {
+    #[prop_or(true)]
+    pub active: bool,
+}
+
 #[function_component(RecordingRulesView)]
-pub fn recording_rules_view() -> Html {
+pub fn recording_rules_view(props: &RecordingRulesViewProps) -> Html {
     let translate = use_translation();
+    let columns = use_memo((), |()| RuleColumn::columns());
     let services = use_service_context();
+    let config_ctx = use_context::<ConfigContext>();
+    let recording_enabled =
+        config_ctx.as_ref().and_then(|ctx| ctx.config.as_ref()).is_some_and(|cfg| cfg.is_recording_enabled());
     let dialog = use_context::<DialogService>();
     let rules = use_state(|| Rc::new(Vec::<RecordingRuleResponse>::new()));
     let editing = use_state(|| None::<RecordingRuleSnapshot>);
     let creating = use_state(|| false);
+    let has_loaded = use_mut_ref(|| false);
 
+    // Lazy load on first activation when enabled
     {
         let rules = rules.clone();
-        let svc = services.clone();
-        use_effect_with((), move |()| {
-            wasm_bindgen_futures::spawn_local(async move {
-                if let Ok(r) = RecordingService::new().list_rules().await {
-                    rules.set(Rc::new(r));
-                }
-            });
-            let _ = svc; // suppress unused
-            || {}
+        let has_loaded = has_loaded.clone();
+        let active = props.active;
+        use_effect_with((active, recording_enabled), move |(active, enabled)| {
+            if should_fetch_recording_rules(*active, *enabled, *has_loaded.borrow()) {
+                *has_loaded.borrow_mut() = true;
+                let rules = rules.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    if let Ok(r) = RecordingService::new().list_rules().await {
+                        rules.set(Rc::new(r));
+                    }
+                });
+            }
+            || ()
         });
     }
 
     // Live updates: the backend broadcasts `RecordingRulesChanged`
     // when the rule repository mutates. Subscribe to it directly
-    // — no per-recording-snapshot refetch. The initial fetch above
-    // is what the user sees until the first mutation arrives.
+    // — only handle if already loaded and recording is enabled.
     {
         let rules = rules.clone();
         let svc = services.clone();
+        let has_loaded = has_loaded.clone();
         use_effect_with((), move |()| {
             let sid = svc.event.subscribe(move |msg| {
                 if matches!(msg, EventMessage::RecordingRulesChanged) {
+                    if !*has_loaded.borrow() || !recording_enabled {
+                        return;
+                    }
                     let rules = rules.clone();
                     wasm_bindgen_futures::spawn_local(async move {
                         if let Ok(r) = RecordingService::new().list_rules().await {
@@ -402,67 +431,93 @@ pub fn recording_rules_view() -> Html {
         html! { <></> }
     };
 
-    let headers: Vec<String> = RULE_HEADERS.iter().map(|h| translate.t(h)).collect();
-    let render_header = Callback::from(move |col: usize| {
-        let headers = headers.clone();
-        let col_text = headers.get(col).cloned().unwrap_or_default();
-        html! { <>{ col_text }</> }
-    });
+    let render_header = {
+        let translate = translate.clone();
+        Callback::from(move |col: usize| {
+            let col_text =
+                RuleColumn::from_index(col).map_or_else(String::new, |column| translate.t(column.header_label()));
+            html! { <>{ col_text }</> }
+        })
+    };
 
     // The enabled column is a switch, not text: sorting by it would
     // reorder rows under the pointer mid-click.
-    let is_sortable = Callback::from(|col: usize| matches!(col, 0..=2));
+
     let on_sort = Callback::from(|_: Option<(usize, SortOrder)>| {});
 
     let rules_items: Rc<Vec<Rc<RecordingRuleResponse>>> = Rc::new((*rules).iter().cloned().map(Rc::new).collect());
     let is_empty = rules_items.is_empty();
     let render_data = {
         let translate = translate.clone();
-        Callback::from(move |(_row, col, rule): (usize, usize, Rc<RecordingRuleResponse>)| match col {
-            0 => html! { <>{ rule_summary(&rule) }</> },
-            1 => html! { <>{ rule_visibility_label(&translate, &rule) }</> },
-            2 => html! { <>{ rule_schedule_label(&translate, &rule) }</> },
-            3 => {
-                let enabled = rule.rule.enabled;
-                let on_change = toggle_enabled_click(rule.rule.id.clone(), enabled);
-                let label = translate.t(if enabled {
-                    "LABEL.RECORDING_RULE_ACTION_DISABLE"
-                } else {
-                    "LABEL.RECORDING_RULE_ACTION_ENABLE"
-                });
-                html! {
-                    <span class="tp__recording-rule-enabled" title={label.clone()} aria-label={label}>
-                        <ToggleSwitch value={enabled} compact={true} on_change={on_change} />
-                    </span>
+        Callback::from(
+            move |(_row, col, rule): (usize, usize, Rc<RecordingRuleResponse>)| match RuleColumn::from_index(col) {
+                Some(RuleColumn::Target) => html! { <>{ rule_summary(&rule) }</> },
+                Some(RuleColumn::Visibility) => html! { <>{ rule_visibility_label(&translate, &rule) }</> },
+                Some(RuleColumn::Schedule) => html! { <>{ rule_schedule_label(&translate, &rule) }</> },
+                Some(RuleColumn::Enabled) => {
+                    let enabled = rule.rule.enabled;
+                    let on_change = toggle_enabled_click(rule.rule.id.clone(), enabled);
+                    let label = translate.t(if enabled {
+                        "LABEL.RECORDING_RULE_ACTION_DISABLE"
+                    } else {
+                        "LABEL.RECORDING_RULE_ACTION_ENABLE"
+                    });
+                    html! {
+                        <span class="tp__recording-rule-enabled" title={label.clone()} aria-label={label}>
+                            <ToggleSwitch value={enabled} compact={true} on_change={on_change} />
+                        </span>
+                    }
                 }
-            }
-            _ => {
-                let id = rule.rule.id.clone();
-                let on_edit = edit_id_click(id.clone());
-                let on_delete = delete_id_click(id.clone());
-                let edit_label = translate.t("LABEL.RECORDING_ACTION_EDIT");
-                let delete_label = translate.t("LABEL.RECORDING_ACTION_DELETE");
-                let row = rule_summary(&rule);
-                html! {
-                    <div class="tp__recording-rule-row-actions">
-                        <TextButton name="rule_edit" icon="" title={edit_label.clone()}
-                            aria_label={format!("{edit_label}: {row}")} onclick={on_edit} />
-                        <TextButton name="rule_delete" icon="" class="tp__button--danger" title={delete_label.clone()}
-                            aria_label={format!("{delete_label}: {row}")} onclick={on_delete} />
-                    </div>
+                Some(RuleColumn::Actions) => {
+                    let id = rule.rule.id.clone();
+                    let on_edit = edit_id_click(id.clone());
+                    let on_delete = delete_id_click(id.clone());
+                    let edit_label = translate.t("LABEL.RECORDING_ACTION_EDIT");
+                    let delete_label = translate.t("LABEL.RECORDING_ACTION_DELETE");
+                    let row = rule_summary(&rule);
+                    html! {
+                        <div class="tp__recording-rule-row-actions">
+                            <TextButton name="rule_edit" icon="" title={edit_label.clone()}
+                                aria_label={format!("{edit_label}: {row}")} onclick={on_edit} />
+                            <TextButton name="rule_delete" icon="" class="tp__button--danger" title={delete_label.clone()}
+                                aria_label={format!("{delete_label}: {row}")} onclick={on_delete} />
+                        </div>
+                    }
                 }
-            }
-        })
+                None => html! {},
+            },
+        )
     };
 
     let table_def = Rc::new(TableDefinition::<RecordingRuleResponse> {
+        table_id: "recording.rules".into(),
+        columns: columns.clone(),
+        row_key: Callback::from(|(_, item): (usize, Rc<RecordingRuleResponse>)| item.rule.id.clone().into()),
         items: Some(rules_items),
-        num_cols: RULE_HEADERS.len(),
-        is_sortable,
+
         render_header_cell: render_header,
         render_data_cell: render_data,
         on_sort,
     });
+
+    if !recording_enabled {
+        return html! {
+            <div class="tp__recording-rules-view tp__list-view">
+                <div class="tp__recording-rules-view__body tp__list-view__body">
+                    <div class="tp__recording-rules tp__list-list">
+                        <div class="tp__recording-rules__header tp__list-list__header">
+                            <h1>{ translate.t("LABEL.RECORDING_RULES") }</h1>
+                        </div>
+                        <div class="tp__recording-rules__body tp__list-list__body">
+                            <p class="tp__recording-list__empty">
+                                { translate.t("LABEL.RECORDING_DISABLED_HINT") }
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        };
+    }
 
     html! {
         <div class="tp__recording-rules-view tp__list-view">
@@ -492,6 +547,14 @@ pub fn recording_rules_view() -> Html {
 mod tests {
     use super::*;
     use shared::model::recording_rule::{RuleSource, RuleVisibility};
+
+    #[test]
+    fn should_fetch_recording_rules_checks_active_enabled_and_loaded() {
+        assert!(should_fetch_recording_rules(true, true, false));
+        assert!(!should_fetch_recording_rules(false, true, false));
+        assert!(!should_fetch_recording_rules(true, false, false));
+        assert!(!should_fetch_recording_rules(true, true, true));
+    }
 
     #[test]
     fn can_show_rules_section_requires_recording_read() {

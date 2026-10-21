@@ -39,6 +39,14 @@ use url::Url;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SourcesYmlPatch {
+    SetObservedAccount {
+        input_name: Arc<str>,
+        observation: crate::model::ProviderAccountObservation,
+    },
+    SetAccountDisabled {
+        input_name: Arc<str>,
+        account_name: Arc<str>,
+    },
     SetFetchedExpiry {
         input_name: Arc<str>,
         account_name: Arc<str>,
@@ -287,6 +295,65 @@ pub(crate) fn apply_sources_yml_patches(
 
     for patch in patches {
         match patch {
+            SourcesYmlPatch::SetObservedAccount { input_name, observation } => {
+                let Some(input) = doc.inputs.iter().find(|input| input.name == *input_name) else {
+                    continue;
+                };
+                let account = if input.name == observation.name {
+                    Some((&input.url, input.username.as_deref(), input.password.as_deref()))
+                } else {
+                    input
+                        .aliases
+                        .iter()
+                        .flatten()
+                        .find(|alias| alias.name == observation.name)
+                        .map(|alias| (&alias.url, alias.username.as_deref(), alias.password.as_deref()))
+                };
+                let Some((url, username, password)) = account else {
+                    continue;
+                };
+                let url = crate::utils::resolve_env_var(url);
+                let username = username.map(crate::utils::resolve_env_var);
+                let password = password.map(crate::utils::resolve_env_var);
+                if shared::model::ProviderAccountIdentity::new(url.trim(), username.as_deref(), password.as_deref())
+                    != observation.identity
+                {
+                    continue;
+                }
+                // Only confirmed terminal states are persisted; transient ones stay runtime exclusions.
+                let disable = observation.is_persistent_block();
+                let command = match observation.exp_date {
+                    Some(exp_date) => SourcesYmlPatch::SetFetchedExpiry {
+                        input_name: Arc::clone(input_name),
+                        account_name: Arc::clone(&observation.name),
+                        exp_date,
+                        disable,
+                    },
+                    None if disable => SourcesYmlPatch::SetAccountDisabled {
+                        input_name: Arc::clone(input_name),
+                        account_name: Arc::clone(&observation.name),
+                    },
+                    None => continue,
+                };
+                changed |= apply_sources_yml_patches(doc, std::slice::from_ref(&command))?;
+            }
+            SourcesYmlPatch::SetAccountDisabled { input_name, account_name } => {
+                let idx = *inputs_by_name
+                    .get(input_name.as_ref())
+                    .ok_or_else(|| TuliproxError::ConfigInput(format!("Missing input {input_name}")))?;
+                let input = &mut doc.inputs[idx];
+                if input.name == *account_name {
+                    changed |= !input.account_disabled;
+                    input.account_disabled = true;
+                    continue;
+                }
+                let alias = input
+                    .aliases
+                    .as_mut()
+                    .and_then(|aliases| aliases.iter_mut().find(|alias| alias.name == *account_name))
+                    .ok_or_else(|| TuliproxError::ConfigInput(format!("Missing alias {account_name}")))?;
+                changed |= std::mem::replace(&mut alias.enabled, false);
+            }
             SourcesYmlPatch::SetFetchedExpiry { input_name, account_name, exp_date, disable } => {
                 let idx = *inputs_by_name.get(input_name.as_ref()).ok_or_else(|| {
                     TuliproxError::ConfigPanelApi(format!("source.yml patch target input '{input_name}' was not found"))
@@ -303,11 +370,13 @@ pub(crate) fn apply_sources_yml_patches(
                 })?;
                 if account_name == input_name {
                     if doc.inputs[idx].exp_date != Some(*exp_date)
+                        || doc.inputs[idx].account_disabled
                         || !doc.inputs[idx].enabled
                         || doc.inputs[idx].max_connections != 1
                     {
                         doc.inputs[idx].exp_date = Some(*exp_date);
                         doc.inputs[idx].enabled = true;
+                        doc.inputs[idx].account_disabled = false;
                         doc.inputs[idx].max_connections = 1;
                         changed = true;
                     }
@@ -321,9 +390,12 @@ pub(crate) fn apply_sources_yml_patches(
                 let aliases = doc.inputs[idx].aliases.as_mut().ok_or_else(|| {
                     TuliproxError::ConfigPanelApi(format!("source.yml patch: input '{input_name}' has no aliases"))
                 })?;
-                if aliases[alias_idx].exp_date != Some(*exp_date) || aliases[alias_idx].max_connections != 1 {
-                    aliases[alias_idx].exp_date = Some(*exp_date);
-                    aliases[alias_idx].max_connections = 1;
+                let alias = &mut aliases[alias_idx];
+                // A panel renewal is an explicit decision for this account and lifts a stored exclusion.
+                if alias.exp_date != Some(*exp_date) || alias.max_connections != 1 || !alias.enabled {
+                    alias.exp_date = Some(*exp_date);
+                    alias.max_connections = 1;
+                    alias.enabled = true;
                     changed = true;
                 }
             }
@@ -367,6 +439,7 @@ pub(crate) fn apply_sources_yml_patches(
                     input.username = Some(username.clone());
                     input.password = Some(password.clone());
                     input.enabled = true;
+                    input.account_disabled = false;
                     input.max_connections = 1;
                     if let Some(exp_date) = *exp_date {
                         input.exp_date = Some(exp_date);
@@ -416,6 +489,7 @@ pub(crate) fn apply_sources_yml_patches(
                     input.username = Some(username.clone());
                     input.password = Some(password.clone());
                     input.enabled = true;
+                    input.account_disabled = false;
                     input.max_connections = 1;
                     if let Some(exp_date) = *exp_date {
                         input.exp_date = Some(exp_date);
@@ -441,9 +515,11 @@ pub(crate) fn apply_sources_yml_patches(
                 if alias.username.as_deref() != Some(username.as_str())
                     || alias.password.as_deref() != Some(password.as_str())
                     || exp_date_changed
+                    || !alias.enabled
                 {
                     alias.username = Some(username.clone());
                     alias.password = Some(password.clone());
+                    alias.enabled = true;
                     alias.max_connections = 1;
                     if let Some(exp_date) = *exp_date {
                         alias.exp_date = Some(exp_date);
@@ -713,6 +789,16 @@ fn plan_scalar_field_edits(
     };
     plan_account_scalar_edits(text, &spans, &changes, edits)?;
 
+    if before.account_disabled != expected.account_disabled {
+        plan_field(
+            text,
+            opt_span(value.account_disabled.as_ref())?,
+            &[Some(spans.name.clone())],
+            "account_disabled",
+            if expected.account_disabled { "true" } else { "false" },
+            edits,
+        )?;
+    }
     plan_panel_api_credits_edit(text, value, before, expected, edits)
 }
 
@@ -867,10 +953,150 @@ fn apply_patch_planning_step(
     Ok(true)
 }
 
-/// Executes a batch of `SourcesYmlPatch` commands as a single atomic transaction.
-///
-/// Returns `Ok(true)` if the file was written, `Ok(false)` if no change was needed.
-/// The write lock is acquired internally — callers must NOT hold it.
+/// Builds the account fields needed for patches without rebuilding prepared inputs.
+pub(crate) fn runtime_patch_document(sources: &crate::model::SourcesConfig) -> SourcesConfigDto {
+    SourcesConfigDto {
+        inputs: sources
+            .inputs
+            .iter()
+            .map(|input| shared::model::ConfigInputDto {
+                id: input.id,
+                name: Arc::clone(&input.name),
+                input_type: input.input_type,
+                url: input.url.clone(),
+                username: input.username.clone(),
+                password: input.password.clone(),
+                priority: input.priority,
+                enabled: input.enabled,
+                account_disabled: input.account_disabled,
+                max_connections: input.max_connections,
+                exp_date: input.exp_date,
+                panel_api: input.panel_api.as_ref().map(shared::model::PanelApiConfigDto::from),
+                aliases: input.aliases.as_ref().map(|aliases| {
+                    aliases
+                        .iter()
+                        .map(|alias| shared::model::ConfigInputAliasDto {
+                            id: alias.id,
+                            name: Arc::clone(&alias.name),
+                            url: alias.url.clone(),
+                            username: alias.username.clone(),
+                            password: alias.password.clone(),
+                            enabled: alias.enabled,
+                            max_connections: alias.max_connections,
+                            priority: alias.priority,
+                            exp_date: alias.exp_date,
+                            stalker: None,
+                        })
+                        .collect()
+                }),
+                ..shared::model::ConfigInputDto::default()
+            })
+            .collect(),
+        ..SourcesConfigDto::default()
+    }
+}
+
+pub(crate) fn merge_runtime_document(
+    current: &crate::model::SourcesConfig,
+    doc: SourcesConfigDto,
+) -> Result<crate::model::SourcesConfig, TuliproxError> {
+    let mut next = current.clone();
+    let mut next_id = next
+        .inputs
+        .iter()
+        .flat_map(|input| std::iter::once(input.id).chain(input.aliases.iter().flatten().map(|alias| alias.id)))
+        .max()
+        .unwrap_or(0);
+    for (input, updated) in next.inputs.iter_mut().zip(doc.inputs) {
+        let input = Arc::make_mut(input);
+        input.url = updated.url;
+        input.username = updated.username;
+        input.password = updated.password;
+        if let Some(stalker) = input.stalker.as_mut() {
+            stalker.username.clone_from(&input.username);
+            stalker.password.clone_from(&input.password);
+        }
+        input.exp_date = updated.exp_date;
+        input.enabled = updated.enabled;
+        input.account_disabled = updated.account_disabled;
+        input.max_connections = updated.max_connections;
+        input.priority = updated.priority;
+        input.panel_api = updated.panel_api.as_ref().map(crate::model::PanelApiConfig::from);
+
+        if let Some(aliases) = updated.aliases {
+            let previous = input.aliases.take().unwrap_or_default();
+            let mut converted = Vec::with_capacity(aliases.len());
+            for alias in aliases {
+                let mut runtime = crate::model::ConfigInputAlias::from(&alias);
+                if let Some(old) = previous.iter().find(|old| old.name == alias.name) {
+                    runtime.id = old.id;
+                    runtime.stalker.clone_from(&old.stalker);
+                    if let Some(stalker) = runtime.stalker.as_mut() {
+                        stalker.username.clone_from(&runtime.username);
+                        stalker.password.clone_from(&runtime.password);
+                    }
+                } else {
+                    next_id = next_id
+                        .checked_add(1)
+                        .ok_or_else(|| TuliproxError::ConfigInput("Provider account ID space exhausted".to_string()))?;
+                    runtime.id = next_id;
+                }
+                converted.push(runtime);
+            }
+            input.aliases = Some(converted);
+        }
+    }
+    next.group_lookup = shared::model::provider_saturation::build_group_lookup(&next.inputs);
+    Ok(next)
+}
+
+pub(crate) fn apply_runtime_source_patches(
+    app_config: &AppConfig,
+    patches: &[SourcesYmlPatch],
+) -> Result<(), TuliproxError> {
+    loop {
+        let current = app_config.sources.load_full();
+        let mut doc = runtime_patch_document(&current);
+        if !apply_sources_yml_patches(&mut doc, patches)? {
+            return Ok(());
+        }
+        let next = merge_runtime_document(&current, doc)?;
+        let previous = app_config.sources.compare_and_swap(&current, Arc::new(next));
+        if Arc::ptr_eq(&previous, &current) {
+            return Ok(());
+        }
+    }
+}
+
+/// Executes account patches (renewals, credential updates) and resets the renewed accounts'
+/// health while the file lock is still held, so a queued observation cannot write a stale ban
+/// back between the write and the reset. Refreshes the provider lineup afterwards.
+pub(crate) async fn execute_account_source_patches(
+    app_state: &crate::api::model::AppState,
+    sources_path: &Path,
+    patches: &[SourcesYmlPatch],
+) -> Result<bool, TuliproxError> {
+    if patches.is_empty() {
+        return Ok(false);
+    }
+    let guard = app_state.app_config.file_locks.write_lock(sources_path).await;
+    let written = execute_source_yml_patches_locked(&app_state.app_config, sources_path, patches, &guard).await?;
+    for patch in patches {
+        let renewed = match patch {
+            SourcesYmlPatch::UpdatePanelAccountExpiry { account_name, .. } => account_name,
+            SourcesYmlPatch::UpdateRootCredentials { input_name, .. } => input_name,
+            SourcesYmlPatch::UpdateAliasCredentials { alias_name, .. } => alias_name,
+            _ => continue,
+        };
+        app_state.active_provider.reset_account_health(renewed);
+    }
+    drop(guard);
+    app_state.active_provider.update_config(&app_state.app_config);
+    Ok(written)
+}
+
+/// Executes patches under the source file's write lock and records the written revision.
+#[cfg(test)]
 pub(crate) async fn execute_source_yml_patches(
     app_config: &Arc<AppConfig>,
     sources_path: &Path,
@@ -880,13 +1106,22 @@ pub(crate) async fn execute_source_yml_patches(
         return Ok(false);
     }
 
-    let _lock = app_config.file_locks.write_lock(sources_path).await;
+    let guard = app_config.file_locks.write_lock(sources_path).await;
+    execute_source_yml_patches_locked(app_config, sources_path, patches, &guard).await
+}
 
+pub(crate) async fn execute_source_yml_patches_locked(
+    app_config: &Arc<AppConfig>,
+    sources_path: &Path,
+    patches: &[SourcesYmlPatch],
+    _guard: &crate::utils::FileWriteGuard,
+) -> Result<bool, TuliproxError> {
     // Read and fingerprint the exact bytes that the transaction is based on.
     let original_bytes = tokio::fs::read(sources_path)
         .await
         .map_err(|err| TuliproxError::ConfigPanelApi(format!("source.yml patch: failed to read file: {err}")))?;
     let original_revision = blake3::hash(&original_bytes);
+    let synchronized = app_config.file_locks.is_internal_revision_hash(sources_path, &original_revision).await;
     let original_text = String::from_utf8(original_bytes)
         .map_err(|_| TuliproxError::ConfigPanelApi("source.yml patch: file is not valid UTF-8".to_string()))?;
 
@@ -915,6 +1150,7 @@ pub(crate) async fn execute_source_yml_patches(
     }
 
     if !changed {
+        apply_runtime_source_patches(app_config, patches)?;
         return Ok(false);
     }
 
@@ -931,12 +1167,10 @@ pub(crate) async fn execute_source_yml_patches(
     .await?;
 
     if written {
-        // Let the file watcher distinguish this write from an external edit.
-        app_config
-            .file_locks
-            .mark_internal_write_revision(sources_path)
-            .await
-            .map_err(|err| TuliproxError::Io(format!("Failed to track internal source update: {err}")))?;
+        apply_runtime_source_patches(app_config, patches)?;
+        if synchronized {
+            app_config.file_locks.mark_internal_write_content(sources_path, patched_text.as_bytes()).await;
+        }
     }
 
     Ok(written)
@@ -987,14 +1221,14 @@ mod tests {
         let mut edits = Vec::new();
         plan_scalar_field_edits(fixture, &doc, &Arc::from("provider"), &before, &expected, &mut edits).expect("plan");
 
-        let patched = edits_to_text(fixture, edits);
+        let patched_text = edits_to_text(fixture, edits);
         for line in fixture.lines() {
-            assert!(patched.contains(line), "line lost after patch: {line}");
+            assert!(patched_text.contains(line), "line lost after patch: {line}");
         }
-        assert!(patched.contains("exp_date: 1700000000"));
+        assert!(patched_text.contains("exp_date: 1700000000"));
         // The exact bug signature: `pass\n    exp_date: ...` glued with no separator.
         assert!(
-            !patched.contains("pass1700000000") && !patched.contains("pass exp_date"),
+            !patched_text.contains("pass1700000000") && !patched_text.contains("pass exp_date"),
             "next line must not be glued to the inserted value"
         );
     }
@@ -1027,9 +1261,9 @@ mod tests {
             .expect("plan");
 
         assert_eq!(edits.len(), 1, "exactly one replacement edit, no insertion");
-        let patched = edits_to_text(fixture, edits);
-        assert!(patched.contains("enabled: false"));
-        assert_eq!(patched.matches("enabled:").count(), 1, "no duplicate `enabled:` key");
+        let patched_text = edits_to_text(fixture, edits);
+        assert!(patched_text.contains("enabled: false"));
+        assert_eq!(patched_text.matches("enabled:").count(), 1, "no duplicate `enabled:` key");
     }
 
     #[test]
@@ -1057,9 +1291,9 @@ mod tests {
         plan_scalar_field_edits(fixture, &doc, &Arc::from("provider"), &before, &expected, &mut edits).expect("plan");
 
         assert!(find_edit(&edits, "credits").is_some(), "credits edit planned");
-        let patched = edits_to_text(fixture, edits);
+        let patched_text = edits_to_text(fixture, edits);
         let reparsed: crate::config_loader::source_patch::SourcePatchDocument =
-            serde_saphyr::from_str(&patched).expect("reparse");
+            serde_saphyr::from_str(&patched_text).expect("reparse");
         let panel = reparsed.inputs[0].value.panel_api.as_ref().expect("panel");
         assert_eq!(panel.value.credits.as_ref().expect("credits").value, "42");
     }
@@ -1073,12 +1307,12 @@ mod tests {
         let anchor = span_byte_range(&input.name).expect("name span");
 
         let edit = build_field_insertion_edit(fixture, &anchor, "enabled", "false").expect("build edit");
-        let patched = edits_to_text(fixture, vec![edit]);
+        let patched_text = edits_to_text(fixture, vec![edit]);
         let reparsed: crate::config_loader::source_patch::SourcePatchDocument =
-            serde_saphyr::from_str(&patched).expect("reparse");
+            serde_saphyr::from_str(&patched_text).expect("reparse");
 
         assert!(!reparsed.inputs[0].value.enabled.as_ref().expect("enabled").value);
-        assert!(patched.contains("name: provider, enabled: false"));
+        assert!(patched_text.contains("name: provider, enabled: false"));
     }
 
     // -----------------------------------------------------------------------
@@ -1146,6 +1380,22 @@ mod tests {
             })
         }
 
+        async fn execute_fixture_patches(
+            app_config: &Arc<AppConfig>,
+            source_path: &std::path::Path,
+            patches: &[SourcesYmlPatch],
+        ) -> Result<bool, TuliproxError> {
+            let text =
+                tokio::fs::read_to_string(source_path).await.map_err(|err| TuliproxError::Io(err.to_string()))?;
+            let dto: SourcesConfigDto =
+                serde_saphyr::from_str(&text).map_err(|err| TuliproxError::ConfigInput(err.to_string()))?;
+            let mut sources = (*app_config.sources.load_full()).clone();
+            sources.inputs = dto.inputs.iter().map(|input| Arc::new(ConfigInput::from(input))).collect();
+            app_config.sources.store(Arc::new(sources));
+            app_config.file_locks.mark_internal_write_content(source_path, text.as_bytes()).await;
+            execute_source_yml_patches(app_config, source_path, patches).await
+        }
+
         const FIXTURE: &str = "\
 inputs:
   - name: provider
@@ -1162,7 +1412,7 @@ sources: []
 ";
 
         fn unique_path(name: &str) -> std::path::PathBuf {
-            let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+            let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
             std::env::temp_dir().join(format!("tuliprox-source-yml-patch-{nanos}-{name}"))
         }
 
@@ -1239,9 +1489,9 @@ sources: []
                                 order: AliasExpDateSortOrder::NewestFirst,
                             },
                         ];
-                        assert!(execute_source_yml_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
-                        let patched = std::fs::read_to_string(&source_path).expect("read patched");
-                        let mut parsed: SourcesConfigDto = serde_saphyr::from_str(&patched).expect("reparse");
+                        assert!(execute_fixture_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
+                        let patched_text = std::fs::read_to_string(&source_path).expect("read patched_text");
+                        let mut parsed: SourcesConfigDto = serde_saphyr::from_str(&patched_text).expect("reparse");
                         let input = &parsed.inputs[0];
                         assert_eq!(input.username.as_deref(), Some("renewed-root"));
                         assert_eq!(input.exp_date, Some(4_102_444_900));
@@ -1254,15 +1504,15 @@ sources: []
                             ["added", "current"]
                         );
                         assert_eq!(aliases[1].password.as_deref(), Some("pass # with: {}, commas"));
-                        assert!(patched.contains("# - {name: commented-old, url: provider://example}"));
+                        assert!(patched_text.contains("# - {name: commented-old, url: provider://example}"));
                         let panel_start = fixture.find("  # keep panel settings").expect("panel");
-                        assert!(patched.ends_with(&fixture[panel_start..]));
+                        assert!(patched_text.ends_with(&fixture[panel_start..]));
                         let current_prefix = if style == "block" { "- name: current" } else { "- {name: current" };
-                        assert!(patched.contains(current_prefix));
+                        assert!(patched_text.contains(current_prefix));
                         // The initial sort makes the older entry the last item. In
                         // mixed lists its block style is the insertion convention.
                         let added_prefix = if style == "flow" { "- {name: added" } else { "- name: added" };
-                        assert!(patched.contains(added_prefix));
+                        assert!(patched_text.contains(added_prefix));
                         assert!(std::fs::read_dir(&backup_dir).expect("backups").any(|entry| {
                             let path = entry.expect("backup entry").path();
                             std::fs::read(path).is_ok_and(|bytes| bytes == fixture.as_bytes())
@@ -1294,7 +1544,7 @@ sources: []
                     password: "pass".into(),
                     exp_date: Some(4_102_444_800),
                 };
-                assert!(!execute_source_yml_patches(&app_cfg, &source_path, &[add]).await.expect("identical addition"));
+                assert!(!execute_fixture_patches(&app_cfg, &source_path, &[add]).await.expect("identical addition"));
                 let patches = [
                     SourcesYmlPatch::UpdateRootCredentials {
                         input_name: "provider".into(),
@@ -1311,7 +1561,7 @@ sources: []
                         exp_date: Some(4_102_444_800),
                     },
                 ];
-                let error = execute_source_yml_patches(&app_cfg, &source_path, &patches).await.expect_err("conflict");
+                let error = execute_fixture_patches(&app_cfg, &source_path, &patches).await.expect_err("conflict");
                 assert!(error.to_string().contains("already exists"));
                 assert!(!error.to_string().contains("conflicting-password"));
                 assert_eq!(std::fs::read(&source_path).expect("unchanged file"), original.as_bytes());
@@ -1346,7 +1596,7 @@ sources: []
                         exp_date: Some(4_102_445_000),
                     },
                 ];
-                assert!(execute_source_yml_patches(&app_cfg, &source_path, &patches).await.expect("replenish"));
+                assert!(execute_fixture_patches(&app_cfg, &source_path, &patches).await.expect("replenish"));
                 let result = std::fs::read_to_string(&source_path).expect("read");
                 let parsed: SourcesConfigDto = serde_saphyr::from_str(&result).expect("reparse");
                 assert_eq!(parsed.inputs[0].username.as_deref(), Some("new-root"));
@@ -1375,11 +1625,11 @@ sources: []
                 disable: false,
             }];
 
-            let written = execute_source_yml_patches(&app_cfg, &source_path, &patches).await.expect("patch");
+            let written = execute_fixture_patches(&app_cfg, &source_path, &patches).await.expect("patch");
             assert!(written, "patch should report a write happened");
 
-            let patched_text = tokio::fs::read_to_string(&source_path).await.expect("read patched");
-            assert!(patched_text.contains("exp_date: 1700000000"), "patched file must contain inserted exp_date");
+            let patched_text = tokio::fs::read_to_string(&source_path).await.expect("read patched_text");
+            assert!(patched_text.contains("exp_date: 1700000000"), "patched_text file must contain inserted exp_date");
             for line in FIXTURE.lines() {
                 assert!(patched_text.contains(line), "line lost after patch: {line}");
             }
@@ -1422,9 +1672,9 @@ sources: []
                 },
             ];
 
-            assert!(execute_source_yml_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
-            let patched = tokio::fs::read_to_string(&source_path).await.expect("read patched");
-            let parsed: SourcesConfigDto = serde_saphyr::from_str(&patched).expect("reparse");
+            assert!(execute_fixture_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
+            let patched_text = tokio::fs::read_to_string(&source_path).await.expect("read patched_text");
+            let parsed: SourcesConfigDto = serde_saphyr::from_str(&patched_text).expect("reparse");
             assert_eq!(parsed.inputs[0].exp_date, Some(1_700_000_000));
             assert_eq!(parsed.inputs[0].aliases.as_ref().expect("aliases")[0].exp_date, Some(1_800_000_000));
 
@@ -1467,7 +1717,7 @@ sources: []
                 },
             ];
 
-            assert!(execute_source_yml_patches(&app_cfg, &source_path, &commands).await.expect("patch"));
+            assert!(execute_fixture_patches(&app_cfg, &source_path, &commands).await.expect("patch"));
             let patched_text = tokio::fs::read_to_string(&source_path).await.expect("read");
             let parsed: SourcesConfigDto = serde_saphyr::from_str(&patched_text).expect("reparse");
             let root = parsed.inputs.iter().find(|input| input.name.as_ref() == "flow-root").expect("root");
@@ -1478,11 +1728,12 @@ sources: []
                 .and_then(|aliases| aliases.iter().find(|alias| alias.name.as_ref() == "flow-alias"))
                 .expect("alias");
 
-            assert!(!root.enabled);
+            assert!(root.enabled);
+            assert!(root.account_disabled);
             assert_eq!(root.exp_date, Some(100));
             assert!(!alias.enabled);
             assert_eq!(alias.exp_date, Some(200));
-            assert!(patched_text.contains("name: flow-root, enabled: false"));
+            assert!(patched_text.contains("name: flow-root, account_disabled: true"));
             assert!(patched_text.contains("name: flow-alias, enabled: false"));
             assert!(patched_text.contains("password: alias-pass, exp_date: 200"));
 
@@ -1520,7 +1771,7 @@ sources: []
                 disable: false,
             }];
 
-            let err = execute_source_yml_patches(&app_cfg, &source_path, &patches)
+            let err = execute_fixture_patches(&app_cfg, &source_path, &patches)
                 .await
                 .expect_err("duplicate alias must be rejected");
             let msg = format!("{err:?}");
@@ -1547,7 +1798,7 @@ sources: []
             let patches =
                 [SourcesYmlPatch::SortAliases { input_name: name, order: AliasExpDateSortOrder::NewestFirst }];
 
-            let written = execute_source_yml_patches(&app_cfg, &source_path, &patches).await.expect("noop");
+            let written = execute_fixture_patches(&app_cfg, &source_path, &patches).await.expect("noop");
             assert!(!written, "no-op patch must not report a write");
 
             let _ = std::fs::remove_dir_all(&dir);
@@ -1588,11 +1839,11 @@ sources: []
                 },
             ];
 
-            assert!(execute_source_yml_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
-            let patched = tokio::fs::read_to_string(&source_path).await.expect("read");
-            assert!(patched.find("name: new").expect("new") < patched.find("name: old").expect("old"));
-            assert_eq!(patched.matches("# old account").count(), 1);
-            assert!(patched.contains("\r\n"));
+            assert!(execute_fixture_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
+            let patched_text = tokio::fs::read_to_string(&source_path).await.expect("read");
+            assert!(patched_text.find("name: new").expect("new") < patched_text.find("name: old").expect("old"));
+            assert_eq!(patched_text.matches("# old account").count(), 1);
+            assert!(patched_text.contains("\r\n"));
 
             let _ = std::fs::remove_dir_all(&dir);
         }
@@ -1635,9 +1886,9 @@ sources: []
                 exp_date: Some(300),
             }];
 
-            assert!(execute_source_yml_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
-            let patched = tokio::fs::read_to_string(&source_path).await.expect("read");
-            let parsed: SourcesConfigDto = serde_saphyr::from_str(&patched).expect("reparse");
+            assert!(execute_fixture_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
+            let patched_text = tokio::fs::read_to_string(&source_path).await.expect("read");
+            let parsed: SourcesConfigDto = serde_saphyr::from_str(&patched_text).expect("reparse");
 
             assert_eq!(parsed.inputs.len(), 2);
             assert!(parsed.inputs[0].panel_api.is_some());
@@ -1645,8 +1896,8 @@ sources: []
             assert_eq!(aliases.len(), 1);
             assert_eq!(aliases[0].name.as_ref(), "provider-new");
             assert_eq!(parsed.inputs[1].name.as_ref(), "next");
-            assert!(patched.contains("    aliases:\n      - name: provider-new"));
-            assert!(patched.contains("        remove_expired: true"));
+            assert!(patched_text.contains("    aliases:\n      - name: provider-new"));
+            assert!(patched_text.contains("        remove_expired: true"));
 
             let _ = std::fs::remove_dir_all(&dir);
         }
@@ -1685,11 +1936,13 @@ sources: []
                 },
             ];
 
-            assert!(execute_source_yml_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
-            let patched = tokio::fs::read_to_string(&source_path).await.expect("read");
-            assert!(patched.find("name: first").expect("first") < patched.find("name: second").expect("second"));
-            assert!(patched.contains("exp_date: 300"));
-            assert!(patched.contains("max_connections: 1"));
+            assert!(execute_fixture_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
+            let patched_text = tokio::fs::read_to_string(&source_path).await.expect("read");
+            assert!(
+                patched_text.find("name: first").expect("first") < patched_text.find("name: second").expect("second")
+            );
+            assert!(patched_text.contains("exp_date: 300"));
+            assert!(patched_text.contains("max_connections: 1"));
 
             let _ = std::fs::remove_dir_all(&dir);
         }
@@ -1715,10 +1968,10 @@ sources: []
             let app_cfg = build_app_config(&backup_dir);
             let patches = [SourcesYmlPatch::RemoveExpiredAliases { input_name: Arc::from("provider") }];
 
-            assert!(execute_source_yml_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
-            let patched = tokio::fs::read_to_string(&source_path).await.expect("read");
-            assert!(!patched.contains("name: expired"));
-            let parsed: SourcesConfigDto = serde_saphyr::from_str(&patched).expect("reparse");
+            assert!(execute_fixture_patches(&app_cfg, &source_path, &patches).await.expect("patch"));
+            let patched_text = tokio::fs::read_to_string(&source_path).await.expect("read");
+            assert!(!patched_text.contains("name: expired"));
+            let parsed: SourcesConfigDto = serde_saphyr::from_str(&patched_text).expect("reparse");
             assert!(parsed.inputs[0].aliases.as_ref().is_none_or(Vec::is_empty));
 
             let _ = std::fs::remove_dir_all(&dir);

@@ -1,5 +1,5 @@
 use crate::{
-    model::{macros, ConfigInputUpdateQuality, ConfigProvider, EpgConfig, PanelApiConfig, ProxyConfig, ResourcePolicy},
+    model::{macros, ConfigInputUpdateQuality, ConfigProvider, EpgConfig, PanelApiConfig, ProxyConfig},
     utils::get_csv_file_path,
 };
 use chrono::Utc;
@@ -10,9 +10,9 @@ use shared::{
     foundation::Filter,
     model::{
         ClusterFlags, ConfigInputAliasDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto,
-        ConnectionLimitPolicy, InputFetchMethod, InputType, MediaServerCatalogConfigDto, MediaServerImagePolicy,
-        MediaServerInputConfigDto, MediaServerLibrarySelector, MediaServerPlaybackConfigDto, StagedInputType,
-        StalkerAuthMode, StalkerDeviceProfileDto, StalkerEndpointPreference, StalkerInputConfigDto, StalkerMagPreset,
+        ConnectionLimitPolicy, FlussonicHlsCatchup, InputFetchMethod, InputType, MediaServerCatalogConfigDto,
+        MediaServerInputConfigDto, MediaServerLibrarySelector, ProviderAccountIdentity, StagedInputType, StalkerAuthMode,
+        StalkerDeviceProfileDto, StalkerEndpointPreference, StalkerInputConfigDto, StalkerMagPreset,
     },
     utils::{
         get_credentials_from_url, get_credentials_from_url_str, is_non_blank_optional_string,
@@ -29,9 +29,10 @@ use std::{
     sync::{Arc, LazyLock},
 };
 use tuliprox_media_server::{
-    client::MediaServerHttpClient,
-    errors::{MediaServerError, MediaServerErrorKind},
+    emby::{client::EmbyClientSettings, EmbyCatalogClient},
+    jellyfin::JellyfinCatalogClient,
     plex::client::{PlexCatalogClient, PlexClientSettings},
+    AnyMediaServerCatalogClient, MediaServerError, MediaServerErrorKind, MediaServerHttpClient,
 };
 use url::Url;
 
@@ -45,6 +46,7 @@ create_bitset!(
     XtreamLiveStreamWithoutExtension,
     DisableHlsStreaming,
     UserAgentStreamIndex,
+    FlussonicHlsAudioTracks,
     ResolveTmdb,
     ResolveBackground,
     ResolveSeries,
@@ -60,6 +62,8 @@ pub struct ConfigInputOptions {
     pub flags: ConfigInputFlagsSet,
     pub connection_limit_policy: ConnectionLimitPolicy,
     pub update_quality: ConfigInputUpdateQuality,
+    pub flussonic_hls_catchup: FlussonicHlsCatchup,
+    pub flussonic_hls_catchup_max_duration_secs: u32,
     pub resolve_delay: u16,
     pub probe_delay: u16,
     pub probe_live_interval_hours: u32,
@@ -93,6 +97,7 @@ impl From<&ConfigInputOptionsDto> for ConfigInputOptions {
             (xtream_live_stream_without_extension, XtreamLiveStreamWithoutExtension),
             (disable_hls_streaming, DisableHlsStreaming),
             (user_agent_stream_index, UserAgentStreamIndex),
+            (flussonic_hls_audio_tracks, FlussonicHlsAudioTracks),
             (resolve_tmdb, ResolveTmdb),
             (resolve_background, ResolveBackground),
             (resolve_series, ResolveSeries),
@@ -107,6 +112,8 @@ impl From<&ConfigInputOptionsDto> for ConfigInputOptions {
             flags,
             connection_limit_policy: dto.connection_limit_policy,
             update_quality: ConfigInputUpdateQuality::from(&dto.update_quality),
+            flussonic_hls_catchup: dto.flussonic_hls_catchup,
+            flussonic_hls_catchup_max_duration_secs: dto.flussonic_hls_catchup_max_duration_secs,
             resolve_delay: dto.resolve_delay,
             probe_delay: dto.probe_delay,
             probe_live_interval_hours: dto.probe_live_interval_hours,
@@ -123,8 +130,6 @@ static DEFAULT_CONFIG_INPUT_OPTIONS: LazyLock<ConfigInputOptions> =
 pub struct MediaServerInputConfig {
     pub libraries: Vec<MediaServerLibrarySelector>,
     pub catalog: MediaServerCatalogConfigDto,
-    pub playback: MediaServerPlaybackConfigDto,
-    pub image_policy: MediaServerImagePolicy,
     pub token: Option<String>,
     pub api_key: Option<String>,
     pub user_id: Option<String>,
@@ -154,22 +159,64 @@ impl MediaServerInputConfig {
 }
 
 impl ConfigInput {
-    /// Builds the Plex catalog client this input describes.
-    ///
-    /// Previously `PlexCatalogClient::from_input`; it moved out of `media_server`
-    /// because it is the only thing there that knew what a `ConfigInput` is.
-    pub fn plex_catalog_client(&self, http: MediaServerHttpClient) -> Result<PlexCatalogClient, MediaServerError> {
-        if self.input_type != InputType::Plex {
-            return Err(MediaServerError::new(MediaServerErrorKind::MediaServerDiscoveryFailed)
-                .provider("plex")
-                .detail("plex catalog client requires a plex input"));
-        }
-        let media_server = self.media_server.as_ref().ok_or_else(|| {
+    /// The `media_server` block of this input, or a discovery error naming `provider`.
+    fn media_server_config(&self, provider: &'static str) -> Result<&MediaServerInputConfig, MediaServerError> {
+        self.media_server.as_ref().ok_or_else(|| {
             MediaServerError::new(MediaServerErrorKind::MediaServerDiscoveryFailed)
-                .provider("plex")
-                .detail("plex input is missing media_server configuration")
-        })?;
-        Ok(PlexCatalogClient::new(self.name.clone(), self.url.as_str(), &media_server.plex_client_settings(), http))
+                .provider(provider)
+                .detail("media-server input is missing media_server configuration")
+        })
+    }
+
+    fn plex_client(&self, media_server: &MediaServerInputConfig, http: MediaServerHttpClient) -> PlexCatalogClient {
+        PlexCatalogClient::new(self.name.clone(), self.url.as_str(), &media_server.plex_client_settings(), http)
+    }
+
+    /// The subset of this input an Emby/Jellyfin catalog client actually needs: server credentials from
+    /// the `media_server` block, login credentials from the input's own `username`/`password`.
+    pub fn emby_client_settings(&self, media_server: &MediaServerInputConfig) -> EmbyClientSettings {
+        EmbyClientSettings {
+            token: media_server.token.clone(),
+            api_key: media_server.api_key.clone(),
+            user_id: media_server.user_id.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            include_media_sources: media_server.catalog.include_media_sources,
+            libraries: media_server.libraries.clone(),
+        }
+    }
+
+    /// Builds the catalog client for whichever media-server kind this input is.
+    pub fn media_server_catalog_client(
+        &self,
+        http: MediaServerHttpClient,
+    ) -> Result<AnyMediaServerCatalogClient, MediaServerError> {
+        match self.input_type {
+            InputType::Plex => {
+                let media_server = self.media_server_config("plex")?;
+                Ok(AnyMediaServerCatalogClient::Plex(self.plex_client(media_server, http)))
+            }
+            InputType::Emby => {
+                let settings = self.emby_client_settings(self.media_server_config("emby")?);
+                Ok(AnyMediaServerCatalogClient::Emby(EmbyCatalogClient::new(
+                    self.name.clone(),
+                    self.url.as_str(),
+                    &settings,
+                    http,
+                )?))
+            }
+            InputType::Jellyfin => {
+                let settings = self.emby_client_settings(self.media_server_config("jellyfin")?);
+                Ok(AnyMediaServerCatalogClient::Jellyfin(JellyfinCatalogClient::new(
+                    self.name.clone(),
+                    self.url.as_str(),
+                    &settings,
+                    http,
+                )?))
+            }
+            _ => Err(MediaServerError::new(MediaServerErrorKind::MediaServerDiscoveryFailed)
+                .detail("input is not a media-server input")),
+        }
     }
 }
 
@@ -190,8 +237,6 @@ impl From<&MediaServerInputConfigDto> for MediaServerInputConfig {
         Self {
             libraries: normalized.libraries,
             catalog: normalized.catalog,
-            playback: normalized.playback,
-            image_policy: normalized.image_policy,
             token: normalized.token,
             api_key: normalized.api_key,
             user_id: normalized.user_id,
@@ -460,6 +505,12 @@ pub struct ConfigInputAlias {
 }
 
 macros::from_impl!(ConfigInputAlias);
+impl ConfigInputAlias {
+    pub fn account_identity(&self) -> ProviderAccountIdentity {
+        ProviderAccountIdentity::new(&self.url, self.username.as_deref(), self.password.as_deref())
+    }
+}
+
 impl From<&ConfigInputAliasDto> for ConfigInputAlias {
     fn from(dto: &ConfigInputAliasDto) -> Self {
         Self {
@@ -493,6 +544,7 @@ pub struct ConfigInput {
     pub proxy: Option<ProxyConfig>,
     pub persist: Option<String>,
     pub enabled: bool,
+    pub account_disabled: bool,
     pub sequential_group: Option<u32>,
     pub options: Option<ConfigInputOptions>,
     pub media_server: Option<MediaServerInputConfig>,
@@ -509,9 +561,6 @@ pub struct ConfigInput {
     pub provider_configs: Option<Vec<Arc<ConfigProvider>>>,
     /// Resolved Stalker device identity + portal hints.
     pub stalker: Option<StalkerInputConfig>,
-    /// Trusted private destinations for resource URLs supplied by this input. `None` and an
-    /// empty policy are equivalent: public destinations only.
-    pub resource_policy: Option<Arc<ResourcePolicy>>,
 }
 
 impl ConfigInput {
@@ -566,9 +615,8 @@ impl ConfigInput {
     fn apply_expiration(&mut self) {
         if is_input_expired(self.exp_date) {
             warn!("Account {} expired for provider: {}", self.username.as_ref().map_or("?", |s| s.as_str()), self.name);
-            let has_usable_alias = self.aliases.as_ref().is_some_and(|aliases| {
-                aliases.iter().any(|alias| alias.enabled && !is_input_expired(alias.exp_date))
-            });
+            // An expired root must not take its still-valid alias pool down with it.
+            let has_usable_alias = self.aliases.iter().flatten().any(|alias| alias.enabled && !is_input_expired(alias.exp_date));
             if !has_usable_alias {
                 self.enabled = false;
             }
@@ -900,6 +948,7 @@ impl ConfigInput {
             proxy: self.proxy.clone(),
             persist: self.persist.clone(),
             enabled: self.enabled,
+            account_disabled: !alias.enabled,
             sequential_group: self.sequential_group,
             options: self.options.clone(),
             media_server: self.media_server.clone(),
@@ -921,9 +970,24 @@ impl ConfigInput {
                 let password = alias.password.clone().or_else(|| cfg.password.clone());
                 StalkerInputConfig { username, password, ..cfg }
             }),
-            // An alias serves the same resources as its main input, so it inherits the policy.
-            resource_policy: self.resource_policy.clone(),
         }
+    }
+
+    pub fn account_identity(&self) -> ProviderAccountIdentity {
+        ProviderAccountIdentity::new(&self.url, self.username.as_deref(), self.password.as_deref())
+    }
+
+    /// Account used for playlist downloads: the root, or the first usable alias
+    /// when the root is excluded or expired.
+    pub fn playlist_account(&self) -> Option<Cow<'_, ConfigInput>> {
+        if !self.account_disabled && !is_input_expired(self.exp_date) {
+            return Some(Cow::Borrowed(self));
+        }
+        self.aliases
+            .iter()
+            .flatten()
+            .find(|alias| alias.enabled && !is_input_expired(alias.exp_date))
+            .map(|alias| Cow::Owned(self.as_input(alias)))
     }
 
     pub fn has_enabled_aliases(&self) -> bool {
@@ -998,6 +1062,7 @@ impl From<&ConfigInputDto> for ConfigInput {
             proxy: dto.proxy.as_ref().map(ProxyConfig::from),
             persist: dto.persist.clone(),
             enabled: dto.enabled,
+            account_disabled: dto.account_disabled,
             sequential_group: dto.sequential_group,
             options: Some(options),
             media_server: dto.media_server.as_ref().map(MediaServerInputConfig::from),
@@ -1016,13 +1081,6 @@ impl From<&ConfigInputDto> for ConfigInput {
                 .stalker
                 .as_ref()
                 .map(|s| StalkerInputConfig::from(s).with_credentials(dto.username.as_ref(), dto.password.as_ref())),
-            // An invalid policy is rejected while the sources config is built; dropping it here
-            // fails closed to public-only instead of silently trusting a partial allowlist.
-            resource_policy: dto
-                .resource_policy
-                .as_ref()
-                .and_then(|policy| ResourcePolicy::from_dto(policy).ok())
-                .map(Arc::new),
         }
     }
 }
@@ -1128,6 +1186,101 @@ mod tests {
             libraries: vec![MediaServerLibrarySelector::Name("Movies".to_string())],
             ..MediaServerInputConfigDto::default()
         })
+    }
+
+    fn media_server_input(
+        input_type: InputType,
+        url: &str,
+        media_server: Option<MediaServerInputConfig>,
+    ) -> ConfigInput {
+        ConfigInput {
+            name: "ms".into(),
+            input_type,
+            url: url.to_string(),
+            media_server,
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn media_server_catalog_client_builds_each_kind() {
+        let http = || MediaServerHttpClient::new(reqwest::Client::new());
+        let with = |token: Option<&str>, api_key: Option<&str>| {
+            Some(MediaServerInputConfig {
+                token: token.map(str::to_string),
+                api_key: api_key.map(str::to_string),
+                ..media_server_config_with_library()
+            })
+        };
+
+        let plex = media_server_input(InputType::Plex, "http://plex.example.invalid:32400", with(Some("t"), None));
+        assert!(matches!(plex.media_server_catalog_client(http()), Ok(AnyMediaServerCatalogClient::Plex(_))));
+
+        let emby = media_server_input(InputType::Emby, "http://emby.example.invalid:8096", with(Some("t"), None));
+        assert!(matches!(emby.media_server_catalog_client(http()), Ok(AnyMediaServerCatalogClient::Emby(_))));
+
+        let jellyfin =
+            media_server_input(InputType::Jellyfin, "http://jf.example.invalid:8096", with(None, Some("key")));
+        assert!(matches!(jellyfin.media_server_catalog_client(http()), Ok(AnyMediaServerCatalogClient::Jellyfin(_))));
+    }
+
+    #[test]
+    fn media_server_catalog_client_rejects_non_media_server_input() {
+        let input = media_server_input(InputType::M3u, "http://example.invalid/list.m3u", None);
+
+        let err = input
+            .media_server_catalog_client(MediaServerHttpClient::new(reqwest::Client::new()))
+            .err()
+            .expect("m3u input must be rejected");
+
+        assert_eq!(err.kind, MediaServerErrorKind::MediaServerDiscoveryFailed);
+        assert!(err.to_string().contains("input is not a media-server input"), "{err}");
+    }
+
+    #[test]
+    fn media_server_catalog_client_requires_media_server_block() {
+        for (input_type, provider) in
+            [(InputType::Plex, "plex"), (InputType::Emby, "emby"), (InputType::Jellyfin, "jellyfin")]
+        {
+            let input = media_server_input(input_type, "http://ms.example.invalid", None);
+
+            let err = input
+                .media_server_catalog_client(MediaServerHttpClient::new(reqwest::Client::new()))
+                .err()
+                .expect("missing media_server block must be rejected");
+
+            assert_eq!(err.kind, MediaServerErrorKind::MediaServerDiscoveryFailed);
+            assert_eq!(err.provider, Some(provider));
+            assert!(err.to_string().contains("media-server input is missing media_server configuration"), "{err}");
+        }
+    }
+
+    #[test]
+    fn emby_client_settings_copies_login_credentials_and_media_source_flag() {
+        let media_server = MediaServerInputConfig {
+            token: Some("token".to_string()),
+            api_key: Some("api-key".to_string()),
+            user_id: Some("user-id".to_string()),
+            ..media_server_config_with_library()
+        };
+        let mut input = media_server_input(InputType::Emby, "http://emby.example.invalid", Some(media_server.clone()));
+        input.username = Some("login".to_string());
+        input.password = Some("secret".to_string());
+
+        let settings = input.emby_client_settings(&media_server);
+
+        assert_eq!(settings.token.as_deref(), Some("token"));
+        assert_eq!(settings.api_key.as_deref(), Some("api-key"));
+        assert_eq!(settings.user_id.as_deref(), Some("user-id"));
+        assert_eq!(settings.username.as_deref(), Some("login"));
+        assert_eq!(settings.password.as_deref(), Some("secret"));
+        assert_eq!(settings.libraries, media_server.libraries);
+        assert!(settings.include_media_sources);
+
+        let mut no_sources = media_server;
+        no_sources.catalog.include_media_sources = false;
+        assert!(!input.emby_client_settings(&no_sources).include_media_sources);
     }
 
     #[test]
@@ -1243,45 +1396,6 @@ mod tests {
     }
 
     #[test]
-    fn alias_conversion_inherits_the_resource_policy() {
-        let dto = ConfigInputDto {
-            input_type: InputType::M3u,
-            url: "https://provider.example/playlist.m3u".to_string(),
-            resource_policy: Some(shared::model::ResourcePolicyDto {
-                allowed_hosts: vec!["media.home.arpa".to_string()],
-                allowed_networks: vec!["192.168.50.20/32".to_string()],
-            }),
-            aliases: Some(vec![ConfigInputAliasDto {
-                name: "alias".into(),
-                url: "https://alias.example.invalid".to_string(),
-                ..ConfigInputAliasDto::default()
-            }]),
-            ..ConfigInputDto::default()
-        };
-        let input = ConfigInput::from(&dto);
-        let alias = input.aliases.as_ref().and_then(|aliases| aliases.first()).expect("runtime alias");
-
-        let alias_input = input.as_input(alias);
-
-        let policy = alias_input.resource_policy.expect("alias inherits the policy");
-        assert!(policy.allows_host("media.home.arpa"));
-    }
-
-    #[test]
-    fn an_invalid_resource_policy_converts_to_public_only() {
-        // The load path rejects this configuration; the conversion itself must fail closed.
-        let dto = ConfigInputDto {
-            resource_policy: Some(shared::model::ResourcePolicyDto {
-                allowed_hosts: vec!["not a host".to_string()],
-                allowed_networks: Vec::new(),
-            }),
-            ..ConfigInputDto::default()
-        };
-
-        assert!(ConfigInput::from(&dto).resource_policy.is_none());
-    }
-
-    #[test]
     fn batch_conversion_preserves_update_quality_when_promoting_alias() {
         let mut input = ConfigInput::from(&ConfigInputDto {
             input_type: InputType::XtreamBatch,
@@ -1331,6 +1445,14 @@ mod tests {
     }
 
     #[test]
+    fn input_options_conversion_sets_flussonic_hls_audio_tracks_flag() {
+        let dto = ConfigInputOptionsDto { flussonic_hls_audio_tracks: true, ..ConfigInputOptionsDto::default() };
+
+        assert!(ConfigInputOptions::from(&dto).has_flag(ConfigInputFlags::FlussonicHlsAudioTracks));
+        assert!(!ConfigInputOptions::defaults().has_flag(ConfigInputFlags::FlussonicHlsAudioTracks));
+    }
+
+    #[test]
     fn media_server_runtime_mapping_preserves_safe_defaults() {
         let dto = ConfigInputDto {
             name: "emby_media_server".into(),
@@ -1356,8 +1478,6 @@ mod tests {
 
         assert_eq!(media_server.libraries, vec![MediaServerLibrarySelector::Name("Movies".to_string())]);
         assert_eq!(media_server.catalog.page_size, 100);
-        assert!(media_server.playback.direct_play_only);
-        assert!(!media_server.playback.allow_transcode);
         assert_eq!(media_server.token.as_deref(), Some("token"));
         assert_eq!(media_server.api_key.as_deref(), Some("api-key"));
         assert_eq!(media_server.user_id.as_deref(), Some("user"));
@@ -1657,6 +1777,94 @@ mod tests {
 
         let err = input.prepare(&[]).unwrap_err();
         assert!(err.to_string().contains("Malformed provider URL"));
+    }
+
+    #[test]
+    fn playlist_account_falls_back_to_first_usable_alias() {
+        let alias = |id, name: &str, enabled| ConfigInputAlias {
+            id,
+            name: name.into(),
+            url: format!("http://{name}.example.com/playlist.m3u"),
+            username: None,
+            password: None,
+            priority: 0,
+            max_connections: 0,
+            exp_date: None,
+            enabled,
+            stalker: None,
+        };
+        let mut input = ConfigInput {
+            name: "root".into(),
+            input_type: InputType::M3u,
+            url: "http://example.com/playlist.m3u".to_string(),
+            enabled: true,
+            aliases: Some(vec![alias(1, "disabled", false), alias(2, "usable", true)]),
+            ..Default::default()
+        };
+        assert!(matches!(input.playlist_account(), Some(Cow::Borrowed(_))));
+        input.exp_date = Some(1);
+        assert_eq!(input.playlist_account().map(|account| account.name.to_string()).as_deref(), Some("usable"));
+        input.exp_date = None;
+        input.account_disabled = true;
+        input.aliases = Some(vec![alias(1, "disabled", false)]);
+        assert!(input.playlist_account().is_none());
+    }
+
+    #[test]
+    fn expired_root_with_aliases_is_not_persistently_disabled() -> Result<(), TuliproxError> {
+        let mut input = ConfigInput {
+            name: "root".into(),
+            input_type: InputType::M3u,
+            url: "http://example.com/playlist.m3u".to_string(),
+            enabled: true,
+            exp_date: Some(1),
+            aliases: Some(vec![ConfigInputAlias {
+                id: 1,
+                name: "alias".into(),
+                url: "http://alias.example.com/playlist.m3u".to_string(),
+                username: None,
+                password: None,
+                priority: 0,
+                max_connections: 0,
+                exp_date: None,
+                enabled: true,
+                stalker: None,
+            }]),
+            ..Default::default()
+        };
+
+        input.prepare(&[])?;
+        assert!(input.enabled);
+        assert!(!input.account_disabled);
+        Ok(())
+    }
+
+    #[test]
+    fn expired_root_requires_a_usable_alias() {
+        for (enabled, exp_date, usable) in
+            [(true, Some(1), false), (false, None, false), (true, None, true), (true, Some(i64::MAX), true)]
+        {
+            let mut input = ConfigInput {
+                enabled: true,
+                exp_date: Some(1),
+                aliases: Some(vec![ConfigInputAlias {
+                    id: 1,
+                    name: Arc::from("alias"),
+                    url: "http://alias.example".to_string(),
+                    username: None,
+                    password: None,
+                    priority: 0,
+                    max_connections: 0,
+                    exp_date,
+                    enabled,
+                    stalker: None,
+                }]),
+                ..ConfigInput::default()
+            };
+            input.apply_expiration();
+            assert_eq!(input.enabled, usable);
+            assert!(!input.account_disabled);
+        }
     }
 
     #[test]

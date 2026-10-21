@@ -1,6 +1,5 @@
 use crate::header_policy::{HeaderProtocol, HopByHopHeader};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue};
-use std::collections::HashMap;
 use tuliprox_core::{model::ReverseProxyDisabledHeaderConfig, utils::content_coding::force_accept_encoding_identity};
 
 /// Returns true when a header must never be forwarded by the live HLS cache proxy.
@@ -62,11 +61,12 @@ pub fn extract_hls_provider_session_header_map(headers: &HeaderMap) -> HeaderMap
 }
 
 /// Extracts provider session cookies for the legacy `ActiveUserManager` session store.
-pub fn extract_hls_provider_session_headers(headers: &HeaderMap) -> HashMap<String, String> {
-    extract_hls_provider_session_header_map(headers)
+pub fn extract_hls_provider_session_headers(headers: &HeaderMap) -> tuliprox_session::ProviderSessionHeaders {
+    let selected = extract_hls_provider_session_header_map(headers)
         .iter()
         .filter_map(|(name, value)| value.to_str().ok().map(|value| (name.as_str().to_string(), value.to_string())))
-        .collect()
+        .collect();
+    tuliprox_session::ProviderSessionHeaders::from_response(headers, selected)
 }
 
 /// Appends trusted provider session headers after client-header scrubbing.
@@ -75,6 +75,36 @@ pub fn append_hls_provider_session_headers(headers: &mut HeaderMap, provider_ses
         headers.insert(header::COOKIE, cookie);
     }
 }
+
+/// Combines provider session cookies from two responses of the same origin, like a cookie jar:
+/// `newer` replaces cookies of the same name and keeps all others from `older`.
+pub fn merge_hls_provider_session_headers(older: &HeaderMap, newer: &HeaderMap) -> HeaderMap {
+    let mut pairs: Vec<&str> = Vec::new();
+    for pair in provider_cookie_pairs(older).chain(provider_cookie_pairs(newer)) {
+        let name = provider_cookie_name(pair);
+        pairs.retain(|existing| provider_cookie_name(existing) != name);
+        pairs.push(pair);
+    }
+    let mut merged = HeaderMap::new();
+    if let Some(cookie_header) =
+        (!pairs.is_empty()).then(|| pairs.join("; ")).and_then(|value| HeaderValue::from_str(&value).ok())
+    {
+        merged.insert(header::COOKIE, cookie_header);
+    }
+    merged
+}
+
+fn provider_cookie_pairs(headers: &HeaderMap) -> impl Iterator<Item = &str> {
+    headers
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .into_iter()
+        .flat_map(|value| value.split(';'))
+        .map(str::trim)
+        .filter(|pair| !pair.is_empty())
+}
+
+fn provider_cookie_name(pair: &str) -> &str { pair.split_once('=').map_or(pair, |(name, _)| name).trim() }
 
 pub fn hls_origin_headers_with_provider_session(
     source_headers: &HeaderMap,
@@ -95,8 +125,8 @@ pub fn force_identity_without_range(headers: &mut HeaderMap) {
 mod tests {
     use super::{
         append_hls_provider_session_headers, extract_hls_provider_session_header_map,
-        extract_hls_provider_session_headers, force_identity_without_range, scrub_hls_origin_headers,
-        should_remove_hls_origin_header,
+        extract_hls_provider_session_headers, force_identity_without_range, merge_hls_provider_session_headers,
+        scrub_hls_origin_headers, should_remove_hls_origin_header,
     };
     use axum::http::{header, HeaderMap, HeaderName, HeaderValue};
     use tuliprox_core::model::ReverseProxyDisabledHeaderConfig;
@@ -191,7 +221,20 @@ mod tests {
         assert_eq!(header_map.get(header::COOKIE).expect("cookie"), "sid=abc; pref=1");
 
         let legacy_headers = extract_hls_provider_session_headers(&headers);
-        assert_eq!(legacy_headers.get("cookie").map(String::as_str), Some("sid=abc; pref=1"));
+        assert_eq!(legacy_headers.headers.get("cookie").map(String::as_str), Some("sid=abc; pref=1"));
+    }
+
+    #[test]
+    fn merge_provider_session_headers_keeps_older_cookies_and_prefers_newer_values() {
+        let mut older = HeaderMap::new();
+        older.insert(header::COOKIE, HeaderValue::from_static("session=a; route=old"));
+        let mut newer = HeaderMap::new();
+        newer.insert(header::COOKIE, HeaderValue::from_static("route=b"));
+
+        let merged = merge_hls_provider_session_headers(&older, &newer);
+        assert_eq!(merged.get(header::COOKIE).expect("cookie"), "session=a; route=b");
+        assert_eq!(merge_hls_provider_session_headers(&older, &HeaderMap::new()), older);
+        assert!(merge_hls_provider_session_headers(&HeaderMap::new(), &HeaderMap::new()).is_empty());
     }
 
     #[test]

@@ -134,6 +134,18 @@ pub(super) fn commit_fetched_manifest_with_acceptance_mode(
     staged_switch: Option<&HlsStagedSwitchCommit>,
 ) -> Result<(HlsManifestCommitProgressEvidence, bool, bool), HlsManifestCommitError> {
     ensure_refresh_origin_work_generation_is_current(session, request)?;
+    if !session
+        .origin_control
+        .qualification
+        .pending_is_current(&crate::short_manifest::HlsOriginQualificationBasis::capture(session))
+        || (matches!(
+            session.origin_control.qualification,
+            crate::short_manifest::HlsOriginQualification::Checking { .. }
+        ) && session.origin_control.qualification.generation()
+            != Some(session.origin_control.acceptance_generation))
+    {
+        return Err(switch_staging_error(HlsManifestRejectLogReason::StagedSwitchInvalidated));
+    }
     let existing_transient_reason = match &session.mode {
         HlsSessionMode::TransientPassthrough { reason } => Some(reason.clone()),
         HlsSessionMode::NormalCacheTimeline => None,
@@ -176,6 +188,10 @@ pub(super) fn commit_fetched_manifest_with_acceptance_mode(
         ),
     };
     if result.is_ok() {
+        if matches!(session.mode, HlsSessionMode::TransientPassthrough { .. }) {
+            session.startup = None;
+            session.origin_control.qualification = crate::short_manifest::HlsOriginQualification::Unchecked;
+        }
         clear_satisfied_fresh_manifest_requirement(session, request);
     }
     let configured_target_duration = session.target_duration;
@@ -251,6 +267,8 @@ fn commit_normal_fetched_manifest(
     )?;
     update_origin_provider_session_headers(session, fetched);
     mark_manifest_acceptance_success(session, fetched, &quality, fetch_finished_at_ms);
+    super::short_manifest::record_origin_qualification(session, manifest.segments.len());
+    queue_and_render_normal_manifest(session, request, fetch_finished_at_ms);
     Ok((HlsManifestCommitProgressEvidence::CacheTimeline(refresh_timing), true, true))
 }
 
@@ -274,6 +292,11 @@ fn commit_transient_fetched_manifest(
     fetch_finished_at_ms: u64,
     options: HlsTransientFetchedCommitOptions,
 ) -> Result<(HlsManifestCommitProgressEvidence, bool, bool), HlsManifestCommitError> {
+    if session.startup.is_some() && session.published_live_origin_baseline.is_some() {
+        return Err(HlsManifestCommitError::TimelineRejected {
+            reason: HlsManifestRejectLogReason::StartupRepresentationChange,
+        });
+    }
     let HlsTransientFetchedCommitOptions { acceptance_mode, reason, manifest_semantics, switch_metric } = options;
     let timeline = parse_transient_manifest_timeline_for_commit(session, &fetched.body)?;
     let quality = evaluate_manifest_acceptance_for_commit(
@@ -423,9 +446,23 @@ fn evaluate_manifest_acceptance_for_commit(
     match evaluate_manifest_acceptance(session, fetched, timeline, &fetch_context, now_ms, mode) {
         HlsManifestAcceptanceDecision::Accept { quality }
         | HlsManifestAcceptanceDecision::AcceptHostSwitch { quality } => Ok(quality),
-        HlsManifestAcceptanceDecision::RetryCurrentTarget { .. } => Err(HlsManifestCommitError::RetryCurrentTarget),
+        HlsManifestAcceptanceDecision::RetryCurrentTarget { .. } => {
+            if matches!(
+                session.origin_control.qualification,
+                crate::short_manifest::HlsOriginQualification::Qualified { .. }
+            ) {
+                session.origin_control.qualification = crate::short_manifest::HlsOriginQualification::Unchecked;
+            }
+            Err(HlsManifestCommitError::RetryCurrentTarget)
+        }
         HlsManifestAcceptanceDecision::Reject { reason, .. } => {
             session.origin_control.path_condition = crate::origin_progress::HlsOriginPathCondition::AcceptanceConflict;
+            if matches!(
+                session.origin_control.qualification,
+                crate::short_manifest::HlsOriginQualification::Qualified { .. }
+            ) {
+                session.origin_control.qualification = crate::short_manifest::HlsOriginQualification::Unchecked;
+            }
             let log_reason = HlsManifestRejectLogReason::from(reason.clone());
             warn!(
                 "HLS origin manifest rejected: session={} proxy_session={} reason={} media_sequence={} segments={}",
@@ -494,6 +531,7 @@ fn mark_manifest_acceptance_success(
     quality: &HlsManifestOriginQuality,
     observed_at_ms: u64,
 ) {
+    session.origin_account_manifest_pending = None;
     let binding = Url::parse(&fetched.resolved_request_url)
         .ok()
         .and_then(|request_url| HlsManifestOriginBinding::new(request_url, fetched.provider_url_index).ok());
@@ -562,6 +600,10 @@ fn prepare_transient_manifest_rewrite(
     let handoff_discontinuity_sequence = session
         .pending_handoff_discontinuity_sequence
         .or_else(|| input.quality.requires_handoff_discontinuity.then_some(0));
+    let rewrite_options = TransientRewriteOptions {
+        handoff_discontinuity_sequence,
+        origin_account_generation: session.transient.origin_account_generation(),
+    };
     let append_context = (handoff_discontinuity_sequence.is_none()
         && matches!(input.manifest_semantics.playlist_type, Some(HlsPlaylistType::Event)))
     .then(|| {
@@ -598,16 +640,17 @@ fn prepare_transient_manifest_rewrite(
             incremental_rewrite = true;
             appended
         } else {
-            TransientManifestRewriter::rewrite(
+            TransientManifestRewriter::rewrite_with_options(
                 input.body,
                 input.final_manifest_url,
                 &session.proxy_session_id,
                 input.reverse_proxy_rewrite_secret,
                 input.rendered_at_ms,
                 input.transient_resource_ttl_ms,
+                rewrite_options,
             )
         }
-    } else if handoff_discontinuity_sequence.is_some() {
+    } else {
         TransientManifestRewriter::rewrite_with_options(
             input.body,
             input.final_manifest_url,
@@ -615,16 +658,7 @@ fn prepare_transient_manifest_rewrite(
             input.reverse_proxy_rewrite_secret,
             input.rendered_at_ms,
             input.transient_resource_ttl_ms,
-            TransientRewriteOptions { handoff_discontinuity_sequence },
-        )
-    } else {
-        TransientManifestRewriter::rewrite(
-            input.body,
-            input.final_manifest_url,
-            &session.proxy_session_id,
-            input.reverse_proxy_rewrite_secret,
-            input.rendered_at_ms,
-            input.transient_resource_ttl_ms,
+            rewrite_options,
         )
     };
     let next_transient_discontinuity_sequence = if handoff_discontinuity_sequence.is_some() {
@@ -717,6 +751,7 @@ fn commit_transient_manifest(
         )?
     };
     session.transient.record_manifest_commit_identity(commit_identity);
+    session.record_origin_manifest_commit();
     session.record_manifest_commit_identity(commit_identity);
     session.transient.record_rolling_event_rewrite_seed(
         body,
@@ -807,6 +842,7 @@ fn commit_normal_manifest(
         &request.reverse_proxy_rewrite_secret,
         rendered_at_ms,
         request.transient_resource_ttl_ms,
+        session.transient.origin_account_generation(),
     );
     let manifest = &manifest;
     let previous_highwater = session.origin_seq_highwater;
@@ -843,7 +879,12 @@ fn commit_normal_manifest(
         session.advance_media_readiness_generation();
     } else {
         let apply_result = if sequence_relation == HlsManifestSequenceRelation::Rebase {
-            session.apply_origin_rebase_manifest(manifest, effective_host_id)
+            let retained_head_in_use = matches!(
+                session.account_binding_protection(rendered_at_ms),
+                crate::HlsAccountBindingProtection::HardActive { .. }
+                    | crate::HlsAccountBindingProtection::SoftActive { .. }
+            );
+            session.apply_origin_rebase_manifest(manifest, effective_host_id, retained_head_in_use)
         } else {
             session.apply_origin_manifest_for_host(manifest, effective_host_id)
         };
@@ -851,13 +892,12 @@ fn commit_normal_manifest(
             reason: HlsManifestRejectLogReason::from(err),
         })?;
     }
+    session.record_origin_manifest_commit();
     session.transient.upsert_resources(key_resources);
     session.initial_prefetch_gap_segments = initial_prefetch_gap_segments;
     if provisioning_handoff {
         limit_publishable_normal_provisioning_handoff_tail(session, &request.strip, manifest.segments.len());
     }
-    queue_and_render_normal_manifest(session, request, rendered_at_ms);
-
     let last_segment_duration_ms = manifest.segments.last().map(|segment| segment.duration_ms);
     let target_duration_ms = manifest.target_duration.map(|duration| u64::from(duration) * 1_000);
     let progress = if staged_switch.is_some() {
@@ -968,11 +1008,12 @@ pub(super) fn materialize_normal_key_resources(
     reverse_proxy_rewrite_secret: &[u8],
     now_ms: u64,
     ttl_ms: u64,
+    origin_account_generation: u64,
 ) -> Vec<TransientResourceRef> {
     let mut resources = Vec::new();
     for encryption in manifest.segments.iter_mut().filter_map(|segment| segment.encryption.as_mut()) {
         let extension = key_resource_extension(&encryption.resolved_origin_uri);
-        let resource = TransientResourceRef::new(
+        let mut resource = TransientResourceRef::new(
             TransientResourceKind::Key,
             encryption.resolved_origin_uri.clone(),
             reverse_proxy_rewrite_secret,
@@ -980,6 +1021,7 @@ pub(super) fn materialize_normal_key_resources(
             ttl_ms,
             Some(extension.clone()),
         );
+        resource.scope_to_origin_account(origin_account_generation, reverse_proxy_rewrite_secret);
         encryption.proxy_resource_id = Some(resource.id.0.clone());
         encryption.proxy_resource_extension = Some(extension);
         resources.push(resource);

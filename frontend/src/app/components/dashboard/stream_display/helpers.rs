@@ -9,10 +9,7 @@ use shared::{
     model::{PlaylistItemType, StreamChannel, StreamInfo, StreamInfoConfigDto, StreamTechnicalInfo},
     utils::{contains_ascii_case_insensitive, current_time_secs, is_catchup_session_token},
 };
-use std::{
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
+use std::{collections::HashMap, rc::Rc};
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{console, Element};
 use yew::UseStateHandle;
@@ -74,6 +71,10 @@ pub fn is_background_transfer_stream(stream: &StreamInfo) -> bool {
     stream.client_ip == BACKGROUND_TRANSFER_CLIENT_IP && stream.provider.as_ref() == BACKGROUND_TRANSFER_PROVIDER
 }
 
+pub fn is_recording_stream(stream: &StreamInfo) -> bool {
+    stream.user_agent == shared::model::RECORDING_STREAM_USER_AGENT
+}
+
 pub fn filter_visible_streams(
     streams: Option<Vec<std::rc::Rc<StreamInfo>>>,
     adaptive_last_seen: &HashMap<u32, u64>,
@@ -84,7 +85,12 @@ pub fn filter_visible_streams(
         streams
             .into_iter()
             .filter(|stream| {
-                if !is_adaptive_session_stream(stream) {
+                if is_background_transfer_stream(stream) {
+                    return false;
+                }
+                // Active rows stay until the backend preserves or removes them. Hiding them by a
+                // list-level clock blanked the whole panel whenever no row content changed.
+                if !stream.preserved || !is_adaptive_session_stream(stream) {
                     return true;
                 }
 
@@ -111,20 +117,13 @@ fn compute_adaptive_last_seen(
     now: u64,
 ) -> HashMap<u32, u64> {
     if let Some(streams) = streams {
-        let adaptive_uids: HashSet<u32> =
-            streams.iter().filter(|stream| is_adaptive_session_stream(stream)).map(|stream| stream.uid).collect();
+        // Only preserved adaptive rows age out. The clock starts when a row is first seen preserved;
+        // a reactivated row drops its entry so the next preservation starts a fresh TTL.
+        let is_preserved_adaptive = |stream: &StreamInfo| stream.preserved && is_adaptive_session_stream(stream);
 
-        next.retain(|uid, _| adaptive_uids.contains(uid));
-
-        for stream in streams {
-            if is_adaptive_session_stream(stream) {
-                // Freeze last_seen for all preserved rows (including shared) so TTL can hide ended sessions.
-                if !stream.preserved || !next.contains_key(&stream.uid) {
-                    next.insert(stream.uid, now);
-                }
-            } else {
-                next.remove(&stream.uid);
-            }
+        next.retain(|uid, _| streams.iter().any(|stream| stream.uid == *uid && is_preserved_adaptive(stream)));
+        for stream in streams.iter().filter(|stream| is_preserved_adaptive(stream)) {
+            next.entry(stream.uid).or_insert(now);
         }
     } else {
         next.clear();
@@ -286,6 +285,22 @@ mod tests {
     }
 
     #[test]
+    fn stream_list_keeps_real_recording_and_hides_download_placeholder() {
+        let mut real = (*test_stream(1, PlaylistItemType::Live, false, false)).clone();
+        real.user_agent = shared::model::RECORDING_STREAM_USER_AGENT.to_string();
+        let mut placeholder = (*test_stream(2, PlaylistItemType::Live, false, false)).clone();
+        placeholder.client_ip = crate::model::BACKGROUND_TRANSFER_CLIENT_IP.to_string();
+        placeholder.provider = crate::model::BACKGROUND_TRANSFER_PROVIDER.intern();
+
+        let visible =
+            super::filter_visible_streams(Some(vec![Rc::new(real), Rc::new(placeholder)]), &HashMap::new(), 0, 60)
+                .expect("stream list");
+
+        assert_eq!(visible.len(), 1);
+        assert!(super::is_recording_stream(&visible[0]));
+    }
+
+    #[test]
     fn compute_adaptive_last_seen_prunes_missing_uids() {
         let existing = HashMap::from([(1, 100), (2, 200), (3, 300)]);
         let streams = Some(vec![
@@ -297,7 +312,7 @@ mod tests {
         let refreshed = compute_adaptive_last_seen(existing, &streams, 999);
 
         assert_eq!(refreshed.get(&2), Some(&200));
-        assert_eq!(refreshed.get(&4), Some(&999));
+        assert!(!refreshed.contains_key(&4), "active rows are not aged by the panel clock");
         assert!(!refreshed.contains_key(&1));
         assert!(!refreshed.contains_key(&3));
         assert!(!refreshed.contains_key(&9));
@@ -325,7 +340,21 @@ mod tests {
 
         // Preserved catchup keeps prior last_seen (sticky between segments).
         assert_eq!(refreshed.get(&5), Some(&100));
-        assert_eq!(refreshed.get(&6), Some(&999));
+        assert!(!refreshed.contains_key(&6));
+    }
+
+    #[test]
+    fn compute_adaptive_last_seen_restarts_ttl_after_reactivation() {
+        let preserved = Some(vec![test_shared_hls_stream(7, true, true)]);
+        let active = Some(vec![test_shared_hls_stream(7, false, true)]);
+
+        let first_preserved = compute_adaptive_last_seen(HashMap::new(), &preserved, 100);
+        let reactivated = compute_adaptive_last_seen(first_preserved.clone(), &active, 200);
+        let preserved_again = compute_adaptive_last_seen(reactivated.clone(), &preserved, 300);
+
+        assert_eq!(first_preserved.get(&7), Some(&100));
+        assert!(!reactivated.contains_key(&7));
+        assert_eq!(preserved_again.get(&7), Some(&300));
     }
 
     #[test]
@@ -366,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn filter_visible_streams_hides_stale_active_catchup_past_adaptive_ttl() {
+    fn filter_visible_streams_keeps_active_adaptive_rows_without_fresh_updates() {
         use super::{filter_visible_streams, ADAPTIVE_STREAM_CLEANUP_BUFFER_SECS};
 
         let streams = Some(vec![
@@ -378,9 +407,8 @@ mod tests {
         let visible =
             filter_visible_streams(streams, &last_seen, 1_000 + ttl + ADAPTIVE_STREAM_CLEANUP_BUFFER_SECS + 1, ttl)
                 .unwrap();
-        // Active rows refresh last_seen in the UI; a frozen last_seen past TTL must hide.
-        assert_eq!(visible.len(), 1);
-        assert_eq!(visible[0].channel.item_type, PlaylistItemType::Video);
+        // Unchanged active rows are still playing; only backend preserve/remove events end them.
+        assert_eq!(visible.len(), 2);
     }
 
     #[test]

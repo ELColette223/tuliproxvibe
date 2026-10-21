@@ -11,7 +11,7 @@ use log::{error, warn};
 use rand::Rng;
 use shared::{
     defaults::{
-        CHANNEL_UNAVAILABLE, HLS_SESSION_OR_LEASE_EXPIRED, LOW_PRIORITY_PREEMPTED, PANEL_API_PROVISIONING,
+        CHANNEL_UNAVAILABLE, HLS_SESSION_OR_LEASE_EXPIRED, LOW_PRIORITY_PREEMPTED, MAINTENANCE, PANEL_API_PROVISIONING,
         PANEL_API_PROVISIONING_HLS_SEGMENT_COUNT, PANEL_API_PROVISIONING_HLS_SEGMENT_PREFIX,
         PROVIDER_CONNECTIONS_EXHAUSTED, USER_ACCOUNT_EXPIRED, USER_CONNECTIONS_EXHAUSTED,
     },
@@ -509,6 +509,7 @@ impl AppConfig {
             let user_account_expired = load_and_set_file(&path.join(USER_ACCOUNT_EXPIRED));
             let panel_api_provisioning = load_and_set_file(&path.join(PANEL_API_PROVISIONING));
             let hls_session_or_lease_expired = load_and_set_file(&path.join(HLS_SESSION_OR_LEASE_EXPIRED));
+            let maintenance = load_and_set_file(&path.join(MAINTENANCE));
             let panel_api_provisioning_hls_segments = (0..PANEL_API_PROVISIONING_HLS_SEGMENT_COUNT)
                 .filter_map(|index| {
                     let filename = format!("{PANEL_API_PROVISIONING_HLS_SEGMENT_PREFIX}{index:03}.ts");
@@ -523,6 +524,7 @@ impl AppConfig {
                 user_account_expired,
                 panel_api_provisioning,
                 hls_session_or_lease_expired,
+                maintenance,
                 panel_api_provisioning_hls_segments,
             })));
         }
@@ -539,6 +541,9 @@ impl AppConfig {
     }
 
     pub fn get_user_server_info(&self, user: &ProxyUserCredentials) -> Option<ApiProxyServerInfo> {
+        if user.is_recording_proxy_user() {
+            return Some(self.config.load().api.local_server_info());
+        }
         let server_info_name = user.server.as_ref().map_or("default", |server_name| server_name.as_str());
         self.get_server_info(server_info_name)
     }
@@ -617,6 +622,7 @@ mod tests {
 
     fn target_with_mapping_id(mapping_id: &str) -> Arc<ConfigTarget> {
         Arc::new(ConfigTarget {
+            curation: None,
             id: 1,
             enabled: true,
             name: "target".to_string(),

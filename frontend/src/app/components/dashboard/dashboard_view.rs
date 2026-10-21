@@ -1,19 +1,22 @@
 use crate::{
     app::{
         components::{
-            Card, DiscordActionCard, DocumentationActionCard, GithubActionCard, IpinfoActionCard, UserActionCard,
-            VersionActionCard,
+            Card, CreditsActionCard, DiscordActionCard, DocumentationActionCard, GithubActionCard, IpinfoActionCard,
+            MaintenanceActionCard, UserActionCard, VersionActionCard,
         },
         context::StatusContext,
     },
+    hooks::use_service_context,
     i18n::use_translation,
 };
+use shared::model::Permission;
 use yew::prelude::*;
 
 #[component]
 pub fn DashboardView() -> Html {
     let translate = use_translation();
     let status_ctx = use_context::<StatusContext>().expect("Status context not found");
+    let can_see_maintenance = use_service_context().auth.has_permission(Permission::MaintenanceRead);
 
     html! {
       <div class="tp__dashboard">
@@ -31,6 +34,8 @@ pub fn DashboardView() -> Html {
               <Card><DiscordActionCard /></Card>
               <Card><GithubActionCard /></Card>
               <Card><IpinfoActionCard /></Card>
+              <Card><CreditsActionCard /></Card>
+              if can_see_maintenance { <Card><MaintenanceActionCard /></Card> }
             </div>
         </div>
       </div>

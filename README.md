@@ -1,5 +1,6 @@
 # **tuliprox** — Self-Hosted Media Gateway & Playlist Processor
 
+![tuliprox logo](https://github.com/user-attachments/assets/8ef9ea79-62ff-4298-978f-22326c5c3d02)
 `tuliprox` is a high-performance, self-hosted media gateway for bringing IPTV providers, media servers, playlists, EPG data,  
 and local media libraries together behind one clean and controllable interface.
 
@@ -8,6 +9,14 @@ media sources, normalizes and enriches their metadata, filters and reorganizes t
 and publishes the result in the formats your clients already understand.
 
 **One service. Multiple sources. Multiple users. Multiple output formats. Full control.**
+
+> **Legal Notice**
+>
+> `tuliprox` does not provide, host, sell, or distribute media content or access credentials.
+> Users are solely responsible for ensuring that they have the necessary rights and authorization to access, process,
+> proxy, record, or redistribute any media sources configured with `tuliprox`.
+>
+> The software is intended for use with legally obtained and properly authorized content and services.
 
 ## ✨ Why Tuliprox?
 
@@ -39,16 +48,6 @@ Tuliprox is built for more than playlist conversion. It is designed to become th
 | **Operations** | Web UI, REST API, scheduler, health/readiness probes, notifications, QoS, stream history, watchdog           |
 | **Storage**    | Embedded B+Tree engine, WAL protection, mmap scans, compression, compaction — no external DB required        |
 | **Deployment** | Docker, Docker Compose templates, Raspberry Pi, NAS, VPS, x86 and ARM                                        |
-
-> **Legal Notice**
->
-> `tuliprox` does not provide, host, sell, or distribute media content or access credentials.
-> Users are solely responsible for ensuring that they have the necessary rights and authorization to access, process,
-> proxy, record, or redistribute any media sources configured with `tuliprox`.
->
-> The software is intended for use with legally obtained and properly authorized content and services.
-
-![tuliprox logo](https://github.com/user-attachments/assets/8ef9ea79-62ff-4298-978f-22326c5c3d02)
 
 ## 🏆 Key Features
 
@@ -127,7 +126,7 @@ Tuliprox can transform provider data into the structure you actually want to use
 - Output filters for the final playlist state
 - Favorites/bouquet management through `add_favourite(group_name)`
 - Target-specific bouquet whitelist/blacklist editing directly from the Web UI
-- Trakt-based auto-curated bouquets such as trending and popular content
+- Target-wide Trakt and TMDB Trending curation, with optional Xtream bouquets over locally available content
 
 **Benefit:** providers supply the raw catalog; Tuliprox decides what your users actually see and how it is organized.
 
@@ -180,6 +179,9 @@ Upstream providers are not always reliable. Tuliprox is designed to preserve usa
 - Independent inputs can update in parallel while optional sequential groups protect providers that must not be refreshed concurrently
 - Automatic Xtream account-expiration refresh with throttling designed to reduce unnecessary provider requests
 - Stalker capability knowledge is reused during a running client session to avoid repeatedly probing known-failing endpoint variants
+- **Maintenance mode** takes an input out of service from the dashboard or the REST API: new streams get a
+  dedicated maintenance video, the last playlist and EPG keep being served, and no subsystem contacts the provider until
+  maintenance ends; running streams and recordings continue
 
 **Benefit:** a broken refresh or failing alias does not have to destroy an otherwise usable catalog.
 
@@ -220,6 +222,8 @@ Tuliprox can improve incomplete provider data and make large catalogs easier to 
 Tuliprox can be configured and monitored directly from the browser.
 
 - **Dashboard** with backend status, active streams, system metrics, and provider capacity
+- **Maintenance card** on the dashboard that turns red while inputs are in maintenance, with a dialog to put inputs
+  into or take them out of maintenance with a remark
 - **Source Editor** for M3U, Xtream, Stalker, Plex, Emby, Jellyfin, local-library, and target configuration
 - Drag & drop, block selection, batch editing, and target bouquet whitelist/blacklist editing
 - **Input-focused Update view** with per-input actions, affected-target selection, status, last update time, and  
@@ -272,7 +276,7 @@ Expose one Tuliprox instance to multiple users without giving everyone identical
 
 #### RBAC
 
-- 14 permissions across 7 domains
+- 20 permissions across 9 domains
 - Independent `.read` and `.write` grants
 - Custom groups and multi-group membership
 - Additive permission resolution
@@ -329,6 +333,8 @@ Notification capabilities include:
 - Preview/test endpoint so templates can be rendered without sending them
 - Events for provider failures, exhausted pools, priority fallback, user connection denial, auth activity, config reload  
   failures, metadata failures, scheduled-task failures, recording lifecycle, disk alerts, and more
+- Playlist change tracking: get told when channels in the groups you care about change, or when whole groups appear
+  or disappear — for example a new event or PPV group — each filtered by your own group patterns
 - Event statistics and a recent-event ring for troubleshooting
 - Disk usage alerts with warning/critical thresholds and configurable repeat intervals
 

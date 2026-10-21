@@ -9,10 +9,9 @@ use shared::{
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 use tuliprox_core::{
-    model::{ConfigInput, EpgSource, EpgSourceType, PersistedEpgSource, PersistedEpgSourceKind},
+    model::{ConfigInput, EpgConfig, EpgSource, EpgSourceType, PersistedEpgSource, PersistedEpgSourceKind},
     utils::{add_prefix_to_filename, prepare_file_path, request},
 };
 use tuliprox_repository::get_input_storage_path;
@@ -193,6 +192,9 @@ pub async fn get_xmltv<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
 ) -> (Option<TVGuide>, Vec<TuliproxError>) {
     match &input.epg {
         None => (None, vec![]),
+        Some(epg_config) if ctx.is_input_in_maintenance(&input.name) => {
+            persisted_epg_for_maintenance(ctx, input, epg_config, storage_dir).await
+        }
         Some(epg_config) => {
             let mut errors = vec![];
             let mut file_paths = vec![];
@@ -213,7 +215,7 @@ pub async fn get_xmltv<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
                 match download_epg_file(epg_source, ctx, &client, input, headers, storage_dir).await {
                     Ok(file_path) => {
                         stored_file_paths.push(file_path.clone());
-                        match persisted_source_from_config(epg_source, file_path, input) {
+                        match persisted_source_from_config(epg_source, file_path) {
                             Ok(persisted) => file_paths.push(persisted),
                             Err(err) => errors.push(err),
                         }
@@ -239,10 +241,38 @@ pub async fn get_xmltv<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
     }
 }
 
+/// The EPG files fetched last, without contacting any source and without cleanup:
+/// deleting "unlisted" files here would throw away exactly what maintenance keeps.
+async fn persisted_epg_for_maintenance<E: EventSink + Clone + 'static, M: MetadataUpdateSink>(
+    ctx: &PlaylistProcessingContext<E, M>,
+    input: &ConfigInput,
+    epg_config: &EpgConfig,
+    storage_dir: &str,
+) -> (Option<TVGuide>, Vec<TuliproxError>) {
+    debug!("Input '{}' is in maintenance; using its persisted epg", input.name);
+    let mut errors = vec![];
+    let mut file_paths = vec![];
+    for epg_source in &epg_config.sources {
+        let Ok(path) = get_input_raw_epg_file_path(epg_source, input, storage_dir).await else {
+            continue;
+        };
+        if tokio::fs::metadata(&path).await.is_ok_and(|metadata| metadata.is_file()) {
+            match persisted_source_from_config(epg_source, path) {
+                Ok(persisted) => file_paths.push(persisted),
+                Err(err) => errors.push(err),
+            }
+        }
+    }
+    if file_paths.is_empty() {
+        (None, errors)
+    } else {
+        (Some(TVGuide::new(file_paths).with_file_locks(std::sync::Arc::clone(&ctx.config.file_locks))), errors)
+    }
+}
+
 fn persisted_source_from_config(
     epg_source: &EpgSource,
     file_path: PathBuf,
-    input: &ConfigInput,
 ) -> Result<PersistedEpgSource, TuliproxError> {
     let kind = match epg_source.source_type {
         EpgSourceType::Xmltv => PersistedEpgSourceKind::Xmltv,
@@ -260,13 +290,7 @@ fn persisted_source_from_config(
         }
     };
 
-    Ok(PersistedEpgSource {
-        file_path,
-        priority: epg_source.priority,
-        logo_override: epg_source.logo_override,
-        kind,
-        input_name: Some(Arc::clone(&input.name)),
-    })
+    Ok(PersistedEpgSource { file_path, priority: epg_source.priority, logo_override: epg_source.logo_override, kind })
 }
 
 #[cfg(test)]

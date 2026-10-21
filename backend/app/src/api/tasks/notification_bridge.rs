@@ -23,10 +23,10 @@ use log::{debug, warn};
 use shared::model::{
     notification::{EventId, Severity},
     AuthAuditEvent, AuthAuditOutcome, ConnectionDenied, EventKind, EventKindMask, EventMessage,
-    LibraryScanSummaryStatus, MetadataUpdateFailure, PlaylistGroupsChanged, ProviderFetchFailure,
-    ProviderPoolExhausted, ProviderPriorityFallback, ScheduledTaskFailure, ServerLifecycleEvent, ServerLifecycleState,
-    StreamProbeFailure, StreamProbeFailureReason, UserLifecycleEvent, UserLifecycleState, WatchDisabled,
-    WatchDisabledReason, WatchUnmatched,
+    LibraryScanSummaryStatus, MetadataUpdateFailure, ProviderFetchFailure, ProviderPoolExhausted,
+    ProviderPriorityFallback, ScheduledTaskFailure, ServerLifecycleEvent, ServerLifecycleState, StreamProbeFailure,
+    StreamProbeFailureReason, UserLifecycleEvent, UserLifecycleState, WatchDisabled, WatchDisabledReason,
+    WatchUnmatched,
 };
 use std::{fmt::Write, sync::Arc};
 use tokio::sync::broadcast::error::RecvError;
@@ -47,7 +47,7 @@ pub fn spawn_notification_bridge(app_state: &Arc<AppState>, cancel_token: &Cance
             match message {
                 Ok(message) => {
                     if let Some(event) = to_notification(&message) {
-                        let client = app_state.http_client.load();
+                        let client = app_state.http_clients.default.load();
                         tuliprox_messaging::send_event(&app_state.app_config, &client, event).await;
                     }
                 }
@@ -77,7 +77,6 @@ const NOTIFIABLE_KINDS: EventKindMask = EventKindMask::new()
     .with(EventKind::DiskAlert)
     .with(EventKind::ConfigReloadFailed)
     .with(EventKind::PlaylistWatchChanged)
-    .with(EventKind::PlaylistGroupsChanged)
     .with(EventKind::PlaylistWatchDisabled)
     .with(EventKind::PlaylistWatchUnmatched)
     .with(EventKind::ProviderAccountStatus)
@@ -100,6 +99,7 @@ const NOTIFIABLE_KINDS: EventKindMask = EventKindMask::new()
     .with(EventKind::ActiveProvider)
     .with(EventKind::RecordingChanged)
     .with(EventKind::RecordingRulesChanged)
+    .with(EventKind::MaintenanceChanged)
     .with(EventKind::UserCreated)
     .with(EventKind::UserUpdated)
     .with(EventKind::UserDeleted)
@@ -209,18 +209,26 @@ pub fn to_notification(message: &EventMessage) -> Option<NotificationEvent> {
             let title = "Recording rules changed".to_string();
             Some(NotificationEvent::new(id, title.clone(), title))
         }
+        EventMessage::MaintenanceChanged(entries) => {
+            let title = if entries.is_empty() {
+                "No input in maintenance".to_string()
+            } else {
+                let names: Vec<&str> = entries.keys().map(String::as_str).collect();
+                format!("Inputs in maintenance: {}", names.join(", "))
+            };
+            Some(NotificationEvent::new(id, title.clone(), title))
+        }
 
-        // The three that already have a `MessageContent` shape reuse it:
-        // `from_content` is what built their title, body and template fields
-        // before, and rebuilding that here by hand would be a second copy
-        // free to drift from the templates that render it.
+        // Events that already have a `MessageContent` shape reuse its
+        // builders: `from_content` is what built their title, body and
+        // template fields before, and rebuilding that here by hand would be a
+        // second copy free to drift from the templates that render it. Watch
+        // changes use the same builders through a borrowing entry point, so
+        // the title lists are not cloned per notification.
         EventMessage::DiskAlert(alert) => {
             Some(NotificationEvent::from_content(&MessageContent::DiskAlert(alert.clone())))
         }
-        EventMessage::PlaylistWatchChanged(changes) => {
-            Some(NotificationEvent::from_content(&MessageContent::Watch(changes.clone())))
-        }
-        EventMessage::PlaylistGroupsChanged(changes) => Some(groups_changed_notification(id, changes)),
+        EventMessage::PlaylistWatchChanged(changes) => Some(NotificationEvent::from_watch_changes(changes)),
         EventMessage::PlaylistWatchDisabled(disabled) => {
             Some(watch_disabled_notification(id, disabled, message.severity()))
         }
@@ -279,8 +287,7 @@ pub fn to_notification(message: &EventMessage) -> Option<NotificationEvent> {
         // which is the single place that decision is made.
         EventMessage::PlaylistUpdateProgress(_)
         | EventMessage::SystemInfoUpdate(_)
-        | EventMessage::DownloadsUpdate(_)
-        | EventMessage::DownloadsDeltaUpdate(_) => None,
+        | EventMessage::RecordingProgress => None,
     }
 }
 
@@ -311,34 +318,6 @@ fn metadata_failure_notification(
         format!("Metadata update for {} could not finish: {} task(s) exhausted", failure.input, failure.failed_tasks);
     let body = failure.last_error.as_ref().map_or_else(|| title.clone(), |err| format!("{title}\n\n{err}"));
     NotificationEvent::new(id, title, body).with_severity(severity).with_fields(failure)
-}
-
-fn groups_changed_notification(id: EventId, changes: &PlaylistGroupsChanged) -> NotificationEvent {
-    let title =
-        format!("{} group(s) added, {} removed in {}", changes.added_total, changes.removed_total, changes.target);
-    let mut body = title.clone();
-    push_sampled_list(&mut body, "Added", &changes.added, changes.added_total);
-    push_sampled_list(&mut body, "Removed", &changes.removed, changes.removed_total);
-    NotificationEvent::new(id, title, body).with_fields(changes)
-}
-
-/// Render one direction of a sampled change set.
-///
-/// The lists carry titles only and may be shorter than the total - or empty -
-/// so the omission is spelled out rather than smuggled into the list.
-fn push_sampled_list(body: &mut String, label: &str, names: &[String], total: usize) {
-    if total == 0 {
-        return;
-    }
-    let _ = write!(body, "\n\n{label} ({total}):");
-    for name in names {
-        body.push('\n');
-        body.push_str(name);
-    }
-    let omitted = total.saturating_sub(names.len());
-    if omitted > 0 {
-        let _ = write!(body, "\n... {omitted} more not listed");
-    }
 }
 
 fn watch_disabled_notification(id: EventId, disabled: &WatchDisabled, severity: Severity) -> NotificationEvent {
@@ -501,13 +480,12 @@ mod tests {
     use shared::model::{
         notification::{registry, Severity},
         ActiveUserConnectionChange, AuthAuditEvent, AuthAuditOutcome, ConfigReloadFailure, ConfigType,
-        ConnectionDenied, DiskAlert, DiskAlertLevel, DownloadsResponse, EventKind, LibraryScanProgressEvent,
-        LibraryScanSummary, LibraryScanSummaryStatus, MetadataUpdateFailure, MsgKind, NotificationDeadLetter,
-        PlaylistGroupsChanged, PlaylistUpdateProgressEvent, PlaylistUpdateState, PlaylistUpdateSummary,
-        ProviderAccountEvent, ProviderAccountState, ProviderFailureKind, ProviderFetchFailure, ProviderPoolExhausted,
-        ProviderPriorityFallback, RecordingLifecycleMessage, ScheduledTaskFailure, ServerLifecycleEvent,
-        StreamProbeFailure, StreamProbeFailureReason, SystemInfo, UserLifecycleEvent, UserLifecycleState, WatchChanges,
-        WatchDisabled, WatchDisabledReason, WatchUnmatched,
+        ConnectionDenied, DiskAlert, DiskAlertLevel, EventKind, LibraryScanProgressEvent, LibraryScanSummary,
+        LibraryScanSummaryStatus, MetadataUpdateFailure, MsgKind, NotificationDeadLetter, PlaylistUpdateProgressEvent,
+        PlaylistUpdateState, PlaylistUpdateSummary, ProviderAccountEvent, ProviderAccountState, ProviderFailureKind,
+        ProviderFetchFailure, ProviderPoolExhausted, ProviderPriorityFallback, RecordingLifecycleMessage,
+        ScheduledTaskFailure, ServerLifecycleEvent, StreamProbeFailure, StreamProbeFailureReason, SystemInfo,
+        UserLifecycleEvent, UserLifecycleState, WatchChanges, WatchDisabled, WatchDisabledReason, WatchUnmatched,
     };
     use std::sync::Arc;
 
@@ -556,7 +534,6 @@ mod tests {
     /// and it has to stay one list for that assert to mean anything.
     #[allow(clippy::too_many_lines)]
     fn sample_of_every_kind() -> Vec<(EventMessage, EventKind)> {
-        let empty_downloads = DownloadsResponse { queue: Vec::new(), finished: Vec::new(), active: Vec::new() };
         let samples = vec![
             EventMessage::ServerError("x".to_string()),
             EventMessage::ServerLifecycle(ServerLifecycleEvent::started("1".into(), "h:1".into())),
@@ -591,10 +568,10 @@ mod tests {
                     result: None,
                 },
             }),
-            EventMessage::DownloadsUpdate(Arc::new(empty_downloads)),
-            EventMessage::DownloadsDeltaUpdate(shared::model::TransfersDelta::ActiveCleared),
             EventMessage::RecordingChanged,
+            EventMessage::RecordingProgress,
             EventMessage::RecordingRulesChanged,
+            EventMessage::MaintenanceChanged(std::sync::Arc::default()),
             EventMessage::InputMetadataUpdatesStarted("a".into()),
             EventMessage::InputMetadataUpdatesFailed(MetadataUpdateFailure::new("a".into(), 1, false, None)),
             EventMessage::InputMetadataUpdatesCompleted("a".into()),
@@ -609,13 +586,7 @@ mod tests {
                 paths: "config.yml".to_string(),
                 error: "boom".to_string(),
             }),
-            EventMessage::PlaylistWatchChanged(WatchChanges::new(
-                "t".to_string(),
-                "g".to_string(),
-                Vec::new(),
-                Vec::new(),
-            )),
-            EventMessage::PlaylistGroupsChanged(PlaylistGroupsChanged::new("t".to_string(), Vec::new(), Vec::new())),
+            EventMessage::PlaylistWatchChanged(WatchChanges::new("t".to_string(), Vec::new())),
             EventMessage::PlaylistWatchDisabled(WatchDisabled::new(
                 "t".to_string(),
                 WatchDisabledReason::InvalidPatterns,
@@ -673,11 +644,11 @@ mod tests {
 
     #[test]
     fn high_frequency_variants_are_not_notifiable() {
-        // Progress ticks and download deltas fire many times per operation;
-        // their terminal counterparts are what reaches a channel. Guarded by
-        // the exhaustive match in `to_notification`, so a new variant is a
-        // compile error rather than a silent firehose.
-        assert!(to_notification(&EventMessage::DownloadsDeltaUpdate(shared::model::TransfersDelta::ActiveCleared))
+        // Progress ticks fire many times per operation; their terminal
+        // counterparts are what reaches a channel. Guarded by the exhaustive
+        // match in `to_notification`, so a new variant is a compile error
+        // rather than a silent firehose.
+        assert!(to_notification(&EventMessage::PlaylistUpdateProgress(PlaylistUpdateProgressEvent::global("", "")))
             .is_none());
     }
 
@@ -745,6 +716,7 @@ mod tests {
             EventMessage::ActiveProvider("provider-a".into(), 3),
             EventMessage::RecordingChanged,
             EventMessage::RecordingRulesChanged,
+            EventMessage::MaintenanceChanged(std::sync::Arc::default()),
         ];
         for message in messages {
             let event = to_notification(&message).expect("mapped");
@@ -766,6 +738,7 @@ mod tests {
             EventMessage::ActiveProvider("a".into(), 1),
             EventMessage::RecordingChanged,
             EventMessage::RecordingRulesChanged,
+            EventMessage::MaintenanceChanged(std::sync::Arc::default()),
         ];
         for message in messages {
             let event = to_notification(&message).expect("mapped");
