@@ -185,3 +185,95 @@ fn auto_epg_uses_account_one_and_the_primary_lateral() {
     let url = input.generate_auto_epg_url().expect("epg url");
     assert_eq!(url, "http://lateral.net/xmltv.php?username=epg_user&password=epg_pw");
 }
+
+/// End-to-end migration of a configuration shaped like a real deployment.
+///
+/// The values reproduce the pattern measured in a production file: one subscription repeated
+/// once per provider domain, copies disagreeing on `enabled`, `exp_date` and `priority`, and an
+/// account that only ever used a subset of the domains.
+#[test]
+fn migrates_a_realistic_multi_domain_pool() {
+    let yaml = r#"
+name: Servidor 1
+type: xtream
+url: http://149.102.224.105:80
+username: "892958"
+password: secret
+max_connections: 3
+aliases:
+- name: "892958-1"
+  url: http://18feitisaria86.org
+  username: "892958"
+  password: secret
+  max_connections: 10
+- name: "564381"
+  url: http://149.102.224.105:80
+  username: "564381"
+  password: pw-a
+  max_connections: 10
+  enabled: false
+  exp_date: 1790045999
+- name: "564381-1"
+  url: http://famad7d.click:80
+  username: "564381"
+  password: pw-a
+  max_connections: 10
+  priority: 1
+  exp_date: 1792810799
+- name: "564381-2"
+  url: http://cavalo.cc:80
+  username: "564381"
+  password: pw-a
+  max_connections: 10
+- name: "003915"
+  url: http://149.102.224.105:80
+  username: "035679"
+  password: pw-b
+  max_connections: 10
+"#;
+    let mut input: ConfigInputDto = serde_saphyr::from_str(yaml).expect("parse");
+    prepare_dto(&mut input).expect("prepare");
+
+    let accounts = input.accounts.as_ref().expect("accounts");
+    let usernames: Vec<&str> = accounts.iter().map(|account| account.username.as_ref()).collect();
+    assert_eq!(usernames, ["892958", "564381", "035679"], "one account per subscription");
+
+    // The root and the alias that repeats it are one account reaching two domains.
+    let root = &accounts[0];
+    assert_eq!(root.password.as_deref(), Some("secret"));
+    assert_eq!(root.max_connections, 10, "the largest declared quota survives");
+    let root_laterals = input.account_laterals(root).expect("root laterals");
+    assert_eq!(root_laterals.len(), 2, "both domains the root used: {:?}", root_laterals);
+
+    // The three copies of `564381` fold into one usable account.
+    let account = &accounts[1];
+    assert!(account.enabled, "enabled is any-true across the copies");
+    assert_eq!(account.exp_date, Some(1792810799), "the renewal is the newest date");
+    assert_eq!(account.priority, 1, "the declared non-default priority survives");
+    assert_eq!(input.account_laterals(account).expect("laterals").len(), 3);
+
+    // A legacy `name` that disagreed with the username keeps the username.
+    assert_eq!(accounts[2].username.as_ref(), "035679");
+    assert_eq!(accounts[2].password.as_deref(), Some("pw-b"));
+
+    // The input carries every domain it ever used, deduplicated.
+    let input_laterals = input.url_aliases.as_ref().expect("input laterals");
+    assert_eq!(input_laterals.len(), 4, "{input_laterals:?}");
+    assert!(input.aliases.is_none(), "the legacy list is consumed");
+}
+
+/// The same subscription in two inputs stays independent, which the legacy global namespace
+/// forbade and the measured configuration relied on.
+#[test]
+fn the_same_subscription_in_two_inputs_is_not_a_conflict() {
+    let yaml = |name: &str| {
+        format!(
+            "name: {name}\ntype: xtream\nurl: http://a.net\nusername: \"892958\"\npassword: secret\nurl_aliases:\n- http://a.net\naccounts:\n- username: \"892958\"\n  password: secret\n"
+        )
+    };
+    for name in ["Servidor 1", "JellyFin"] {
+        let mut input: ConfigInputDto = serde_saphyr::from_str(&yaml(name)).expect("parse");
+        prepare_dto(&mut input).expect("the same username in another input is valid");
+        assert_eq!(input.accounts.as_ref().expect("accounts")[0].username.as_ref(), "892958");
+    }
+}

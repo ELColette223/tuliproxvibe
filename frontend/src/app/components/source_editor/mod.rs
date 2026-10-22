@@ -1,5 +1,4 @@
 mod account_item_form;
-mod alias_item_form;
 mod block_view;
 mod editor_form;
 mod editor_model;
@@ -23,7 +22,6 @@ mod url_alias_form;
 mod watch_entries_editor;
 
 pub(crate) use account_item_form::*;
-pub(crate) use alias_item_form::*;
 pub(crate) use block_view::*;
 pub(crate) use editor_form::*;
 pub(crate) use editor_model::*;

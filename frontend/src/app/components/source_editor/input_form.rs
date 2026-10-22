@@ -21,9 +21,8 @@ use self::{
 use crate::{
     app::{
         components::{
-            config::HasFormData, AccountItemForm, AliasItemForm, BlockId, BlockInstance, Card, EditMode,
-            EpgSmartMatchForm, EpgSourceItemForm, IconButton, Panel, ProviderItemForm, SourceEditorContext, TextButton,
-            UrlAliasList,
+            config::HasFormData, AccountItemForm, BlockId, BlockInstance, Card, EditMode, EpgSmartMatchForm,
+            EpgSourceItemForm, IconButton, Panel, ProviderItemForm, SourceEditorContext, TextButton, UrlAliasList,
         },
         ConfigContext,
     },
@@ -34,7 +33,7 @@ use shared::{
     concat_string,
     error::TuliproxError,
     model::{
-        ConfigInputAccountDto, ConfigInputAliasDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto,
+        ConfigInputAccountDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto,
         ConfigInputUpdateQualityDto, ConfigProviderDto, ConnectionLimitPolicy, EpgSmartMatchConfigDto, EpgSourceDto,
         FlussonicHlsCatchup, InputFetchMethod, InputType, MediaServerInputConfigDto, MediaServerLibrarySelector,
         OnConnectErrorPolicy, ProviderUrlSelectionPolicy, ProxyConfigDto, StagedInputType, StalkerDeviceProfileDto,
