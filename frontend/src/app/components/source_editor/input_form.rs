@@ -115,7 +115,6 @@ const LABEL_CACHE_DURATION: &str = "LABEL.CACHE_DURATION";
 const LABEL_MAIN: &str = "LABEL.MAIN_CONFIG";
 const LABEL_OPTIONS: &str = "LABEL.OPTIONS";
 const LABEL_EPG: &str = "LABEL.EPG";
-const LABEL_ALIAS: &str = "LABEL.ALIAS";
 const LABEL_TYPE: &str = "LABEL.TYPE";
 const LABEL_CLUSTER: &str = "LABEL.CLUSTER";
 const LABEL_MEDIA_SERVER: &str = "LABEL.MEDIA_SERVER";
@@ -1468,8 +1467,12 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
             })}
             {html_if!(!library_input && !staged_input && !media_server_input, {
             <>
-            <IconButton class={format!("tp__app-sidebar-menu--{}{}", InputFormPage::Accounts, if *view_visible == InputFormPage::Accounts { " active" } else {""})}  icon="Accounts" hint={translate.t(LABEL_ACCOUNTS)} name={InputFormPage::Accounts.to_string()} onclick={&handle_menu_click}></IconButton>
-            <IconButton class={format!("tp__app-sidebar-menu--{}{}", InputFormPage::UrlAliases, if *view_visible == InputFormPage::UrlAliases { " active" } else {""})}  icon="UrlAliases" hint={translate.t(LABEL_URL_ALIASES)} name={InputFormPage::UrlAliases.to_string()} onclick={&handle_menu_click}></IconButton>
+            <IconButton class={format!("tp__app-sidebar-menu--{}{}", InputFormPage::Accounts, if *view_visible == InputFormPage::Accounts { " active" } else {""})}
+                icon="User" hint={translate.t(LABEL_ACCOUNTS)} aria_label={Some(translate.t(LABEL_ACCOUNTS))}
+                name={InputFormPage::Accounts.to_string()} onclick={&handle_menu_click}></IconButton>
+            <IconButton class={format!("tp__app-sidebar-menu--{}{}", InputFormPage::UrlAliases, if *view_visible == InputFormPage::UrlAliases { " active" } else {""})}
+                icon="LinkRounded" hint={translate.t(LABEL_URL_ALIASES)} aria_label={Some(translate.t(LABEL_URL_ALIASES))}
+                name={InputFormPage::UrlAliases.to_string()} onclick={&handle_menu_click}></IconButton>
             </>
             })}
             { html_if!(options_input, {
