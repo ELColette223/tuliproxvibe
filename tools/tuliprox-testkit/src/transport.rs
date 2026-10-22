@@ -63,13 +63,9 @@ impl SharedControllerState {
     }
 
     #[must_use]
-    pub fn next_command_sequence(&self) -> u64 {
-        self.next_controller_sequence.fetch_add(1, Ordering::Relaxed)
-    }
+    pub fn next_command_sequence(&self) -> u64 { self.next_controller_sequence.fetch_add(1, Ordering::Relaxed) }
 
-    fn next_connection_token(&self) -> u64 {
-        self.next_connection_token.fetch_add(1, Ordering::Relaxed)
-    }
+    fn next_connection_token(&self) -> u64 { self.next_connection_token.fetch_add(1, Ordering::Relaxed) }
 
     async fn register_agent(&self, agent_id: AgentId, token: u64, sender: mpsc::Sender<Envelope<Command>>) {
         let mut agents = self.agents.lock().await;
@@ -108,9 +104,7 @@ impl SharedControllerState {
     }
 
     #[must_use]
-    pub fn run_id(&self) -> RunId {
-        self.run_id.clone()
-    }
+    pub fn run_id(&self) -> RunId { self.run_id.clone() }
 
     pub async fn dispatch(&self, agent_id: &AgentId, command: Envelope<Command>) -> Result<(), TestkitError> {
         command.validate()?;
@@ -127,9 +121,7 @@ impl SharedControllerState {
         sender.send(command).await.map_err(|_| TestkitError::Protocol("agent control channel closed".to_owned()))
     }
 
-    pub async fn connected_agents(&self) -> Vec<AgentId> {
-        self.agents.lock().await.keys().cloned().collect()
-    }
+    pub async fn connected_agents(&self) -> Vec<AgentId> { self.agents.lock().await.keys().cloned().collect() }
 
     pub async fn ready_agents(&self) -> Vec<AgentId> {
         const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -145,9 +137,7 @@ impl SharedControllerState {
             .collect()
     }
 
-    pub async fn take_events(&self) -> Vec<Envelope<AgentMessage>> {
-        std::mem::take(&mut *self.events.lock().await)
-    }
+    pub async fn take_events(&self) -> Vec<Envelope<AgentMessage>> { std::mem::take(&mut *self.events.lock().await) }
 
     /// Removes only an event belonging to the requested playback. Events for
     /// concurrent starts remain queued for their own waiter.

@@ -54,9 +54,7 @@ impl TransientPassthroughState {
         }
     }
 
-    pub fn set_resource_ttl_ms(&mut self, resource_ttl_ms: u64) {
-        self.resource_ttl_ms = resource_ttl_ms;
-    }
+    pub fn set_resource_ttl_ms(&mut self, resource_ttl_ms: u64) { self.resource_ttl_ms = resource_ttl_ms; }
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn replace_manifest_with_semantics(

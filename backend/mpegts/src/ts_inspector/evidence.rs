@@ -139,9 +139,7 @@ impl HlsTsCompatibleSpliceEvidence {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn for_test(topology: HlsTsTrackSignature) -> Self {
-        Self { topology, pid_boundaries: Arc::from([]) }
-    }
+    pub fn for_test(topology: HlsTsTrackSignature) -> Self { Self { topology, pid_boundaries: Arc::from([]) } }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

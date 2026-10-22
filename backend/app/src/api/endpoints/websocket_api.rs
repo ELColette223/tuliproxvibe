@@ -52,15 +52,11 @@ impl std::error::Error for WebSocketApiError {
 }
 
 impl From<axum::Error> for WebSocketApiError {
-    fn from(value: axum::Error) -> Self {
-        Self::Transport(value)
-    }
+    fn from(value: axum::Error) -> Self { Self::Transport(value) }
 }
 
 impl From<io::Error> for WebSocketApiError {
-    fn from(value: io::Error) -> Self {
-        Self::Protocol(value)
-    }
+    fn from(value: io::Error) -> Self { Self::Protocol(value) }
 }
 
 // WebSocket upgrade handler
@@ -143,9 +139,7 @@ fn websocket_can_receive_runtime_events(mem: &ProtocolHandlerMemory, event: &Eve
 /// not serialize them - the notification bridge, say - pay a refcount bump
 /// instead of a deep copy. Only here, at the wire boundary, is the value
 /// itself needed.
-fn unwrap_or_clone<T: Clone>(value: Arc<T>) -> T {
-    Arc::try_unwrap(value).unwrap_or_else(|shared| (*shared).clone())
-}
+fn unwrap_or_clone<T: Clone>(value: Arc<T>) -> T { Arc::try_unwrap(value).unwrap_or_else(|shared| (*shared).clone()) }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum MainEventReceiveErrorAction {
@@ -456,9 +450,7 @@ impl RecordingProgressThrottle {
 
     /// A state change also resets the clock: the client has just been given
     /// current bytes, so the next progress tick can wait its full second.
-    fn note_full_snapshot(&mut self, now: std::time::Instant) {
-        self.last_sent = Some(now);
-    }
+    fn note_full_snapshot(&mut self, now: std::time::Instant) { self.last_sent = Some(now); }
 }
 
 /// The wire frame an event becomes, with the label used if sending it fails.

@@ -22,9 +22,7 @@ const SENSITIVE_HEADER_NAMES: &[&str] =
     &["authorization", "x-emby-token", "x-mediabrowser-token", "x-plex-token", "cookie", "set-cookie"];
 
 /// `Some("***")` for a present secret, `None` otherwise: lets `Debug` impls show whether a secret is set.
-pub(crate) fn redacted_secret(secret: Option<&str>) -> Option<&'static str> {
-    secret.map(|_| REDACTED_VALUE)
-}
+pub(crate) fn redacted_secret(secret: Option<&str>) -> Option<&'static str> { secret.map(|_| REDACTED_VALUE) }
 
 pub fn is_sensitive_media_server_header(name: &HeaderName) -> bool {
     let value = name.as_str().to_ascii_lowercase();

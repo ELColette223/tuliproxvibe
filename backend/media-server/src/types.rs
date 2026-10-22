@@ -72,9 +72,7 @@ pub struct MediaServerPageRequest {
 }
 
 impl MediaServerPageRequest {
-    pub const fn new(start: usize, limit: usize) -> Self {
-        Self { start, limit }
-    }
+    pub const fn new(start: usize, limit: usize) -> Self { Self { start, limit } }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,13 +103,9 @@ impl<T> MediaServerPage<T> {
         Self { request, total, upstream_item_count, items }
     }
 
-    pub fn item_count(&self) -> usize {
-        self.items.len()
-    }
+    pub fn item_count(&self) -> usize { self.items.len() }
 
-    pub fn upstream_item_count(&self) -> usize {
-        self.upstream_item_count
-    }
+    pub fn upstream_item_count(&self) -> usize { self.upstream_item_count }
 
     pub fn next_request(&self) -> Option<MediaServerPageRequest> {
         let next_start = self.request.start.saturating_add(self.upstream_item_count());
@@ -122,9 +116,7 @@ impl<T> MediaServerPage<T> {
         }
     }
 
-    pub fn cursor_advanced(&self) -> bool {
-        self.upstream_item_count() > 0
-    }
+    pub fn cursor_advanced(&self) -> bool { self.upstream_item_count() > 0 }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,9 +147,7 @@ pub struct MediaServerDescriptiveFacts {
 impl MediaServerDescriptiveFacts {
     /// `true` when no field carries a value.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self == &Self::default()
-    }
+    pub fn is_empty(&self) -> bool { self == &Self::default() }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -170,9 +160,7 @@ pub struct MediaServerVideoTechnicalFacts {
 impl MediaServerVideoTechnicalFacts {
     /// `true` when no field carries a value.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self == &Self::default()
-    }
+    pub fn is_empty(&self) -> bool { self == &Self::default() }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -184,9 +172,7 @@ pub struct MediaServerAudioTechnicalFacts {
 impl MediaServerAudioTechnicalFacts {
     /// `true` when no field carries a value.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self == &Self::default()
-    }
+    pub fn is_empty(&self) -> bool { self == &Self::default() }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -202,9 +188,7 @@ pub struct MediaServerTechnicalFacts {
 impl MediaServerTechnicalFacts {
     /// `true` when no field carries a value.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self == &Self::default()
-    }
+    pub fn is_empty(&self) -> bool { self == &Self::default() }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

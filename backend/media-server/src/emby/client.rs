@@ -443,9 +443,7 @@ impl<F: EmbyFamilyFlavor> EmbyFamilyCatalogClient<F> {
 
 #[allow(async_fn_in_trait)]
 impl<F: EmbyFamilyFlavor> MediaServerCatalogClient for EmbyFamilyCatalogClient<F> {
-    async fn discover(&self) -> Result<MediaServerStatus, MediaServerError> {
-        Ok(self.connection().await?.status)
-    }
+    async fn discover(&self) -> Result<MediaServerStatus, MediaServerError> { Ok(self.connection().await?.status) }
 
     async fn list_libraries(&self) -> Result<Vec<MediaServerLibrary>, MediaServerError> {
         let connection = self.connection().await?;
@@ -696,21 +694,13 @@ mod tests {
             self
         }
 
-        fn set_valid_token(&self, token: &str) {
-            *self.valid_token.lock().expect("lock") = token.to_string();
-        }
+        fn set_valid_token(&self, token: &str) { *self.valid_token.lock().expect("lock") = token.to_string(); }
 
-        fn log(&self) -> Vec<String> {
-            self.log.lock().expect("lock").clone()
-        }
+        fn log(&self) -> Vec<String> { self.log.lock().expect("lock").clone() }
 
-        fn logins(&self) -> usize {
-            self.login_count.load(Ordering::SeqCst)
-        }
+        fn logins(&self) -> usize { self.login_count.load(Ordering::SeqCst) }
 
-        fn is_jellyfin(&self) -> bool {
-            self.provider == "jellyfin"
-        }
+        fn is_jellyfin(&self) -> bool { self.provider == "jellyfin" }
 
         /// `(identity header present, token)` as the client sent them.
         fn credentials(&self, parts: &Parts) -> (bool, Option<String>) {
@@ -855,9 +845,7 @@ mod tests {
         MediaServerHttpClient::new(reqwest::Client::builder().no_proxy().build().expect("client builds"))
     }
 
-    fn movies_only() -> Vec<MediaServerLibrarySelector> {
-        vec![MediaServerLibrarySelector::Name("Movies".to_string())]
-    }
+    fn movies_only() -> Vec<MediaServerLibrarySelector> { vec![MediaServerLibrarySelector::Name("Movies".to_string())] }
 
     fn token_settings(token: &str) -> EmbyClientSettings {
         EmbyClientSettings { token: Some(token.to_string()), libraries: movies_only(), ..EmbyClientSettings::default() }
@@ -904,9 +892,7 @@ mod tests {
         url::form_urlencoded::parse(query.as_bytes()).find(|(key, _)| key == name).map(|(_, value)| value.into_owned())
     }
 
-    fn item_requests(log: &[String]) -> Vec<&String> {
-        log.iter().filter(|entry| entry.contains("/Items?")).collect()
-    }
+    fn item_requests(log: &[String]) -> Vec<&String> { log.iter().filter(|entry| entry.contains("/Items?")).collect() }
 
     async fn token_import_succeeds<F: EmbyFamilyFlavor>(input_name: &str) {
         let state = Arc::new(MockServer::new(F::PROVIDER, "secret"));
@@ -929,9 +915,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn emby_import_uses_x_emby_token() {
-        token_import_succeeds::<Emby>("emby-x-emby-token").await;
-    }
+    async fn emby_import_uses_x_emby_token() { token_import_succeeds::<Emby>("emby-x-emby-token").await; }
 
     async fn prefix_is_preserved<F: EmbyFamilyFlavor>(input_name: &str, suffix: &str) {
         let state = Arc::new(MockServer::new(F::PROVIDER, "secret").with_prefix("/media/pre"));

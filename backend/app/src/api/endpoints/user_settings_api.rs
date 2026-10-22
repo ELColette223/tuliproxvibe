@@ -27,9 +27,7 @@ fn error_response(error: SettingsError, headers: &HeaderMap) -> Response {
     (status, json_or_bin_response(accept(headers), &serde_json::json!({"error": error.to_string()}))).into_response()
 }
 
-fn accept(headers: &HeaderMap) -> Option<&str> {
-    headers.get(header::ACCEPT).and_then(|v| v.to_str().ok())
-}
+fn accept(headers: &HeaderMap) -> Option<&str> { headers.get(header::ACCEPT).and_then(|v| v.to_str().ok()) }
 
 fn layout_response(layout: &TableLayoutPreferencesDto, etag: &str, headers: &HeaderMap) -> Response {
     let mut response = json_or_bin_response(accept(headers), layout).into_response();

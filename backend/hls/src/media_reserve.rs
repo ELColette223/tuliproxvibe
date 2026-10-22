@@ -72,17 +72,11 @@ impl HlsManifestCommitIdentity {
 
     /// Compatibility constructor for focused fixtures whose render marker is already monotonic.
     #[cfg(any(test, feature = "test-support"))]
-    pub const fn new(rendered_at_ms: u64) -> Self {
-        Self { commit_generation: rendered_at_ms, rendered_at_ms }
-    }
+    pub const fn new(rendered_at_ms: u64) -> Self { Self { commit_generation: rendered_at_ms, rendered_at_ms } }
 
-    pub const fn commit_generation(self) -> u64 {
-        self.commit_generation
-    }
+    pub const fn commit_generation(self) -> u64 { self.commit_generation }
 
-    pub const fn rendered_at_ms(self) -> u64 {
-        self.rendered_at_ms
-    }
+    pub const fn rendered_at_ms(self) -> u64 { self.rendered_at_ms }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

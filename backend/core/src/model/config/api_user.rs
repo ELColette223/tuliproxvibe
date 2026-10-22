@@ -30,9 +30,7 @@ pub struct NetworkAccess {
 }
 
 impl NetworkAccess {
-    pub fn is_empty(&self) -> bool {
-        self.allowed_countries.is_empty() && self.allowed_networks.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.allowed_countries.is_empty() && self.allowed_networks.is_empty() }
 }
 
 impl From<&NetworkAccessDto> for NetworkAccess {
@@ -207,9 +205,7 @@ impl From<&ProxyUserCredentials> for ProxyUserCredentialsDto {
 pub const RECORDING_PROXY_USERNAME: &str = "recording_user";
 
 impl ProxyUserCredentials {
-    pub fn is_recording_proxy_user(&self) -> bool {
-        self.t_is_api_user && self.username == RECORDING_PROXY_USERNAME
-    }
+    pub fn is_recording_proxy_user(&self) -> bool { self.t_is_api_user && self.username == RECORDING_PROXY_USERNAME }
 
     /// Fill unset capability values from the referenced plan and compile the
     /// combined content filter. Idempotent; call after any load/conversion.
@@ -294,9 +290,7 @@ impl ProxyUserCredentials {
     }
 
     #[inline]
-    pub fn permission_denied(&self, app_config: &AppConfig) -> bool {
-        !self.has_permissions(app_config)
-    }
+    pub fn permission_denied(&self, app_config: &AppConfig) -> bool { !self.has_permissions(app_config) }
 
     pub fn permission_denied_reason(&self, app_config: &AppConfig) -> Option<ProxyUserPermissionDenyReason> {
         // A plan reference that cannot be resolved must never fall back to
@@ -345,9 +339,7 @@ impl ProxyUserCredentials {
         None
     }
 
-    pub fn allows_cluster(&self, cluster: XtreamCluster) -> bool {
-        self.output_clusters.has_cluster(cluster.into())
-    }
+    pub fn allows_cluster(&self, cluster: XtreamCluster) -> bool { self.output_clusters.has_cluster(cluster.into()) }
 
     pub fn allows_item_type(&self, item_type: shared::model::PlaylistItemType) -> bool {
         self.output_clusters.has_cluster(item_type)

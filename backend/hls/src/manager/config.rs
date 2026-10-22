@@ -152,29 +152,17 @@ impl HlsProxyManager {
         manager
     }
 
-    pub fn segment_fetch_policy(&self) -> SegmentFetchPolicy {
-        self.runtime_config.load().segment_fetch_policy.clone()
-    }
+    pub fn segment_fetch_policy(&self) -> SegmentFetchPolicy { self.runtime_config.load().segment_fetch_policy.clone() }
 
-    pub fn is_enabled(&self) -> bool {
-        self.runtime_config.load().enabled
-    }
+    pub fn is_enabled(&self) -> bool { self.runtime_config.load().enabled }
 
-    pub fn cache_duration_seconds(&self) -> u64 {
-        self.runtime_config.load().cache_duration_seconds
-    }
+    pub fn cache_duration_seconds(&self) -> u64 { self.runtime_config.load().cache_duration_seconds }
 
-    pub fn session_idle_timeout_ms(&self) -> u64 {
-        self.runtime_config.load().gc_policy.session_idle_timeout_ms
-    }
+    pub fn session_idle_timeout_ms(&self) -> u64 { self.runtime_config.load().gc_policy.session_idle_timeout_ms }
 
-    pub fn strip(&self) -> StripConfig {
-        self.runtime_config.load().strip.clone()
-    }
+    pub fn strip(&self) -> StripConfig { self.runtime_config.load().strip.clone() }
 
-    pub fn origin_manifest_timeout_ms(&self) -> u64 {
-        self.runtime_config.load().origin_manifest_timeout_ms
-    }
+    pub fn origin_manifest_timeout_ms(&self) -> u64 { self.runtime_config.load().origin_manifest_timeout_ms }
 
     pub fn initial_manifest_wait_timeout_secs(&self) -> u64 {
         self.runtime_config.load().initial_manifest_wait_timeout_secs
@@ -184,17 +172,11 @@ impl HlsProxyManager {
         self.runtime_config.load().manifest_recovery_burst.clone()
     }
 
-    pub fn transient_resource_ttl_ms(&self) -> u64 {
-        self.runtime_config.load().transient_resource_ttl_ms
-    }
+    pub fn transient_resource_ttl_ms(&self) -> u64 { self.runtime_config.load().transient_resource_ttl_ms }
 
-    pub fn gc_policy(&self) -> GarbageCollectionPolicy {
-        self.runtime_config.load().gc_policy.clone()
-    }
+    pub fn gc_policy(&self) -> GarbageCollectionPolicy { self.runtime_config.load().gc_policy.clone() }
 
-    pub fn rewrite_secret_fingerprint(&self) -> String {
-        self.runtime_config.load().rewrite_secret_fingerprint.clone()
-    }
+    pub fn rewrite_secret_fingerprint(&self) -> String { self.runtime_config.load().rewrite_secret_fingerprint.clone() }
 
     pub async fn update_config(&self, app_config: &AppConfig) {
         let (hls_config, rewrite_secret, enabled) = {

@@ -122,19 +122,13 @@ impl TransportStreamBuffer {
         }
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.buffer
-    }
+    pub fn as_bytes(&self) -> &[u8] { &self.buffer }
 
     /// Cheap clone of the underlying buffer as `Bytes` (refcount bump).
     /// Use this from response builders to avoid `Bytes::copy_from_slice(&[u8])`.
-    pub fn clone_bytes(&self) -> Bytes {
-        self.buffer.clone()
-    }
+    pub fn clone_bytes(&self) -> Bytes { self.buffer.clone() }
 
-    pub fn duration_ms(&self) -> Option<u64> {
-        self.duration_ticks_90khz().and_then(ticks_90khz_to_rounded_millis)
-    }
+    pub fn duration_ms(&self) -> Option<u64> { self.duration_ticks_90khz().and_then(ticks_90khz_to_rounded_millis) }
 
     pub fn duration_ticks_90khz(&self) -> Option<u64> {
         self.finite_hls_presentation_duration.as_ref().map(|duration| duration.duration_ticks_90khz)
@@ -148,13 +142,9 @@ impl TransportStreamBuffer {
         self.finite_hls_track_signature.clone()
     }
 
-    pub const fn has_finite_hls_track_signature(&self) -> bool {
-        self.finite_hls_track_signature.is_some()
-    }
+    pub const fn has_finite_hls_track_signature(&self) -> bool { self.finite_hls_track_signature.is_some() }
 
-    pub const fn finite_hls_asset_fingerprint(&self) -> [u8; 32] {
-        self.finite_hls_asset_fingerprint
-    }
+    pub const fn finite_hls_asset_fingerprint(&self) -> [u8; 32] { self.finite_hls_asset_fingerprint }
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn finite_hls_render_count(&self) -> usize {

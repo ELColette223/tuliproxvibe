@@ -16,9 +16,7 @@ impl PlaybackLifecycle {
     /// Returns true for lifecycle states that own a counted admission lease.
     /// Both `Active` and `GraceActive` count — `GraceActive` is a provisional
     /// counted state for `GraceMode::Instant` sessions.
-    pub fn is_counted(&self) -> bool {
-        matches!(self, Self::Active | Self::GraceActive)
-    }
+    pub fn is_counted(&self) -> bool { matches!(self, Self::Active | Self::GraceActive) }
 }
 
 impl UserSession {
@@ -45,9 +43,7 @@ impl ConnectionAdmission {
         }
     }
 
-    pub fn permission(&self) -> UserConnectionPermission {
-        self.permission
-    }
+    pub fn permission(&self) -> UserConnectionPermission { self.permission }
 }
 
 impl UserConnectionData {

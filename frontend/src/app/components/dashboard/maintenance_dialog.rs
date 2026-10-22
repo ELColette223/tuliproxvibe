@@ -31,9 +31,7 @@ fn local_time(since: i64) -> String {
 }
 
 #[allow(clippy::cast_possible_truncation)]
-fn now_secs() -> i64 {
-    (js_sys::Date::now() / 1000.0) as i64
-}
+fn now_secs() -> i64 { (js_sys::Date::now() / 1000.0) as i64 }
 
 /// Sends the pending changes one by one and reads the resulting state back.
 async fn apply_changes(

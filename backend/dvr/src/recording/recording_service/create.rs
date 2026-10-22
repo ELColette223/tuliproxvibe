@@ -39,9 +39,7 @@ pub struct IdempotencyRequest {
 
 impl RecordingService {
     /// Construct from the queue and app config.
-    pub fn new(recordings: Arc<RecordingQueue>, app_config: Arc<AppConfig>) -> Self {
-        Self { recordings, app_config }
-    }
+    pub fn new(recordings: Arc<RecordingQueue>, app_config: Arc<AppConfig>) -> Self { Self { recordings, app_config } }
 
     /// Convenience constructor from the DVR's context.
     pub fn from_ctx<E: EventSink + Clone + 'static>(ctx: &RecordingCtx<E>) -> Self {

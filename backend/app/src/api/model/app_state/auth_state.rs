@@ -24,7 +24,5 @@ impl AuthState {
 
     /// An empty, unpersisted revocation list.
     #[cfg(test)]
-    pub(crate) fn for_tests() -> Self {
-        Self::new(TokenRevocations::empty(std::path::PathBuf::new()))
-    }
+    pub(crate) fn for_tests() -> Self { Self::new(TokenRevocations::empty(std::path::PathBuf::new())) }
 }

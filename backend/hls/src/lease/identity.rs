@@ -13,13 +13,9 @@ impl fmt::Debug for HlsAccessLeaseId {
 }
 
 impl HlsMediaLeaseIdentity {
-    pub const fn is_live(self) -> bool {
-        matches!(self.playback, HlsMediaLeasePlaybackIdentity::Live { .. })
-    }
+    pub const fn is_live(self) -> bool { matches!(self.playback, HlsMediaLeasePlaybackIdentity::Live { .. }) }
 
-    pub const fn lease_issued_at_ms(self) -> u64 {
-        self.issued_at_ms
-    }
+    pub const fn lease_issued_at_ms(self) -> u64 { self.issued_at_ms }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -29,9 +25,7 @@ pub(super) enum HlsMediaLeasePlaybackIdentity {
 }
 
 impl HlsLeaseManifestPublicationGuard {
-    pub(crate) const fn lease_issued_at_ms(self) -> u64 {
-        self.issued_at_ms
-    }
+    pub(crate) const fn lease_issued_at_ms(self) -> u64 { self.issued_at_ms }
     pub(crate) const fn media_identity(self) -> HlsMediaLeaseIdentity {
         HlsMediaLeaseIdentity {
             issued_at_ms: self.issued_at_ms,

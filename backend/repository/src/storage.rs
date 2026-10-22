@@ -63,9 +63,7 @@ pub fn get_target_storage_path(cfg: &Config, target_name: &str) -> Option<PathBu
     utils::get_file_path(&cfg.storage_dir, Some(std::path::PathBuf::from(target_name.replace(' ', "_"))))
 }
 
-pub fn sanitize_name(name: &str) -> String {
-    name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect()
-}
+pub fn sanitize_name(name: &str) -> String { name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect() }
 
 pub fn build_input_storage_path(input_name: &str, storage_dir: &str) -> PathBuf {
     let sanitized_name: String = sanitize_name(input_name);
@@ -131,9 +129,7 @@ impl XtreamRefreshGenerationGuard {
         Ok(Self { file: Some(file), path })
     }
 
-    fn from_locked_file(path: PathBuf, file: File) -> Self {
-        Self { file: Some(file), path }
-    }
+    fn from_locked_file(path: PathBuf, file: File) -> Self { Self { file: Some(file), path } }
 }
 
 impl Drop for XtreamRefreshGenerationGuard {
@@ -305,9 +301,7 @@ fn cleanup_orphaned_staging_artifacts_with_hook(
 }
 
 #[cfg(test)]
-fn is_orphan_staging_name(leaf: &str) -> bool {
-    refresh_generation_from_staging_name(leaf).is_some()
-}
+fn is_orphan_staging_name(leaf: &str) -> bool { refresh_generation_from_staging_name(leaf).is_some() }
 
 fn refresh_generation_from_staging_name(leaf: &str) -> Option<Uuid> {
     let (stem, generation_and_suffix) = leaf.split_once(".refresh-")?;
@@ -345,9 +339,7 @@ fn refresh_generation_from_guard_name(leaf: &str) -> Option<Uuid> {
     Uuid::parse_str(generation).ok()
 }
 
-pub fn get_geoip_path(storage_dir: &str) -> PathBuf {
-    Path::new(storage_dir).join("geoip.db")
-}
+pub fn get_geoip_path(storage_dir: &str) -> PathBuf { Path::new(storage_dir).join("geoip.db") }
 
 // The sorted-index sidecar name is part of the B+Tree on-disk layout, so the
 // engine owns it. Re-exported here because every repository already reaches for
@@ -439,9 +431,7 @@ mod tests {
     }
 
     impl ReapChildOnDrop {
-        fn new(child: Child) -> Self {
-            Self { child: Some(child) }
-        }
+        fn new(child: Child) -> Self { Self { child: Some(child) } }
 
         fn wait_for_exit(mut self, timeout: Duration) -> io::Result<ExitStatus> {
             let deadline = Instant::now() + timeout;

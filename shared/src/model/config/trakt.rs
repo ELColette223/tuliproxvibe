@@ -160,9 +160,7 @@ impl Default for TraktSourceConfigDto {
 }
 
 impl TraktSourceConfigDto {
-    pub fn has_selectors(&self) -> bool {
-        !self.lists.is_empty() || !self.charts.is_empty()
-    }
+    pub fn has_selectors(&self) -> bool { !self.lists.is_empty() || !self.charts.is_empty() }
 
     pub(super) fn prepare(&mut self, curation_enabled: bool) -> Result<(), TuliproxError> {
         self.api.prepare();
@@ -225,9 +223,7 @@ fn prepare_trakt_selectors(
 }
 
 impl TraktConfigDto {
-    pub fn has_selectors(&self) -> bool {
-        !self.lists.is_empty() || !self.charts.is_empty()
-    }
+    pub fn has_selectors(&self) -> bool { !self.lists.is_empty() || !self.charts.is_empty() }
 
     /// Returns whether this is the compatible all-default, source-less no-op.
     ///

@@ -13,9 +13,7 @@ use crate::{
 use tuliprox_core::{model::HlsSegmentRepairConfig, utils::current_time_millis};
 use tuliprox_session::StreamMeterHandle;
 
-fn test_log_identity() -> HlsLogIdentity {
-    HlsLogIdentity::for_test("content-session", "proxy-session")
-}
+fn test_log_identity() -> HlsLogIdentity { HlsLogIdentity::for_test("content-session", "proxy-session") }
 
 use arc_swap::ArcSwapOption;
 use axum::http::{header, HeaderValue, StatusCode};
@@ -32,9 +30,7 @@ use std::{
 };
 use tokio::{sync::Semaphore, time::advance};
 
-fn header(value: &str) -> HeaderValue {
-    HeaderValue::from_str(value).expect("valid header")
-}
+fn header(value: &str) -> HeaderValue { HeaderValue::from_str(value).expect("valid header") }
 
 fn test_segment_repair_manager() -> Arc<HlsSegmentRepairManager> {
     Arc::new(HlsSegmentRepairManager::new(HlsSegmentRepairConfig {

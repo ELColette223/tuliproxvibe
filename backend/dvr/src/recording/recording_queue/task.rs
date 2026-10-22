@@ -147,14 +147,10 @@ impl RecordingTask {
     }
 
     /// Padded start of a scheduled Live window.
-    pub fn scheduled_start(&self) -> Option<i64> {
-        self.recording.scheduled_start
-    }
+    pub fn scheduled_start(&self) -> Option<i64> { self.recording.scheduled_start }
 
     /// Padded end of a scheduled Live window.
-    pub fn scheduled_end(&self) -> Option<i64> {
-        self.recording.scheduled_end
-    }
+    pub fn scheduled_end(&self) -> Option<i64> { self.recording.scheduled_end }
 
     /// Length of the padded Live window, when both bounds are known.
     pub fn scheduled_duration_secs(&self) -> Option<u64> {
@@ -162,9 +158,7 @@ impl RecordingTask {
         u64::try_from(end.saturating_sub(start)).ok()
     }
 
-    pub fn owner_id(&self) -> &UserId {
-        self.recording.owner_id()
-    }
+    pub fn owner_id(&self) -> &UserId { self.recording.owner_id() }
 
     /// Public projection for one viewer. Returns `None` when the viewer is
     /// neither the owner nor entitled to see a shared task; the owner id is

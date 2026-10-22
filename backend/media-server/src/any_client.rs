@@ -27,9 +27,7 @@ macro_rules! dispatch {
 }
 
 impl MediaServerCatalogClient for AnyMediaServerCatalogClient {
-    async fn discover(&self) -> Result<MediaServerStatus, MediaServerError> {
-        dispatch!(self, discover())
-    }
+    async fn discover(&self) -> Result<MediaServerStatus, MediaServerError> { dispatch!(self, discover()) }
 
     async fn list_libraries(&self) -> Result<Vec<MediaServerLibrary>, MediaServerError> {
         dispatch!(self, list_libraries())
@@ -91,9 +89,7 @@ mod tests {
     const INPUT: &str = "any-client-input";
     const CLOSED_PORT_URL: &str = "http://127.0.0.1:1";
 
-    fn http() -> MediaServerHttpClient {
-        MediaServerHttpClient::new(reqwest::Client::new())
-    }
+    fn http() -> MediaServerHttpClient { MediaServerHttpClient::new(reqwest::Client::new()) }
 
     fn emby_settings() -> EmbyClientSettings {
         EmbyClientSettings { token: Some("secret".to_string()), ..EmbyClientSettings::default() }

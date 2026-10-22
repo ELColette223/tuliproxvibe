@@ -144,17 +144,11 @@ pub fn plex_video_to_episode(
 }
 
 impl MediaServerLibraryCandidate for PlexSectionDto {
-    fn library_key(&self) -> Option<&str> {
-        self.key.as_deref()
-    }
+    fn library_key(&self) -> Option<&str> { self.key.as_deref() }
 
-    fn library_title(&self) -> Option<&str> {
-        self.title.as_deref()
-    }
+    fn library_title(&self) -> Option<&str> { self.title.as_deref() }
 
-    fn library_kind(&self) -> MediaServerLibraryKind {
-        plex_library_kind(self.section_type.as_deref())
-    }
+    fn library_kind(&self) -> MediaServerLibraryKind { plex_library_kind(self.section_type.as_deref()) }
 }
 
 fn plex_library_kind(section_type: Option<&str>) -> MediaServerLibraryKind {
@@ -351,15 +345,9 @@ mod tests {
         test_fixtures::{PLEX_EPISODES_XML, PLEX_MOVIES_XML, PLEX_SEASONS_XML, PLEX_SHOWS_XML},
     };
 
-    fn input_name() -> Arc<str> {
-        Arc::<str>::from("media_server")
-    }
-    fn server_id() -> Arc<str> {
-        Arc::<str>::from("machine-redacted")
-    }
-    fn library_id() -> Arc<str> {
-        Arc::<str>::from("library-redacted")
-    }
+    fn input_name() -> Arc<str> { Arc::<str>::from("media_server") }
+    fn server_id() -> Arc<str> { Arc::<str>::from("machine-redacted") }
+    fn library_id() -> Arc<str> { Arc::<str>::from("library-redacted") }
 
     #[test]
     fn maps_plex_movie_catalog_row_to_media_server_movie_without_leaking_part_file() {

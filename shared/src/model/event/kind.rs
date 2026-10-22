@@ -121,9 +121,7 @@ impl EventKind {
     /// it is where a mask migration would have to happen *after* operators
     /// had written subscriptions into config. Widening now is free.
     #[must_use]
-    pub const fn bit(self) -> u64 {
-        1 << (self as u32)
-    }
+    pub const fn bit(self) -> u64 { 1 << (self as u32) }
 
     /// The permission a websocket session must hold to receive this kind.
     ///
@@ -213,9 +211,7 @@ impl EventKind {
     /// This is what a cold websocket connect should be handed instead of
     /// waiting up to three seconds for the next sample.
     #[must_use]
-    pub const fn is_latched(self) -> bool {
-        matches!(self, Self::SystemInfoUpdate | Self::ActiveProvider)
-    }
+    pub const fn is_latched(self) -> bool { matches!(self, Self::SystemInfoUpdate | Self::ActiveProvider) }
 
     /// Is this kind a payload-free nudge that can be coalesced?
     ///
@@ -229,9 +225,7 @@ impl EventKind {
     /// Never true for an event carrying a payload, however repetitive - a
     /// dropped progress tick loses the message it carried.
     #[must_use]
-    pub const fn is_coalescable(self) -> bool {
-        matches!(self, Self::RecordingChanged | Self::RecordingRulesChanged)
-    }
+    pub const fn is_coalescable(self) -> bool { matches!(self, Self::RecordingChanged | Self::RecordingRulesChanged) }
 
     /// Stable wire name.
     ///
@@ -309,35 +303,25 @@ impl EventKindMask {
 
     /// An empty mask to build on.
     #[must_use]
-    pub const fn new() -> Self {
-        Self::NONE
-    }
+    pub const fn new() -> Self { Self::NONE }
 
     /// This mask plus `kind`.
     #[must_use]
-    pub const fn with(self, kind: EventKind) -> Self {
-        Self(self.0 | kind.bit())
-    }
+    pub const fn with(self, kind: EventKind) -> Self { Self(self.0 | kind.bit()) }
 
     /// Is `kind` in this mask?
     #[must_use]
-    pub const fn contains(self, kind: EventKind) -> bool {
-        self.0 & kind.bit() != 0
-    }
+    pub const fn contains(self, kind: EventKind) -> bool { self.0 & kind.bit() != 0 }
 
     /// Is this mask empty? A subscriber with nothing selected should not be
     /// spawned at all.
     #[must_use]
-    pub const fn is_empty(self) -> bool {
-        self.0 == 0
-    }
+    pub const fn is_empty(self) -> bool { self.0 == 0 }
 
     /// The union of two masks - how a plugin host builds one mask covering
     /// every loaded plugin's subscriptions.
     #[must_use]
-    pub const fn union(self, other: Self) -> Self {
-        Self(self.0 | other.0)
-    }
+    pub const fn union(self, other: Self) -> Self { Self(self.0 | other.0) }
 }
 
 impl EventKindMask {
@@ -365,13 +349,9 @@ impl EventKindMask {
 
     /// The kinds in this mask.
     #[must_use]
-    pub fn kinds(self) -> Vec<EventKind> {
-        EventKind::ALL.into_iter().filter(|kind| self.contains(*kind)).collect()
-    }
+    pub fn kinds(self) -> Vec<EventKind> { EventKind::ALL.into_iter().filter(|kind| self.contains(*kind)).collect() }
 }
 
 impl FromIterator<EventKind> for EventKindMask {
-    fn from_iter<I: IntoIterator<Item = EventKind>>(iter: I) -> Self {
-        iter.into_iter().fold(Self::NONE, Self::with)
-    }
+    fn from_iter<I: IntoIterator<Item = EventKind>>(iter: I) -> Self { iter.into_iter().fold(Self::NONE, Self::with) }
 }

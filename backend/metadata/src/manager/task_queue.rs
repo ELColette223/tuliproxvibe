@@ -58,9 +58,7 @@ pub(super) struct ScopedTaskKey {
 }
 
 impl ScopedTaskKey {
-    pub(super) fn new(input_name: Arc<str>, task_key: TaskKey) -> Self {
-        Self { input_name, task_key }
-    }
+    pub(super) fn new(input_name: Arc<str>, task_key: TaskKey) -> Self { Self { input_name, task_key } }
 }
 
 pub(super) struct PendingTask {
@@ -604,9 +602,7 @@ impl InputWorker {
     }
 
     #[inline]
-    pub(super) fn is_vod_task_key(key: &TaskKey) -> bool {
-        matches!(key, TaskKey::Vod(_) | TaskKey::VodStr(_))
-    }
+    pub(super) fn is_vod_task_key(key: &TaskKey) -> bool { matches!(key, TaskKey::Vod(_) | TaskKey::VodStr(_)) }
 
     #[inline]
     pub(super) fn is_series_task_key(key: &TaskKey) -> bool {

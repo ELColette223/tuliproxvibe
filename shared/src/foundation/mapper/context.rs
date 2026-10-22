@@ -29,13 +29,9 @@ impl<'a> MapperContext<'a> {
         }
     }
 
-    pub(super) fn has_var(&self, name: &str) -> bool {
-        self.variables.contains_key(name)
-    }
+    pub(super) fn has_var(&self, name: &str) -> bool { self.variables.contains_key(name) }
 
-    pub(super) fn get_var(&self, name: &str) -> &EvalResult {
-        self.variables.get(name).unwrap_or(&Undefined)
-    }
+    pub(super) fn get_var(&self, name: &str) -> &EvalResult { self.variables.get(name).unwrap_or(&Undefined) }
 
     pub(super) fn eval_expr_by_id(&mut self, id: usize, accessor: &mut ValueAccessor) -> EvalResult {
         let Some(expr) = self.expressions.get(id) else { return Undefined };

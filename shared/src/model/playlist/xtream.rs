@@ -44,9 +44,7 @@ pub enum ResourceOutputPolicy {
 
 impl XtreamMappingOptions {
     #[inline]
-    pub fn is_reverse(&self, item_type: PlaylistItemType) -> bool {
-        self.reverse_item_types.is_set(item_type)
-    }
+    pub fn is_reverse(&self, item_type: PlaylistItemType) -> bool { self.reverse_item_types.is_set(item_type) }
 
     pub(super) fn is_trusted_web_ui_resource_path(resource_url: &str) -> bool {
         const TRUSTED_WEB_UI_RESOURCE_PREFIXES: [&str; 1] = ["/api/v1/library/thumbnail/"];
@@ -331,9 +329,7 @@ impl XtreamPlaylistItem {
 
 impl PlaylistEntry for XtreamPlaylistItem {
     #[inline]
-    fn get_virtual_id(&self) -> VirtualId {
-        self.virtual_id
-    }
+    fn get_virtual_id(&self) -> VirtualId { self.virtual_id }
     fn get_input_stream_id(&self) -> Option<Arc<str>> {
         if self.input_stream_id.is_empty() {
             (self.provider_id > 0).then(|| self.provider_id.to_string().intern())
@@ -342,34 +338,22 @@ impl PlaylistEntry for XtreamPlaylistItem {
         }
     }
 
-    fn get_upstream_user_agent(&self) -> Option<&str> {
-        self.upstream_user_agent.as_deref()
-    }
+    fn get_upstream_user_agent(&self) -> Option<&str> { self.upstream_user_agent.as_deref() }
     #[inline]
-    fn get_provider_id(&self) -> Option<u32> {
-        Some(self.provider_id)
-    }
+    fn get_provider_id(&self) -> Option<u32> { Some(self.provider_id) }
     #[inline]
-    fn get_category_id(&self) -> Option<u32> {
-        Some(self.category_id)
-    }
+    fn get_category_id(&self) -> Option<u32> { Some(self.category_id) }
     #[inline]
-    fn get_provider_url(&self) -> Arc<str> {
-        Arc::clone(&self.url)
-    }
+    fn get_provider_url(&self) -> Arc<str> { Arc::clone(&self.url) }
 
     #[inline]
     fn get_uuid(&self) -> UUIDType {
         generate_runtime_playlist_uuid(&self.input_name, &self.provider_id.to_string(), self.item_type, &self.url)
     }
     #[inline]
-    fn get_item_type(&self) -> PlaylistItemType {
-        self.item_type
-    }
+    fn get_item_type(&self) -> PlaylistItemType { self.item_type }
     #[inline]
-    fn get_group(&self) -> Arc<str> {
-        Arc::clone(&self.group)
-    }
+    fn get_group(&self) -> Arc<str> { Arc::clone(&self.group) }
     #[inline]
     fn get_name(&self) -> Arc<str> {
         if self.title.is_empty() {
@@ -395,17 +379,11 @@ impl PlaylistEntry for XtreamPlaylistItem {
     }
 
     #[inline]
-    fn get_additional_properties(&self) -> Option<&StreamProperties> {
-        self.additional_properties.as_ref()
-    }
+    fn get_additional_properties(&self) -> Option<&StreamProperties> { self.additional_properties.as_ref() }
     #[inline]
-    fn get_additional_properties_mut(&mut self) -> Option<&mut StreamProperties> {
-        self.additional_properties.as_mut()
-    }
+    fn get_additional_properties_mut(&mut self) -> Option<&mut StreamProperties> { self.additional_properties.as_mut() }
 }
 
 impl From<XtreamPlaylistItem> for CommonPlaylistItem {
-    fn from(item: XtreamPlaylistItem) -> Self {
-        item.to_common()
-    }
+    fn from(item: XtreamPlaylistItem) -> Self { item.to_common() }
 }

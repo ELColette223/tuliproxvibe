@@ -135,27 +135,17 @@ impl MediaServerLibraryCandidate for EmbyVirtualFolderDto {
         [self.item_id.as_deref(), self.id.as_deref()].into_iter().flatten().find(|value| !value.trim().is_empty())
     }
 
-    fn library_title(&self) -> Option<&str> {
-        self.name.as_deref()
-    }
+    fn library_title(&self) -> Option<&str> { self.name.as_deref() }
 
-    fn library_kind(&self) -> MediaServerLibraryKind {
-        emby_library_kind(self.collection_type.as_deref())
-    }
+    fn library_kind(&self) -> MediaServerLibraryKind { emby_library_kind(self.collection_type.as_deref()) }
 }
 
 impl MediaServerLibraryCandidate for EmbyViewDto {
-    fn library_key(&self) -> Option<&str> {
-        Some(self.id.as_str())
-    }
+    fn library_key(&self) -> Option<&str> { Some(self.id.as_str()) }
 
-    fn library_title(&self) -> Option<&str> {
-        self.name.as_deref()
-    }
+    fn library_title(&self) -> Option<&str> { self.name.as_deref() }
 
-    fn library_kind(&self) -> MediaServerLibraryKind {
-        emby_library_kind(self.collection_type.as_deref())
-    }
+    fn library_kind(&self) -> MediaServerLibraryKind { emby_library_kind(self.collection_type.as_deref()) }
 }
 
 pub(crate) fn emby_library_kind(collection_type: Option<&str>) -> MediaServerLibraryKind {
@@ -368,15 +358,9 @@ mod tests {
     };
     use shared::model::{MediaServerLibraryKind, MediaServerLibrarySelector};
 
-    fn input_name() -> Arc<str> {
-        Arc::<str>::from("media_server")
-    }
-    fn server_id() -> Arc<str> {
-        Arc::<str>::from("server-redacted-id")
-    }
-    fn library_id() -> Arc<str> {
-        Arc::<str>::from("library-redacted")
-    }
+    fn input_name() -> Arc<str> { Arc::<str>::from("media_server") }
+    fn server_id() -> Arc<str> { Arc::<str>::from("server-redacted-id") }
+    fn library_id() -> Arc<str> { Arc::<str>::from("library-redacted") }
 
     fn items(json: &str) -> Vec<EmbyItemDto> {
         serde_json::from_str::<EmbyItemsPageDto<EmbyItemDto>>(json).expect("fixture parses").items
@@ -396,9 +380,7 @@ mod tests {
         })
     }
 
-    fn strs(values: &[Arc<str>]) -> Vec<&str> {
-        values.iter().map(AsRef::as_ref).collect()
-    }
+    fn strs(values: &[Arc<str>]) -> Vec<&str> { values.iter().map(AsRef::as_ref).collect() }
 
     fn check_movie_mapping<F: EmbyFamilyFlavor>() {
         let movie =

@@ -47,9 +47,7 @@ impl HlsResourceKind {
         }
     }
 
-    pub const fn is_manifest(self) -> bool {
-        matches!(self, Self::Manifest(_))
-    }
+    pub const fn is_manifest(self) -> bool { matches!(self, Self::Manifest(_)) }
 }
 
 /// Decoded content of a sealed HLS resource token.
@@ -65,9 +63,7 @@ pub struct HlsResourceToken {
 
 impl HlsResourceToken {
     /// Manifest vs. media decision for the token route; falls back to the URL heuristic.
-    pub fn is_manifest(&self) -> bool {
-        self.kind.map_or_else(|| is_hls_url(&self.url), HlsResourceKind::is_manifest)
-    }
+    pub fn is_manifest(&self) -> bool { self.kind.map_or_else(|| is_hls_url(&self.url), HlsResourceKind::is_manifest) }
 }
 
 /// Seals an HLS resource token and appends the path extension for the emitted URI.
@@ -150,9 +146,7 @@ pub enum HlsPlaylistKind {
 }
 
 /// Strips a leading UTF-8 BOM; classification and rewriting must see the same input.
-pub fn normalize_hls_playlist(content: &str) -> &str {
-    content.strip_prefix('\u{FEFF}').unwrap_or(content)
-}
+pub fn normalize_hls_playlist(content: &str) -> &str { content.strip_prefix('\u{FEFF}').unwrap_or(content) }
 
 /// Classifies playlist content line by line. Tags are matched with `starts_with` on trimmed
 /// lines only, so tag names inside titles never change the kind.

@@ -17,9 +17,7 @@ use std::{
 use tuliprox_core::model::{Config, SharedSubscriberId, StreamError};
 
 impl PendingSharedMeterRegistration {
-    pub fn commit(mut self) {
-        self.armed = false;
-    }
+    pub fn commit(mut self) { self.armed = false; }
 }
 
 impl Drop for PendingSharedMeterRegistration {
@@ -66,9 +64,7 @@ impl PendingSharedSubscriberCleanup {
 
     /// Produces the cleanup-ownership proof for this subscriber. The permit held by
     /// this guard is the source of the capability.
-    pub fn capability(&self) -> SharedCleanupCapability {
-        SharedCleanupCapability::new(self.subscriber_id)
-    }
+    pub fn capability(&self) -> SharedCleanupCapability { SharedCleanupCapability::new(self.subscriber_id) }
 
     pub(super) fn take_cleanup(
         &mut self,
@@ -80,9 +76,7 @@ impl PendingSharedSubscriberCleanup {
         (self.permit.take(), self.request_id.take(), self.owner.take())
     }
 
-    pub fn disarm(&mut self) {
-        self.permit = None;
-    }
+    pub fn disarm(&mut self) { self.permit = None; }
 }
 
 impl Drop for PendingSharedSubscriberCleanup {
@@ -200,7 +194,5 @@ pub(super) fn resolve_min_burst_buffer_bytes(config: &Config) -> usize {
 }
 
 impl<S> Drop for ReceiverStreamWrapper<S> {
-    fn drop(&mut self) {
-        self.release();
-    }
+    fn drop(&mut self) { self.release(); }
 }

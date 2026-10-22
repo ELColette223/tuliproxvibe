@@ -28,9 +28,7 @@ pub fn root_font_px() -> f64 {
 }
 
 /// Resolves a CSS length (`px` or `rem`) against the current root font size.
-pub fn resolve_css_length_px(value: &str) -> Option<f64> {
-    parse_css_length_px(value, root_font_px())
-}
+pub fn resolve_css_length_px(value: &str) -> Option<f64> { parse_css_length_px(value, root_font_px()) }
 
 /// Value of a CSS custom property on the document root, resolved to px.
 pub fn read_css_var_px(var_name: &str, fallback: f64) -> f64 {

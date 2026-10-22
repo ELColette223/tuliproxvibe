@@ -51,9 +51,7 @@ impl MsgKind {
         }
     }
 
-    pub fn template_filename(&self, prefix: &str) -> String {
-        concat_string!(prefix, "_", self.wire_name(), ".templ")
-    }
+    pub fn template_filename(&self, prefix: &str) -> String { concat_string!(prefix, "_", self.wire_name(), ".templ") }
 
     /// `true` for the recording lifecycle kinds.
     pub fn is_recording_lifecycle(&self) -> bool {
@@ -66,9 +64,7 @@ mod tests {
     use super::{MsgKind, WatchChange, WatchChanges, WatchGroupItems, WatchItems};
     use std::sync::Arc;
 
-    fn titles(names: &[&str]) -> Vec<Arc<str>> {
-        names.iter().map(|n| Arc::from(*n)).collect()
-    }
+    fn titles(names: &[&str]) -> Vec<Arc<str>> { names.iter().map(|n| Arc::from(*n)).collect() }
 
     fn sample_changes() -> WatchChanges {
         WatchChanges::new(
@@ -195,9 +191,7 @@ pub struct WatchItems {
 impl WatchItems {
     /// A complete list, nothing sampled.
     #[must_use]
-    pub fn complete(items: Vec<Arc<str>>) -> Self {
-        Self { total: items.len(), items, truncated: false }
-    }
+    pub fn complete(items: Vec<Arc<str>>) -> Self { Self { total: items.len(), items, truncated: false } }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -209,9 +203,7 @@ pub struct WatchGroupItems {
 
 impl WatchChanges {
     #[must_use]
-    pub fn new(target: String, changes: Vec<WatchChange>) -> Self {
-        Self { target, changes }
-    }
+    pub fn new(target: String, changes: Vec<WatchChange>) -> Self { Self { target, changes } }
 
     /// The shape notification templates see under `watch`.
     #[must_use]

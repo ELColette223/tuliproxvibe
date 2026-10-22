@@ -42,17 +42,13 @@ where
         })
     }
 
-    pub fn try_new_with_backoff(filepath: &Path) -> io::Result<Self> {
-        Self::try_new(filepath)
-    }
+    pub fn try_new_with_backoff(filepath: &Path) -> io::Result<Self> { Self::try_new(filepath) }
 
     pub fn try_new_with_backoff_stats(filepath: &Path) -> io::Result<(Self, u64)> {
         Self::try_new(filepath).map(|updater| (updater, 0))
     }
 
-    pub fn set_flush_policy(&mut self, policy: FlushPolicy) {
-        self.flush_policy = policy;
-    }
+    pub fn set_flush_policy(&mut self, policy: FlushPolicy) { self.flush_policy = policy; }
 
     pub(super) fn ensure_transaction(&mut self) -> io::Result<()> {
         if self.active.is_some() {

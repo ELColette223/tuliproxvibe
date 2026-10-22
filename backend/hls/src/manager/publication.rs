@@ -201,21 +201,13 @@ impl HlsProxyManager {
         manager
     }
 
-    pub fn sessions(&self) -> &Arc<HlsSessionStore> {
-        &self.sessions
-    }
+    pub fn sessions(&self) -> &Arc<HlsSessionStore> { &self.sessions }
 
-    pub fn segment_cache(&self) -> &Arc<HlsSegmentCache> {
-        &self.segment_cache
-    }
+    pub fn segment_cache(&self) -> &Arc<HlsSegmentCache> { &self.segment_cache }
 
-    pub fn segment_repair(&self) -> &Arc<HlsSegmentRepairManager> {
-        &self.segment_repair
-    }
+    pub fn segment_repair(&self) -> &Arc<HlsSegmentRepairManager> { &self.segment_repair }
 
-    pub fn startup_observability(&self) -> &Arc<HlsStartupObservability> {
-        &self.startup_observability
-    }
+    pub fn startup_observability(&self) -> &Arc<HlsStartupObservability> { &self.startup_observability }
 
     pub fn spawn_access_lease_repair_prewarm(
         self: &Arc<Self>,
@@ -260,21 +252,15 @@ impl HlsProxyManager {
         });
     }
 
-    pub fn segment_worker_pool(&self) -> &Arc<HlsSegmentWorkerPool> {
-        &self.segment_worker_pool
-    }
+    pub fn segment_worker_pool(&self) -> &Arc<HlsSegmentWorkerPool> { &self.segment_worker_pool }
 
-    pub fn map_worker_pool(&self) -> &Arc<HlsMapWorkerPool> {
-        &self.map_worker_pool
-    }
+    pub fn map_worker_pool(&self) -> &Arc<HlsMapWorkerPool> { &self.map_worker_pool }
 
     /// The clock every time-dependent HLS scheduler reads.
     ///
     /// One clock, so a test that controls time controls all of it rather than
     /// some schedulers following the wall clock and others the test clock.
-    pub(crate) fn now_ms(&self) -> u64 {
-        self.terminal_commit_clock.now_ms()
-    }
+    pub(crate) fn now_ms(&self) -> u64 { self.terminal_commit_clock.now_ms() }
 
     /// Anchor the scheduling clock to tokio's, for `start_paused` tests.
     #[cfg(test)]
@@ -282,25 +268,15 @@ impl HlsProxyManager {
         self.terminal_commit_clock.follow_tokio_clock(base_ms);
     }
 
-    pub fn transient_resources(&self) -> &Arc<TransientResourceStore> {
-        &self.transient_resources
-    }
+    pub fn transient_resources(&self) -> &Arc<TransientResourceStore> { &self.transient_resources }
 
-    pub fn access_leases(&self) -> &Arc<RwLock<HlsAccessLeaseStore>> {
-        &self.access_leases
-    }
+    pub fn access_leases(&self) -> &Arc<RwLock<HlsAccessLeaseStore>> { &self.access_leases }
 
-    pub fn metrics(&self) -> &Arc<HlsCacheMetrics> {
-        &self.metrics
-    }
+    pub fn metrics(&self) -> &Arc<HlsCacheMetrics> { &self.metrics }
 
-    pub fn qos(&self) -> &Arc<HlsQosRegistry> {
-        &self.qos
-    }
+    pub fn qos(&self) -> &Arc<HlsQosRegistry> { &self.qos }
 
-    pub fn garbage_collector(&self) -> &Arc<HlsGarbageCollector> {
-        &self.gc
-    }
+    pub fn garbage_collector(&self) -> &Arc<HlsGarbageCollector> { &self.gc }
 
     pub(super) async fn clear_runtime_cache_state_for_cache_path_change(&self) {
         self.availability_reevaluations.clear();
@@ -958,7 +934,5 @@ impl HlsProxyManager {
 }
 
 impl Default for HlsProxyManager {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }

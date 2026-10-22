@@ -26,9 +26,7 @@ pub struct LiveHlsOriginEntry {
 }
 
 impl LiveHlsOriginEntry {
-    pub fn parse(url: &str) -> Option<Self> {
-        Self::parse_with_url_failover_provider(url, None)
-    }
+    pub fn parse(url: &str) -> Option<Self> { Self::parse_with_url_failover_provider(url, None) }
 
     pub fn parse_with_url_failover_provider(
         url: &str,
@@ -45,13 +43,9 @@ impl LiveHlsOriginEntry {
         Url::parse(url).ok().map(|url| Self { url, url_failover_provider, runtime_provider_config })
     }
 
-    pub fn url(&self) -> &Url {
-        &self.url
-    }
+    pub fn url(&self) -> &Url { &self.url }
 
-    pub fn url_failover_provider(&self) -> Option<&Arc<ConfigProvider>> {
-        self.url_failover_provider.as_ref()
-    }
+    pub fn url_failover_provider(&self) -> Option<&Arc<ConfigProvider>> { self.url_failover_provider.as_ref() }
 
     pub fn to_input_source(&self) -> InputSource {
         let user_info = if self.url.scheme() == "provider" {
@@ -97,9 +91,7 @@ pub struct RetryPolicy {
 }
 
 impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self { delays_ms: [0, 100, 250, 500, 750], jitter_max_ms: 100 }
-    }
+    fn default() -> Self { Self { delays_ms: [0, 100, 250, 500, 750], jitter_max_ms: 100 } }
 }
 
 impl RetryPolicy {
@@ -107,9 +99,7 @@ impl RetryPolicy {
         self.delays_ms.get(attempt_index).map(|base| base.saturating_add(jitter_ms.min(self.jitter_max_ms)))
     }
 
-    pub fn attempt_count(&self) -> usize {
-        self.delays_ms.len()
-    }
+    pub fn attempt_count(&self) -> usize { self.delays_ms.len() }
 
     /// Samples a uniform jitter in `0..=jitter_max_ms` (0 when jitter is disabled).
     pub fn sample_jitter_ms(&self) -> u64 {

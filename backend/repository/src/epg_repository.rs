@@ -44,9 +44,7 @@ fn epg_order_rank(source_ordinal: u32, traversal_ordinal: u32) -> u64 {
 }
 
 /// A channel is written to the target EPG db only when it has programmes.
-fn is_written_epg_channel(channel: &EpgChannel) -> bool {
-    !channel.programmes.is_empty()
-}
+fn is_written_epg_channel(channel: &EpgChannel) -> bool { !channel.programmes.is_empty() }
 
 /// Canonical keys `epg_write_file` writes for `epg`, or `None` when it writes nothing.
 fn epg_written_keys(epg: &Epg, output_case: EpgIdOutputCase) -> Option<HashSet<Arc<str>>> {

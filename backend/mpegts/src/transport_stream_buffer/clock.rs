@@ -114,9 +114,7 @@ pub(super) enum HlsTsTimestampKind {
 }
 
 #[inline]
-pub(super) fn ts_packet_pid(packet: &[u8]) -> u16 {
-    (u16::from(packet[1] & 0x1F) << 8) | u16::from(packet[2])
-}
+pub(super) fn ts_packet_pid(packet: &[u8]) -> u16 { (u16::from(packet[1] & 0x1F) << 8) | u16::from(packet[2]) }
 
 pub(super) fn same_finite_ts_packet_layout(source: &[u8], prepared: &[u8]) -> bool {
     if source.len() != TS_PACKET_SIZE
@@ -193,6 +191,4 @@ pub(super) fn decode_pcr_at_location(
     Ok(decode_pcr(bytes))
 }
 
-pub(super) fn ticks_90khz_to_rounded_millis(ticks: u64) -> Option<u64> {
-    ticks.checked_add(45)?.checked_div(90)
-}
+pub(super) fn ticks_90khz_to_rounded_millis(ticks: u64) -> Option<u64> { ticks.checked_add(45)?.checked_div(90) }

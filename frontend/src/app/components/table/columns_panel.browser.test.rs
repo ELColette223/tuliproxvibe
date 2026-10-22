@@ -57,9 +57,7 @@ extern "C" {
 }
 struct MockGuard;
 impl Drop for MockGuard {
-    fn drop(&mut self) {
-        stop_mock();
-    }
+    fn drop(&mut self) { stop_mock(); }
 }
 
 #[component]

@@ -24,9 +24,7 @@ impl FaultSchedule {
         Ok(())
     }
 
-    pub fn take(&mut self, fault_id: &str) -> Option<OriginFault> {
-        self.faults.remove(fault_id)
-    }
+    pub fn take(&mut self, fault_id: &str) -> Option<OriginFault> { self.faults.remove(fault_id) }
 
     pub fn clear(&mut self, fault_id: &str) -> Result<(), TestkitError> {
         self.faults
@@ -35,9 +33,7 @@ impl FaultSchedule {
             .ok_or_else(|| TestkitError::Configuration(format!("fault ID {fault_id} does not exist")))
     }
 
-    pub fn clear_all(&mut self) {
-        self.faults.clear();
-    }
+    pub fn clear_all(&mut self) { self.faults.clear(); }
 }
 
 #[cfg(test)]

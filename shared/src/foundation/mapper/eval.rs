@@ -38,9 +38,7 @@ impl MapperScript {
             .collect()
     }
 
-    pub fn get_expr_by_id(&self, id: usize) -> Option<&Expression> {
-        self.expressions.get(id)
-    }
+    pub fn get_expr_by_id(&self, id: usize) -> Option<&Expression> { self.expressions.get(id) }
 }
 
 #[derive(Debug, Clone)]
@@ -130,9 +128,7 @@ impl EvalResult {
         }
     }
 
-    pub fn is_error(&self) -> bool {
-        matches!(self, Failure(_))
-    }
+    pub fn is_error(&self) -> bool { matches!(self, Failure(_)) }
 }
 
 fn concat_args(args: &Vec<EvalResult>) -> Vec<Cow<'_, str>> {

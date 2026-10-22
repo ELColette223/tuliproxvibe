@@ -45,9 +45,7 @@ pub(crate) struct Manifest {
 }
 
 impl Manifest {
-    pub(crate) fn checkpoint_hash_bytes(&self) -> io::Result<[u8; 32]> {
-        unhex(&self.checkpoint_hash)
-    }
+    pub(crate) fn checkpoint_hash_bytes(&self) -> io::Result<[u8; 32]> { unhex(&self.checkpoint_hash) }
 
     fn validate(&self, schema_name: &str) -> io::Result<()> {
         if self.format_version != FORMAT_VERSION {
@@ -85,9 +83,7 @@ impl GenerationPaths {
     }
 }
 
-pub(crate) fn generation_directory_name(generation: u64) -> String {
-    format!("{GENERATION_PREFIX}{generation:020}")
-}
+pub(crate) fn generation_directory_name(generation: u64) -> String { format!("{GENERATION_PREFIX}{generation:020}") }
 
 fn parse_generation_directory_name(name: &str) -> Option<u64> {
     let digits = name.strip_prefix(GENERATION_PREFIX)?;
@@ -118,9 +114,7 @@ pub(crate) struct GenerationScan {
 }
 
 impl GenerationScan {
-    pub(crate) fn order_key(&self) -> (u64, u64) {
-        (self.manifest.checkpoint_revision, self.journal.revision)
-    }
+    pub(crate) fn order_key(&self) -> (u64, u64) { (self.manifest.checkpoint_revision, self.journal.revision) }
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {

@@ -113,12 +113,8 @@ pub struct TargetStats {
 }
 
 impl TargetStats {
-    pub fn success(name: &str) -> Self {
-        Self { name: name.to_string(), success: true, processing: None }
-    }
-    pub fn failure(name: &str) -> Self {
-        Self { name: name.to_string(), success: false, processing: None }
-    }
+    pub fn success(name: &str) -> Self { Self { name: name.to_string(), success: true, processing: None } }
+    pub fn failure(name: &str) -> Self { Self { name: name.to_string(), success: false, processing: None } }
 
     pub fn success_with_processing(name: &str, processing: PipelineStats) -> Self {
         Self { name: name.to_string(), success: true, processing: (!processing.is_empty()).then_some(processing) }

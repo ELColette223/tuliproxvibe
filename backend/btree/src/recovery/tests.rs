@@ -27,29 +27,19 @@ impl RecoverySchema<Key, Record> for Schema {
     const NAME: &'static str = "fault";
     const CURRENT_VERSION: u32 = 1;
 
-    fn encode_key(&self, key: &Key) -> io::Result<Value> {
-        to_value(key)
-    }
+    fn encode_key(&self, key: &Key) -> io::Result<Value> { to_value(key) }
 
-    fn migrate_key_one(&self, _from: u32, key: Value) -> io::Result<Value> {
-        Ok(key)
-    }
+    fn migrate_key_one(&self, _from: u32, key: Value) -> io::Result<Value> { Ok(key) }
 
-    fn decode_current_key(&self, key: Value) -> io::Result<Key> {
-        from_value(key)
-    }
+    fn decode_current_key(&self, key: Value) -> io::Result<Key> { from_value(key) }
 
-    fn encode_current(&self, value: &Record) -> io::Result<Value> {
-        to_value(value)
-    }
+    fn encode_current(&self, value: &Record) -> io::Result<Value> { to_value(value) }
 
     fn migrate_one(&self, from: u32, _value: Value) -> io::Result<Value> {
         Err(io::Error::new(io::ErrorKind::InvalidData, format!("no migration from {from}")))
     }
 
-    fn decode_current(&self, value: Value) -> io::Result<Record> {
-        from_value(value)
-    }
+    fn decode_current(&self, value: Value) -> io::Result<Record> { from_value(value) }
 }
 
 fn to_value<T: Serialize>(value: &T) -> io::Result<Value> {

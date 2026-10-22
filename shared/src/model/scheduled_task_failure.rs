@@ -22,9 +22,7 @@ pub struct ScheduledTaskFailure {
 
 impl ScheduledTaskFailure {
     #[must_use]
-    pub fn new(task: ScheduleTaskType, error: String) -> Self {
-        Self { task, schedule: None, error }
-    }
+    pub fn new(task: ScheduleTaskType, error: String) -> Self { Self { task, schedule: None, error } }
 
     #[must_use]
     pub fn with_schedule(mut self, schedule: String) -> Self {
@@ -35,7 +33,5 @@ impl ScheduledTaskFailure {
     /// Per task type: a task that fails on a schedule fails the same way every
     /// time it runs.
     #[must_use]
-    pub fn dedup_key(&self) -> String {
-        format!("scheduled-task:{:?}", self.task)
-    }
+    pub fn dedup_key(&self) -> String { format!("scheduled-task:{:?}", self.task) }
 }

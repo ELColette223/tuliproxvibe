@@ -199,17 +199,11 @@ impl HlsSegmentWorkerPool {
         self.runtime.store(Arc::new(SegmentWorkerRuntime::new(policy, global_semaphore)));
     }
 
-    pub fn policy(&self) -> SegmentFetchPolicy {
-        self.runtime.load().policy.clone()
-    }
+    pub fn policy(&self) -> SegmentFetchPolicy { self.runtime.load().policy.clone() }
 
-    pub fn access_leases(&self) -> &Arc<RwLock<HlsAccessLeaseStore>> {
-        &self.access_leases
-    }
+    pub fn access_leases(&self) -> &Arc<RwLock<HlsAccessLeaseStore>> { &self.access_leases }
 
-    pub fn metrics(&self) -> &Arc<HlsCacheMetrics> {
-        &self.metrics
-    }
+    pub fn metrics(&self) -> &Arc<HlsCacheMetrics> { &self.metrics }
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn pause_next_origin_prepare_for_test(&self) -> Arc<super::HlsSegmentPrepareBarrier> {
@@ -622,7 +616,5 @@ pub(super) fn mark_segment_discovered(session: &mut super::super::HlsSession, pr
 }
 
 impl Default for HlsSegmentWorkerPool {
-    fn default() -> Self {
-        Self::new(SegmentFetchPolicy::default())
-    }
+    fn default() -> Self { Self::new(SegmentFetchPolicy::default()) }
 }

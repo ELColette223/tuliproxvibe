@@ -37,9 +37,7 @@ pub(super) struct PageSink {
 }
 
 impl PageSink {
-    pub(super) const fn new(file: File) -> Self {
-        Self { file, next_page_id: 0 }
-    }
+    pub(super) const fn new(file: File) -> Self { Self { file, next_page_id: 0 } }
 
     fn allocate(&mut self) -> io::Result<u64> {
         let page_id = self.next_page_id;

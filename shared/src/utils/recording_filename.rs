@@ -206,9 +206,7 @@ where
 /// Sanitize a single filename segment with the shared filename allow-list:
 /// letters of every script are kept, whitespace becomes `_`, symbols and
 /// separators are dropped.
-fn sanitize_filename_segment(s: &str) -> String {
-    crate::utils::sanitize_filename_chars(s, true)
-}
+fn sanitize_filename_segment(s: &str) -> String { crate::utils::sanitize_filename_chars(s, true) }
 
 /// Collapse runs of `_` / `.` into one separator and trim leading/trailing
 /// ones so empty fields do not produce dangling separators. A run that
@@ -285,9 +283,7 @@ mod tests {
         }
     }
 
-    fn utc() -> Tz {
-        Tz::UTC
-    }
+    fn utc() -> Tz { Tz::UTC }
 
     #[test]
     fn validation_accepts_canonical_template() {

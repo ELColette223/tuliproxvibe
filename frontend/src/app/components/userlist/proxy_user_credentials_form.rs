@@ -40,9 +40,7 @@ struct UserFormFieldErrors {
 }
 
 impl UserFormFieldErrors {
-    fn has_errors(&self) -> bool {
-        self.username.is_some() || self.password.is_some() || self.target.is_some()
-    }
+    fn has_errors(&self) -> bool { self.username.is_some() || self.password.is_some() || self.target.is_some() }
 }
 
 fn cluster_flags_label(flags: ClusterFlags, t: impl Fn(&str) -> String) -> String {

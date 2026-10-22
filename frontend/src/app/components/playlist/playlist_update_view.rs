@@ -38,9 +38,7 @@ struct PlaylistUpdateBulkSubmissionState {
 }
 
 impl PlaylistUpdateBulkSubmissionState {
-    const fn is_submitting(&self) -> bool {
-        self.submitting_for.is_some()
-    }
+    const fn is_submitting(&self) -> bool { self.submitting_for.is_some() }
 
     fn is_submitting_for(&self, connection_context: WebSocketConnectionContext) -> bool {
         self.submitting_for == Some(connection_context)

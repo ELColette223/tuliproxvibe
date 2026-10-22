@@ -68,9 +68,7 @@ fn sync_runtime_csv_accounts(
     }
 }
 
-fn backup_dir(app_state: &AppState) -> String {
-    app_state.app_config.config.load().get_backup_dir().into_owned()
-}
+fn backup_dir(app_state: &AppState) -> String { app_state.app_config.config.load().get_backup_dir().into_owned() }
 
 fn parse_csv(input_type: InputType, content: &[u8]) -> Result<Vec<ConfigInputAliasDto>, TuliproxError> {
     repository::csv_read_inputs_from_reader(

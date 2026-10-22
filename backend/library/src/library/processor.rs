@@ -689,9 +689,7 @@ impl LibraryProcessor {
     }
 
     // Gets all cached metadata entries
-    pub async fn get_all_entries(&self) -> Vec<MetadataCacheEntry> {
-        self.storage.load_all().await
-    }
+    pub async fn get_all_entries(&self) -> Vec<MetadataCacheEntry> { self.storage.load_all().await }
 
     /// Current catalog counts, independent of any scan's file/group counters.
     pub async fn catalog_status(&self) -> io::Result<LibraryStatus> {

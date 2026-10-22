@@ -115,13 +115,9 @@ impl DiscoveryServer {
         }
     }
 
-    fn reply(&self, path: &str, status: u16, body: &str) {
-        self.reply_raw(path, response(status, body));
-    }
+    fn reply(&self, path: &str, status: u16, body: &str) { self.reply_raw(path, response(status, body)); }
 
-    fn reply_raw(&self, path: &str, body: Vec<u8>) {
-        self.replies.lock().unwrap().insert(path.into(), body);
-    }
+    fn reply_raw(&self, path: &str, body: Vec<u8>) { self.replies.lock().unwrap().insert(path.into(), body); }
 }
 
 fn response(status: u16, body: &str) -> Vec<u8> {
@@ -129,9 +125,7 @@ fn response(status: u16, body: &str) -> Vec<u8> {
 }
 
 impl Drop for DiscoveryServer {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    fn drop(&mut self) { self.task.abort(); }
 }
 
 fn catalog() -> Vec<PlaylistGroup> {
@@ -255,9 +249,7 @@ impl Publication {
         }
     }
 
-    async fn publish(&self) -> Result<(), Vec<TuliproxError>> {
-        self.publish_catalog(catalog()).await
-    }
+    async fn publish(&self) -> Result<(), Vec<TuliproxError>> { self.publish_catalog(catalog()).await }
 
     async fn publish_catalog(&self, playlist: Vec<PlaylistGroup>) -> Result<(), Vec<TuliproxError>> {
         let mut channel = shared::model::EpgChannel::new("fixture.live".intern());

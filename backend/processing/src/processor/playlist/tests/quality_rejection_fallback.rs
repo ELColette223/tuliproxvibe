@@ -38,9 +38,7 @@ struct TestXtreamServer {
 }
 
 impl TestXtreamServer {
-    fn start(candidate_counts: [usize; 3]) -> Self {
-        Self::start_with_responses(fixture_responses(candidate_counts))
-    }
+    fn start(candidate_counts: [usize; 3]) -> Self { Self::start_with_responses(fixture_responses(candidate_counts)) }
 
     fn start_with_responses(responses: HashMap<String, String>) -> Self {
         Self::start_with_statuses(responses, HashMap::new())
@@ -91,18 +89,14 @@ impl TestXtreamServer {
 }
 
 impl Drop for TestXtreamServer {
-    fn drop(&mut self) {
-        self.stop_worker();
-    }
+    fn drop(&mut self) { self.stop_worker(); }
 }
 
 #[derive(Clone, Default)]
 struct CollectSink(Arc<StdMutex<Vec<EventMessage>>>);
 
 impl EventSink for CollectSink {
-    fn emit(&self, event: EventMessage) {
-        self.0.lock().expect("event sink lock").push(event);
-    }
+    fn emit(&self, event: EventMessage) { self.0.lock().expect("event sink lock").push(event); }
 }
 
 fn fixture_responses(candidate_counts: [usize; 3]) -> HashMap<String, String> {
@@ -1629,14 +1623,10 @@ mod staged_completion;
 struct FixedGate(&'static str);
 
 impl tuliprox_core::model::MaintenanceGate for FixedGate {
-    fn is_in_maintenance(&self, input_name: &str) -> bool {
-        input_name == self.0
-    }
+    fn is_in_maintenance(&self, input_name: &str) -> bool { input_name == self.0 }
 }
 
-fn quality_95() -> ConfigInputUpdateQualityDto {
-    ConfigInputUpdateQualityDto { live: 95, vod: 95, series: 95 }
-}
+fn quality_95() -> ConfigInputUpdateQualityDto { ConfigInputUpdateQualityDto { live: 95, vod: 95, series: 95 } }
 
 #[tokio::test]
 async fn maintenance_input_uses_persisted_playlist_without_download() {

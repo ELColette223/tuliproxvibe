@@ -178,6 +178,4 @@ pub(super) async fn persist_panel_api_time_cache(
     Ok(())
 }
 
-pub(super) fn parse_cached_tz(tz: Option<String>) -> Option<Tz> {
-    tz.and_then(|name| name.parse::<Tz>().ok())
-}
+pub(super) fn parse_cached_tz(tz: Option<String>) -> Option<Tz> { tz.and_then(|name| name.parse::<Tz>().ok()) }

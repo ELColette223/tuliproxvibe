@@ -68,9 +68,7 @@ impl WireMarkerScanner {
 }
 
 #[must_use]
-pub fn fixture_digest(bytes: &[u8]) -> String {
-    blake3::hash(bytes).to_hex().to_string()
-}
+pub fn fixture_digest(bytes: &[u8]) -> String { blake3::hash(bytes).to_hex().to_string() }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

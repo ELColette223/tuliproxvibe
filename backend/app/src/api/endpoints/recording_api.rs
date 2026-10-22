@@ -666,13 +666,9 @@ fn recording_rule_repo(app_state: &AppState) -> RecordingRuleRepository {
     RecordingRuleRepository::new(&app_state.app_config.config.load().storage_dir)
 }
 
-fn can_write_rules(claims: &shared::model::Claims) -> bool {
-    claims.permissions.contains(Permission::RecordingManage)
-}
+fn can_write_rules(claims: &shared::model::Claims) -> bool { claims.permissions.contains(Permission::RecordingManage) }
 
-fn is_admin(claims: &shared::model::Claims) -> bool {
-    claims.is_admin()
-}
+fn is_admin(claims: &shared::model::Claims) -> bool { claims.is_admin() }
 
 async fn resolve_recording_source(
     app_state: &Arc<AppState>,
@@ -950,9 +946,7 @@ fn apply_recording_rule_edit(rule: &mut RecordingRule, body: EditRecordingRuleBo
     rule.updated_at = now;
 }
 
-fn recording_virtual_id(virtual_id: &str) -> Option<u32> {
-    virtual_id.parse::<u32>().ok()
-}
+fn recording_virtual_id(virtual_id: &str) -> Option<u32> { virtual_id.parse::<u32>().ok() }
 
 fn accept_resolved_recording_source(
     virtual_id: &mut String,
@@ -1198,9 +1192,7 @@ mod tests {
     }
 
     impl UnavailableCapacity {
-        fn new() -> Arc<Self> {
-            Arc::new(Self { notify: Arc::new(Notify::new()) })
-        }
+        fn new() -> Arc<Self> { Arc::new(Self { notify: Arc::new(Notify::new()) }) }
     }
 
     impl RecordingCapacityPort for UnavailableCapacity {
@@ -1212,17 +1204,11 @@ mod tests {
             Box::pin(async { None })
         }
 
-        fn release(&self, _handle: Option<ProviderHandle>) -> BoxFuture<'_, ()> {
-            Box::pin(async {})
-        }
+        fn release(&self, _handle: Option<ProviderHandle>) -> BoxFuture<'_, ()> { Box::pin(async {}) }
 
-        fn capacity_changed(&self) -> Arc<Notify> {
-            Arc::clone(&self.notify)
-        }
+        fn capacity_changed(&self) -> Arc<Notify> { Arc::clone(&self.notify) }
 
-        fn is_input_in_maintenance(&self, _input_name: &str) -> bool {
-            false
-        }
+        fn is_input_in_maintenance(&self, _input_name: &str) -> bool { false }
     }
 
     fn edit_claims(subject_id: Option<UserId>, admin: bool) -> shared::model::Claims {

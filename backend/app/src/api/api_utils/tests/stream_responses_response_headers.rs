@@ -122,9 +122,7 @@ fn test_resolve_request_url_for_logging_respects_sanitization_setting() {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     struct SanitizeSettingGuard(bool);
     impl Drop for SanitizeSettingGuard {
-        fn drop(&mut self) {
-            shared::utils::set_sanitize_sensitive_info(self.0);
-        }
+        fn drop(&mut self) { shared::utils::set_sanitize_sensitive_info(self.0); }
     }
     let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 

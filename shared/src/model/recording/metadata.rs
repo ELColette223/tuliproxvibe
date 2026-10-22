@@ -39,9 +39,7 @@ pub struct NotificationMarker {
 }
 
 impl NotificationMarker {
-    pub fn new(kind: NotificationMarkerKind, attempted_at: i64) -> Self {
-        Self { kind, attempted_at }
-    }
+    pub fn new(kind: NotificationMarkerKind, attempted_at: i64) -> Self { Self { kind, attempted_at } }
 }
 
 /// Recurring-rule provenance. `rule_id` and `occurrence_key` are immutable for
@@ -199,18 +197,12 @@ impl RecordingMetadata {
         }
     }
 
-    pub fn is_deleting(&self) -> bool {
-        self.deleting_previous_state.is_some()
-    }
+    pub fn is_deleting(&self) -> bool { self.deleting_previous_state.is_some() }
 
-    pub fn owner_id(&self) -> &UserId {
-        self.owner.user_id()
-    }
+    pub fn owner_id(&self) -> &UserId { self.owner.user_id() }
 
     /// Filename component of the final relative path, if one is reserved.
-    pub fn filename(&self) -> Option<&str> {
-        self.relative_path.as_deref().and_then(extract_filename_component)
-    }
+    pub fn filename(&self) -> Option<&str> { self.relative_path.as_deref().and_then(extract_filename_component) }
 }
 
 fn extract_filename_component(relative_path: &str) -> Option<&str> {

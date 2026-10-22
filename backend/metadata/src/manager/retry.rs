@@ -51,13 +51,9 @@ pub(super) struct TaskRetryState {
 }
 
 impl TaskRetryState {
-    pub(super) fn is_empty(&self) -> bool {
-        self.resolve.is_none() && self.probe.is_none() && self.tmdb.is_none()
-    }
+    pub(super) fn is_empty(&self) -> bool { self.resolve.is_none() && self.probe.is_none() && self.tmdb.is_none() }
 
-    pub(super) fn touch(&mut self, now_ts: i64) {
-        self.updated_at_ts = now_ts.max(1);
-    }
+    pub(super) fn touch(&mut self, now_ts: i64) { self.updated_at_ts = now_ts.max(1); }
 
     pub(super) fn max_domain_timestamp(&self) -> i64 {
         let domain_max = |state: &RetryState| state.next_allowed_at_ts.max(state.cooldown_until_ts.unwrap_or(0));
@@ -469,9 +465,7 @@ impl InputWorker {
     }
 
     #[inline]
-    fn is_word_byte(byte: u8) -> bool {
-        byte.is_ascii_alphanumeric() || byte == b'_'
-    }
+    fn is_word_byte(byte: u8) -> bool { byte.is_ascii_alphanumeric() || byte == b'_' }
 
     fn contains_standalone_fragment(haystack: &str, fragment: &str) -> bool {
         if fragment.is_empty() || haystack.len() < fragment.len() {

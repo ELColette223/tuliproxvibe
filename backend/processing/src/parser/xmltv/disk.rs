@@ -150,9 +150,7 @@ impl Ord for EpgDiskChannelKey {
 }
 
 impl PartialOrd for EpgDiskChannelKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) }
 }
 
 /// Handle for a temp `BPlusTree` that holds the channels of one EPG source.

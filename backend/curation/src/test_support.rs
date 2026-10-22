@@ -21,9 +21,7 @@ pub(crate) struct TestServer {
 }
 
 impl TestServer {
-    pub(crate) async fn new(response: String) -> Self {
-        Self::new_bytes(response.into_bytes()).await
-    }
+    pub(crate) async fn new(response: String) -> Self { Self::new_bytes(response.into_bytes()).await }
 
     pub(crate) async fn new_bytes(response: Vec<u8>) -> Self {
         Self::delayed_bytes(response, Duration::ZERO, false).await
@@ -116,7 +114,5 @@ pub(crate) async fn with_paused_io<T>(future: impl Future<Output = T>) -> T {
 }
 
 impl Drop for TestServer {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    fn drop(&mut self) { self.task.abort(); }
 }

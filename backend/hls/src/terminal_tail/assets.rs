@@ -14,9 +14,7 @@ impl HlsTerminalKeyMaterial {
         Some(Self { bytes: Zeroizing::new(bytes) })
     }
 
-    pub(super) fn as_bytes(&self) -> &[u8; AES_128_BLOCK_BYTES] {
-        &self.bytes
-    }
+    pub(super) fn as_bytes(&self) -> &[u8; AES_128_BLOCK_BYTES] { &self.bytes }
 }
 
 impl std::fmt::Debug for HlsTerminalKeyMaterial {
@@ -52,23 +50,15 @@ impl HlsTerminalKeyBinding {
         self.proxy_session_id == *proxy_session_id
     }
 
-    pub fn content_type(&self) -> &str {
-        &self.content_type
-    }
+    pub fn content_type(&self) -> &str { &self.content_type }
 
-    pub fn bytes(&self) -> Bytes {
-        Bytes::copy_from_slice(self.material.as_bytes())
-    }
+    pub fn bytes(&self) -> Bytes { Bytes::copy_from_slice(self.material.as_bytes()) }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn source_cache_key(&self) -> &TransientObjectCacheKey {
-        &self.source_cache_key
-    }
+    pub fn source_cache_key(&self) -> &TransientObjectCacheKey { &self.source_cache_key }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn resource_id(&self) -> &TransientResourceId {
-        &self.resource_id
-    }
+    pub fn resource_id(&self) -> &TransientResourceId { &self.resource_id }
 }
 
 impl std::fmt::Debug for HlsTerminalKeyBinding {
@@ -163,33 +153,19 @@ impl HlsTerminalMediaAsset {
         HlsTerminalAssetIdentity { revision: self.validated.revision, fingerprint: self.validated.fingerprint }
     }
 
-    pub fn container(&self) -> HlsMediaContainer {
-        self.validated.container
-    }
+    pub fn container(&self) -> HlsMediaContainer { self.validated.container }
 
-    pub fn track_signature(&self) -> &HlsTsTrackSignature {
-        &self.validated.track_signature
-    }
+    pub fn track_signature(&self) -> &HlsTsTrackSignature { &self.validated.track_signature }
 
-    pub fn duration_ms(&self) -> u64 {
-        self.validated.duration_ms
-    }
+    pub fn duration_ms(&self) -> u64 { self.validated.duration_ms }
 
-    pub fn duration_ticks_90khz(&self) -> u64 {
-        self.validated.duration_ticks_90khz
-    }
+    pub fn duration_ticks_90khz(&self) -> u64 { self.validated.duration_ticks_90khz }
 
-    pub fn timestamp_profile(&self) -> Option<HlsTsTimestampProfile> {
-        self.validated.timestamp_profile
-    }
+    pub fn timestamp_profile(&self) -> Option<HlsTsTimestampProfile> { self.validated.timestamp_profile }
 
-    pub fn content_type(&self) -> &'static str {
-        self.validated.content_type
-    }
+    pub fn content_type(&self) -> &'static str { self.validated.content_type }
 
-    pub(crate) fn renderer(&self) -> Arc<TransportStreamBuffer> {
-        Arc::clone(&self.validated.renderer)
-    }
+    pub(crate) fn renderer(&self) -> Arc<TransportStreamBuffer> { Arc::clone(&self.validated.renderer) }
 }
 
 /// Captures and validates one immutable revision of the configured terminal TS asset.
@@ -249,7 +225,5 @@ pub struct HlsTerminalAssetIdentity {
 }
 
 impl HlsTerminalAssetIdentity {
-    pub fn from_asset(asset: &HlsTerminalMediaAsset) -> Self {
-        asset.identity()
-    }
+    pub fn from_asset(asset: &HlsTerminalMediaAsset) -> Self { asset.identity() }
 }

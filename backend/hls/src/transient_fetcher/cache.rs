@@ -144,9 +144,7 @@ impl HlsTransientObjectFetchFinalizer {
         Self { session, segment_cache, fetch_token, completed: false, retry_after_ms }
     }
 
-    pub fn complete(&mut self) {
-        self.completed = true;
-    }
+    pub fn complete(&mut self) { self.completed = true; }
 }
 
 impl Drop for HlsTransientObjectFetchFinalizer {

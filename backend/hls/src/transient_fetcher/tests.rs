@@ -49,9 +49,7 @@ struct TestOrigin {
 }
 
 impl Drop for TestOrigin {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    fn drop(&mut self) { self.task.abort(); }
 }
 
 fn finalized_resource_resolution_fixture(
@@ -482,9 +480,7 @@ impl TestTransientCacheFixture {
 struct DropCounter(Arc<AtomicUsize>);
 
 impl Drop for DropCounter {
-    fn drop(&mut self) {
-        self.0.fetch_add(1, Ordering::Relaxed);
-    }
+    fn drop(&mut self) { self.0.fetch_add(1, Ordering::Relaxed); }
 }
 
 mod cache;

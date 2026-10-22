@@ -66,17 +66,11 @@ impl SharedStreamState {
         self
     }
 
-    pub(super) fn increment_pending_joins(&self) {
-        self.pending_joins.fetch_add(1, Ordering::AcqRel);
-    }
+    pub(super) fn increment_pending_joins(&self) { self.pending_joins.fetch_add(1, Ordering::AcqRel); }
 
-    pub(super) fn decrement_pending_joins(&self) {
-        self.pending_joins.fetch_sub(1, Ordering::AcqRel);
-    }
+    pub(super) fn decrement_pending_joins(&self) { self.pending_joins.fetch_sub(1, Ordering::AcqRel); }
 
-    pub(super) fn has_pending_joins(&self) -> bool {
-        self.pending_joins.load(Ordering::Acquire) > 0
-    }
+    pub(super) fn has_pending_joins(&self) -> bool { self.pending_joins.load(Ordering::Acquire) > 0 }
 
     pub(super) fn lock_terminal_outcome(&self) -> std::sync::MutexGuard<'_, Option<TerminalOutcome>> {
         self.terminal_outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner)

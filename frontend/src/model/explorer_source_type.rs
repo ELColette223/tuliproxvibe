@@ -32,7 +32,5 @@ impl ExplorerSourceType {
 }
 
 impl Internable for ExplorerSourceType {
-    fn intern(self) -> Arc<str> {
-        self.as_str().intern()
-    }
+    fn intern(self) -> Arc<str> { self.as_str().intern() }
 }

@@ -167,9 +167,7 @@ mod tests {
         PlaylistGroup { id, title: title.intern(), channels, xtream_cluster: cluster }
     }
 
-    fn keys(ids: &[&str]) -> HashSet<Arc<str>> {
-        ids.iter().map(|id| id.intern()).collect()
-    }
+    fn keys(ids: &[&str]) -> HashSet<Arc<str>> { ids.iter().map(|id| id.intern()).collect() }
 
     fn groups_of(tree: &EpgGroupTree) -> Vec<(String, u32)> {
         tree.iter().map(|(_, group)| (group.name.to_string(), group.channel_count)).collect()

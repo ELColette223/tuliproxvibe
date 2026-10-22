@@ -26,70 +26,46 @@ impl ClusterFlags {
     pub const Vod: Self = Self::flag(ClusterFlag::Vod);
     pub const Series: Self = Self::flag(ClusterFlag::Series);
 
-    const fn flag(flag: ClusterFlag) -> Self {
-        Self(ClusterFlagSet(1 << flag as u8))
-    }
+    const fn flag(flag: ClusterFlag) -> Self { Self(ClusterFlagSet(1 << flag as u8)) }
 }
 
 impl Default for ClusterFlags {
-    fn default() -> Self {
-        Self::all()
-    }
+    fn default() -> Self { Self::all() }
 }
 
 impl ClusterFlags {
     #[must_use]
-    pub const fn all() -> Self {
-        Self(ClusterFlagSet::ALL)
-    }
+    pub const fn all() -> Self { Self(ClusterFlagSet::ALL) }
 
     #[must_use]
-    pub const fn empty() -> Self {
-        Self(ClusterFlagSet::new())
-    }
+    pub const fn empty() -> Self { Self(ClusterFlagSet::new()) }
 
     /// The raw bits, widened to the `u16` the `bitflags` type exposed.
     #[inline]
-    pub fn bits(&self) -> u16 {
-        u16::from(self.0 .0)
-    }
+    pub fn bits(&self) -> u16 { u16::from(self.0 .0) }
 
     #[inline]
-    pub fn is_all(&self) -> bool {
-        self.0 == ClusterFlagSet::ALL
-    }
+    pub fn is_all(&self) -> bool { self.0 == ClusterFlagSet::ALL }
 
     #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.0.is_empty() }
 
     /// Whether every cluster in `other` is set.
     #[inline]
-    pub fn contains(&self, other: Self) -> bool {
-        self.0.contains_all(&other.0)
-    }
+    pub fn contains(&self, other: Self) -> bool { self.0.contains_all(&other.0) }
 
     /// Whether any cluster in `other` is set.
     #[inline]
-    pub fn intersects(&self, other: Self) -> bool {
-        self.0.contains_any(&other.0)
-    }
+    pub fn intersects(&self, other: Self) -> bool { self.0.contains_any(&other.0) }
 
     #[inline]
-    pub fn insert(&mut self, other: Self) {
-        self.0.union(other.0);
-    }
+    pub fn insert(&mut self, other: Self) { self.0.union(other.0); }
 
     #[inline]
-    pub fn remove(&mut self, other: Self) {
-        self.0 = ClusterFlagSet(self.0 .0 & !other.0 .0);
-    }
+    pub fn remove(&mut self, other: Self) { self.0 = ClusterFlagSet(self.0 .0 & !other.0 .0); }
 
     #[inline]
-    pub fn toggle(&mut self, other: Self) {
-        self.0 = ClusterFlagSet(self.0 .0 ^ other.0 .0);
-    }
+    pub fn toggle(&mut self, other: Self) { self.0 = ClusterFlagSet(self.0 .0 ^ other.0 .0); }
 
     #[inline]
     pub fn set(&mut self, other: Self, value: bool) {
@@ -108,9 +84,7 @@ impl ClusterFlags {
         })
     }
 
-    pub fn has_full_flags(&self) -> bool {
-        self.is_all()
-    }
+    pub fn has_full_flags(&self) -> bool { self.is_all() }
 
     fn parse_flag(item: &str) -> Result<ClusterFlag, String> {
         let item = item.trim();
@@ -138,22 +112,16 @@ impl std::ops::BitOr for ClusterFlags {
     type Output = Self;
 
     #[inline]
-    fn bitor(self, other: Self) -> Self {
-        Self(ClusterFlagSet(self.0 .0 | other.0 .0))
-    }
+    fn bitor(self, other: Self) -> Self { Self(ClusterFlagSet(self.0 .0 | other.0 .0)) }
 }
 
 impl std::ops::BitOrAssign for ClusterFlags {
     #[inline]
-    fn bitor_assign(&mut self, other: Self) {
-        self.insert(other);
-    }
+    fn bitor_assign(&mut self, other: Self) { self.insert(other); }
 }
 
 impl From<Option<ClusterFlags>> for ClusterFlags {
-    fn from(value: Option<ClusterFlags>) -> Self {
-        value.unwrap_or_else(ClusterFlags::all)
-    }
+    fn from(value: Option<ClusterFlags>) -> Self { value.unwrap_or_else(ClusterFlags::all) }
 }
 
 impl fmt::Display for ClusterFlags {
@@ -172,9 +140,7 @@ impl fmt::Display for ClusterFlags {
 }
 
 impl fmt::Debug for ClusterFlags {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ClusterFlags({self})")
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "ClusterFlags({self})") }
 }
 
 impl TryFrom<&str> for ClusterFlags {
@@ -193,9 +159,7 @@ impl TryFrom<&str> for ClusterFlags {
 impl TryFrom<Vec<String>> for ClusterFlags {
     type Error = String;
 
-    fn try_from(value: Vec<String>) -> Result<Self, Self::Error> {
-        ClusterFlags::from_items(value)
-    }
+    fn try_from(value: Vec<String>) -> Result<Self, Self::Error> { ClusterFlags::from_items(value) }
 }
 
 impl Serialize for ClusterFlags {

@@ -14,9 +14,7 @@ pub enum XtreamInfoDocument {
 pub struct XtreamEmptyDoc {}
 
 impl Default for XtreamInfoDocument {
-    fn default() -> Self {
-        Self::Empty(XtreamEmptyDoc {})
-    }
+    fn default() -> Self { Self::Empty(XtreamEmptyDoc {}) }
 }
 
 impl StreamProperties {

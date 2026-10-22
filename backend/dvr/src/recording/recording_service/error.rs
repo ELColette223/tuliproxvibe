@@ -58,9 +58,7 @@ pub enum ServiceError {
 }
 
 impl std::fmt::Display for ServiceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.code())
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(self.code()) }
 }
 
 impl std::error::Error for ServiceError {}

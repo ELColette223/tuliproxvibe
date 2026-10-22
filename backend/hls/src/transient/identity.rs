@@ -13,24 +13,16 @@ use tokio::sync::Notify;
 use tuliprox_parser::hls::origin_manifest::{HlsManifestLifecycle, HlsManifestWindowPolicy, ParsedManifestSemantics};
 
 impl HlsPublishedTransientResourceIds {
-    pub fn from_manifest_body(body: &str) -> Self {
-        Self(Arc::new(extract_transient_resource_ids(body)))
-    }
+    pub fn from_manifest_body(body: &str) -> Self { Self(Arc::new(extract_transient_resource_ids(body))) }
 
-    pub(super) fn from_shared(resource_ids: Arc<HashSet<TransientResourceId>>) -> Self {
-        Self(resource_ids)
-    }
+    pub(super) fn from_shared(resource_ids: Arc<HashSet<TransientResourceId>>) -> Self { Self(resource_ids) }
 
-    pub fn contains(&self, resource_id: &TransientResourceId) -> bool {
-        self.0.contains(resource_id)
-    }
+    pub fn contains(&self, resource_id: &TransientResourceId) -> bool { self.0.contains(resource_id) }
 }
 
 impl TransientManifestGeneration {
     #[cfg(test)]
-    pub(crate) const fn for_test(generation: u64) -> Self {
-        Self(generation)
-    }
+    pub(crate) const fn for_test(generation: u64) -> Self { Self(generation) }
 }
 
 /// Exact lease incarnation that currently publishes one finalized transient manifest generation.
@@ -61,9 +53,7 @@ pub(crate) enum HlsTransientManifestCommitError {
 }
 
 impl From<HlsManifestLimitViolation> for HlsTransientManifestCommitError {
-    fn from(violation: HlsManifestLimitViolation) -> Self {
-        Self::LocalRepresentationLimit(violation)
-    }
+    fn from(violation: HlsManifestLimitViolation) -> Self { Self::LocalRepresentationLimit(violation) }
 }
 
 pub(crate) struct RollingEventAppendContext {
@@ -117,9 +107,7 @@ impl CommittedTransientManifestValidity {
         }
     }
 
-    pub(super) const fn is_finalized(self) -> bool {
-        matches!(self, Self::Finalized)
-    }
+    pub(super) const fn is_finalized(self) -> bool { matches!(self, Self::Finalized) }
 
     pub(super) const fn window_policy(self) -> HlsManifestWindowPolicy {
         match self {
@@ -187,13 +175,9 @@ pub enum TransientObjectFetchDecision {
 }
 
 impl TransientObjectFetchToken {
-    pub fn cache_key(&self) -> &TransientObjectCacheKey {
-        &self.cache_key
-    }
+    pub fn cache_key(&self) -> &TransientObjectCacheKey { &self.cache_key }
 
-    pub fn superseded_object(&self) -> Option<&TransientObjectRemoval> {
-        self.superseded_object.as_ref()
-    }
+    pub fn superseded_object(&self) -> Option<&TransientObjectRemoval> { self.superseded_object.as_ref() }
 }
 
 impl TransientObjectResourceBinding {
@@ -310,9 +294,7 @@ impl TransientResourceRef {
         }
     }
 
-    pub fn is_valid_at(&self, now_ms: u64) -> bool {
-        now_ms <= self.expires_at_ms
-    }
+    pub fn is_valid_at(&self, now_ms: u64) -> bool { now_ms <= self.expires_at_ms }
 
     pub(super) fn refresh_from(&mut self, next: TransientResourceRef) {
         self.kind = next.kind;
@@ -336,9 +318,7 @@ impl TransientResourceRef {
             && self.file_ext_hint == other.file_ext_hint
     }
 
-    pub fn active_readers(&self) -> u32 {
-        self.access.active_readers()
-    }
+    pub fn active_readers(&self) -> u32 { self.access.active_readers() }
 }
 
 impl fmt::Debug for TransientResourceRef {

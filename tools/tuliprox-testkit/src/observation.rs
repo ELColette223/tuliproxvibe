@@ -21,17 +21,11 @@ impl TuliproxObserver {
         Self { base_url: base_url.into().trim_end_matches('/').to_owned(), client: reqwest::Client::new(), credentials }
     }
 
-    pub async fn config(&self) -> Result<Value, TestkitError> {
-        self.get_json("config").await
-    }
+    pub async fn config(&self) -> Result<Value, TestkitError> { self.get_json("config").await }
 
-    pub async fn status(&self) -> Result<Value, TestkitError> {
-        self.get_json("status").await
-    }
+    pub async fn status(&self) -> Result<Value, TestkitError> { self.get_json("status").await }
 
-    pub async fn streams(&self) -> Result<Value, TestkitError> {
-        self.get_json("streams").await
-    }
+    pub async fn streams(&self) -> Result<Value, TestkitError> { self.get_json("streams").await }
 
     pub async fn stream_history(&self, session_id: u64) -> Result<Value, TestkitError> {
         let timestamp = i64::try_from(session_id >> 32)

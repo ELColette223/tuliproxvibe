@@ -49,9 +49,7 @@ fn monotonic_origin() -> Instant {
 /// Wall-clock reads can jump backwards on NTP adjustments, which would make a
 /// heartbeat age meaningless; the watchdog therefore never uses `SystemTime`.
 #[must_use]
-pub fn monotonic_now_ms() -> u64 {
-    u64::try_from(monotonic_origin().elapsed().as_millis()).unwrap_or(u64::MAX)
-}
+pub fn monotonic_now_ms() -> u64 { u64::try_from(monotonic_origin().elapsed().as_millis()).unwrap_or(u64::MAX) }
 
 fn read_env_ms(name: &str, default_ms: u64) -> u64 {
     std::env::var(name)
@@ -87,9 +85,7 @@ fn watchdog_mode(value: Option<&str>) -> WatchdogMode {
 /// The watchdog is opt-in and off by default. `TULIPROX_WATCHDOG` selects the
 /// mode: `0`/unset off, `1` observe, `2` observe and restart on a confirmed
 /// stall.
-fn configured_watchdog_mode() -> WatchdogMode {
-    watchdog_mode(std::env::var("TULIPROX_WATCHDOG").ok().as_deref())
-}
+fn configured_watchdog_mode() -> WatchdogMode { watchdog_mode(std::env::var("TULIPROX_WATCHDOG").ok().as_deref()) }
 
 /// Progress shared between the in-runtime heartbeat and the watchdog thread.
 ///
@@ -129,19 +125,13 @@ impl RuntimeLiveness {
     }
 
     #[must_use]
-    pub const fn restart_on_stall(&self) -> bool {
-        self.restart_on_stall
-    }
+    pub const fn restart_on_stall(&self) -> bool { self.restart_on_stall }
 
     #[must_use]
-    pub const fn heartbeat_interval_ms(&self) -> u64 {
-        self.heartbeat_interval_ms
-    }
+    pub const fn heartbeat_interval_ms(&self) -> u64 { self.heartbeat_interval_ms }
 
     #[must_use]
-    pub const fn stall_threshold_ms(&self) -> u64 {
-        self.stall_threshold_ms
-    }
+    pub const fn stall_threshold_ms(&self) -> u64 { self.stall_threshold_ms }
 
     /// Records progress. `schedule_delay_ms` is how late the heartbeat was
     /// scheduled relative to its deadline and surfaces scheduler pressure even
@@ -154,18 +144,12 @@ impl RuntimeLiveness {
 
     /// Saturation covers a heartbeat timestamp that is somehow ahead of `now`.
     #[must_use]
-    pub fn age_ms(&self, now_ms: u64) -> u64 {
-        now_ms.saturating_sub(self.last_tick_ms.load(Ordering::Acquire))
-    }
+    pub fn age_ms(&self, now_ms: u64) -> u64 { now_ms.saturating_sub(self.last_tick_ms.load(Ordering::Acquire)) }
 
     #[must_use]
-    pub fn is_stalled(&self, now_ms: u64) -> bool {
-        self.age_ms(now_ms) > self.stall_threshold_ms
-    }
+    pub fn is_stalled(&self, now_ms: u64) -> bool { self.age_ms(now_ms) > self.stall_threshold_ms }
 
-    pub fn note_stall(&self) {
-        self.stall_episodes.fetch_add(1, Ordering::Relaxed);
-    }
+    pub fn note_stall(&self) { self.stall_episodes.fetch_add(1, Ordering::Relaxed); }
 
     #[must_use]
     pub fn snapshot(&self, now_ms: u64) -> RuntimeHealth {
@@ -189,14 +173,10 @@ impl RuntimeLiveness {
 static INSTANCE: OnceLock<Arc<RuntimeLiveness>> = OnceLock::new();
 
 /// Installs the process-wide liveness state once. Later calls are ignored.
-pub fn install(liveness: Arc<RuntimeLiveness>) -> bool {
-    INSTANCE.set(liveness).is_ok()
-}
+pub fn install(liveness: Arc<RuntimeLiveness>) -> bool { INSTANCE.set(liveness).is_ok() }
 
 #[must_use]
-pub fn installed() -> Option<&'static Arc<RuntimeLiveness>> {
-    INSTANCE.get()
-}
+pub fn installed() -> Option<&'static Arc<RuntimeLiveness>> { INSTANCE.get() }
 
 /// Current liveness snapshot, or `None` when the watchdog is not installed.
 #[must_use]

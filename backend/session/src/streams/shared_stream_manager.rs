@@ -62,9 +62,7 @@ impl TerminalOutcome {
     }
 
     /// Whether this outcome represents a provider failure (not a clean EOF).
-    fn is_failure(&self) -> bool {
-        matches!(self, Self::ProviderError(_))
-    }
+    fn is_failure(&self) -> bool { matches!(self, Self::ProviderError(_)) }
 }
 
 pub struct PendingSharedSubscriberCleanup {

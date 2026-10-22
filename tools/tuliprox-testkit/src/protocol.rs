@@ -12,9 +12,7 @@ macro_rules! id_type {
 
         impl $name {
             #[must_use]
-            pub fn new(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
+            pub fn new(value: impl Into<String>) -> Self { Self(value.into()) }
         }
     };
 }
@@ -117,14 +115,10 @@ pub enum PlaybackOutcome {
 
 impl PlaybackOutcome {
     #[must_use]
-    pub fn is_streaming(&self) -> bool {
-        matches!(self, Self::Streaming { .. })
-    }
+    pub fn is_streaming(&self) -> bool { matches!(self, Self::Streaming { .. }) }
 
     #[must_use]
-    pub fn is_rejected(&self) -> bool {
-        matches!(self, Self::AdmissionRejected { .. })
-    }
+    pub fn is_rejected(&self) -> bool { matches!(self, Self::AdmissionRejected { .. }) }
 }
 
 impl std::fmt::Display for PlaybackOutcome {
@@ -204,14 +198,10 @@ impl RunLease {
     }
 
     #[must_use]
-    pub fn expired(&self) -> bool {
-        tokio::time::Instant::now() >= self.expires_at
-    }
+    pub fn expired(&self) -> bool { tokio::time::Instant::now() >= self.expires_at }
 
     #[must_use]
-    pub const fn deadline(&self) -> tokio::time::Instant {
-        self.expires_at
-    }
+    pub const fn deadline(&self) -> tokio::time::Instant { self.expires_at }
 }
 
 #[cfg(test)]

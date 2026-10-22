@@ -6,7 +6,5 @@ pub(crate) trait MutexExt<T> {
 }
 
 impl<T> MutexExt<T> for Mutex<T> {
-    fn lock_unpoisoned(&self) -> MutexGuard<'_, T> {
-        self.lock().unwrap_or_else(PoisonError::into_inner)
-    }
+    fn lock_unpoisoned(&self) -> MutexGuard<'_, T> { self.lock().unwrap_or_else(PoisonError::into_inner) }
 }

@@ -26,9 +26,7 @@ use tuliprox_core::{
     utils::FileLockManager,
 };
 
-fn create_test_app_config() -> AppConfig {
-    create_test_app_config_with_conns(1)
-}
+fn create_test_app_config() -> AppConfig { create_test_app_config_with_conns(1) }
 
 fn create_test_app_config_with_conns(max_connections: u16) -> AppConfig {
     let input = Arc::new(ConfigInput {

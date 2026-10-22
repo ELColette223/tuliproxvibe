@@ -12,58 +12,40 @@ use std::{
 };
 
 impl<K: Ord, V> Default for BPlusTree<K, V> {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl<K: Ord, V> BPlusTree<K, V> {
-    pub const fn new() -> Self {
-        Self { entries: BTreeMap::new(), metadata: BPlusTreeMetadata::Empty, dirty: true }
-    }
+    pub const fn new() -> Self { Self { entries: BTreeMap::new(), metadata: BPlusTreeMetadata::Empty, dirty: true } }
 
-    pub fn get_metadata(&self) -> &BPlusTreeMetadata {
-        &self.metadata
-    }
+    pub fn get_metadata(&self) -> &BPlusTreeMetadata { &self.metadata }
 
     pub fn set_metadata(&mut self, metadata: BPlusTreeMetadata) {
         self.metadata = metadata;
         self.dirty = true;
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
 
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
+    pub fn len(&self) -> usize { self.entries.len() }
 
     pub fn insert(&mut self, key: K, value: V) {
         let _ = self.entries.insert(key, value);
         self.dirty = true;
     }
 
-    pub fn query(&self, key: &K) -> Option<&V> {
-        self.entries.get(key)
-    }
+    pub fn query(&self, key: &K) -> Option<&V> { self.entries.get(key) }
 
-    pub fn find_le(&self, key: &K) -> Option<(&K, &V)> {
-        self.entries.range(..=key).next_back()
-    }
+    pub fn find_le(&self, key: &K) -> Option<(&K, &V)> { self.entries.range(..=key).next_back() }
 
-    pub fn iter(&self) -> std::collections::btree_map::Iter<'_, K, V> {
-        self.entries.iter()
-    }
+    pub fn iter(&self) -> std::collections::btree_map::Iter<'_, K, V> { self.entries.iter() }
 }
 
 impl<'a, K: Ord, V> IntoIterator for &'a BPlusTree<K, V> {
     type Item = (&'a K, &'a V);
     type IntoIter = std::collections::btree_map::Iter<'a, K, V>;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.entries.iter()
-    }
+    fn into_iter(self) -> Self::IntoIter { self.entries.iter() }
 }
 
 impl<K, V> BPlusTree<K, V>

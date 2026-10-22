@@ -52,9 +52,7 @@ pub(in crate::segment_fetcher::tests) struct TestSegmentServer {
 }
 
 impl Drop for TestSegmentServer {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    fn drop(&mut self) { self.task.abort(); }
 }
 
 #[derive(Clone)]

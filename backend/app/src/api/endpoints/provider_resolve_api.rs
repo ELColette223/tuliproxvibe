@@ -275,9 +275,7 @@ mod tests {
         user
     }
 
-    fn input() -> ConfigInput {
-        input_with_provider_urls(vec!["http://provider.example.com".into()], None)
-    }
+    fn input() -> ConfigInput { input_with_provider_urls(vec!["http://provider.example.com".into()], None) }
 
     fn input_with_provider_urls(urls: Vec<Arc<str>>, current_index: Option<usize>) -> ConfigInput {
         let provider = Arc::new(ConfigProvider::from(&ConfigProviderDto {

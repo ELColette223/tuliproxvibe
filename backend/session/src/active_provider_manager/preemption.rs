@@ -78,9 +78,7 @@ impl ActiveProviderManager {
         }
     }
 
-    pub(super) fn get_grace_options(cfg: &AppConfig) -> GracePeriodOptions {
-        cfg.config.load().get_grace_options()
-    }
+    pub(super) fn get_grace_options(cfg: &AppConfig) -> GracePeriodOptions { cfg.config.load().get_grace_options() }
 
     pub(super) fn acquire_exact_connection_inner_no_preempt(
         &self,

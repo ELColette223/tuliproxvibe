@@ -354,9 +354,7 @@ pub(crate) struct TransformBuffer {
 }
 
 impl TransformBuffer {
-    pub(crate) fn new(items: Vec<PlaylistItem>) -> Self {
-        Self { items, grouping: GroupingPolicy::ExactCategory }
-    }
+    pub(crate) fn new(items: Vec<PlaylistItem>) -> Self { Self { items, grouping: GroupingPolicy::ExactCategory } }
 
     pub(crate) fn apply_filter(&mut self, target: &ConfigTarget) -> FilterOutcome {
         let mut outcome = FilterOutcome::default();
@@ -410,9 +408,7 @@ impl TransformBuffer {
         self.items = buckets.into_values().flatten().collect();
     }
 
-    pub(crate) fn into_groups(self) -> Vec<PlaylistGroup> {
-        group_items(self.items, self.grouping)
-    }
+    pub(crate) fn into_groups(self) -> Vec<PlaylistGroup> { group_items(self.items, self.grouping) }
 }
 
 pub(crate) fn group_items(items: Vec<PlaylistItem>, policy: GroupingPolicy) -> Vec<PlaylistGroup> {

@@ -21,9 +21,7 @@ pub(crate) enum LibraryUpdateMode {
 }
 
 impl LibraryUpdateMode {
-    pub(crate) fn reloads_input(self, input_id: u16) -> bool {
-        self == Self::Rescan { input_id }
-    }
+    pub(crate) fn reloads_input(self, input_id: u16) -> bool { self == Self::Rescan { input_id } }
 }
 
 /// The rebuild is not even started until the existing scanner reports complete success.

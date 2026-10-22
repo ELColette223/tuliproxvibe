@@ -357,9 +357,7 @@ impl HlsSegmentCache {
         self.capacity.lock_unpoisoned().session_bytes.get(&key.session_path_component()).copied().unwrap_or_default()
     }
 
-    pub(crate) fn accounted_global_bytes(&self) -> u64 {
-        self.capacity.lock_unpoisoned().total_bytes
-    }
+    pub(crate) fn accounted_global_bytes(&self) -> u64 { self.capacity.lock_unpoisoned().total_bytes }
 
     pub(crate) async fn session_revision_disk_bytes(&self, session: &crate::ProxySessionId) -> io::Result<u64> {
         let key = super::SegmentCacheKey::new(session.clone(), 0, "ts");

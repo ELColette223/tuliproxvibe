@@ -277,12 +277,8 @@ pub const ALL: &[EventDescriptor] = &[
 
 /// Look up the descriptor for an id.
 #[must_use]
-pub fn describe(id: EventId) -> Option<&'static EventDescriptor> {
-    ALL.iter().find(|d| d.id == id)
-}
+pub fn describe(id: EventId) -> Option<&'static EventDescriptor> { ALL.iter().find(|d| d.id == id) }
 
 /// Default severity for an id; `Info` for anything unregistered.
 #[must_use]
-pub fn default_severity(id: EventId) -> Severity {
-    describe(id).map_or(Severity::Info, |d| d.severity)
-}
+pub fn default_severity(id: EventId) -> Severity { describe(id).map_or(Severity::Info, |d| d.severity) }

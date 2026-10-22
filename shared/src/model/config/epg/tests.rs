@@ -4,9 +4,7 @@ use crate::defaults::{
     MAX_ICS_DOWNLOAD_BYTES_HARD_LIMIT, MAX_ICS_EVENTS_HARD_LIMIT, MAX_ICS_SUMMARY_LENGTH,
 };
 
-fn xmltv_source(url: &str) -> EpgSourceDto {
-    EpgSourceDto { url: url.to_owned(), ..EpgSourceDto::default() }
-}
+fn xmltv_source(url: &str) -> EpgSourceDto { EpgSourceDto { url: url.to_owned(), ..EpgSourceDto::default() } }
 
 fn ics_source(url: &str, channel_id: Option<&str>) -> EpgSourceDto {
     EpgSourceDto {

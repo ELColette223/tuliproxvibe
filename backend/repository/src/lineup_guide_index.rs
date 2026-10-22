@@ -110,9 +110,7 @@ pub fn lineup_guide_index_view(target: &ConfigTarget) -> Option<LineupGuideView>
     }
 }
 
-fn lineup_guide_file_name() -> String {
-    concat_string!("lineup_guide.", storage_const::FILE_SUFFIX_DB)
-}
+fn lineup_guide_file_name() -> String { concat_string!("lineup_guide.", storage_const::FILE_SUFFIX_DB) }
 
 /// Index file of the M3U view, next to the M3U playlist db of the target.
 pub fn m3u_lineup_guide_index_path(target_path: &Path) -> PathBuf {

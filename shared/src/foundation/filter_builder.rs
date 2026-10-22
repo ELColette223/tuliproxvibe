@@ -15,13 +15,9 @@ pub struct FilterBuilderError {
 }
 
 impl FilterBuilderError {
-    fn root(message: impl Into<String>) -> Self {
-        Self { path: Vec::new(), message: message.into() }
-    }
+    fn root(message: impl Into<String>) -> Self { Self { path: Vec::new(), message: message.into() } }
 
-    fn at(path: &[usize], message: impl Into<String>) -> Self {
-        Self { path: path.to_vec(), message: message.into() }
-    }
+    fn at(path: &[usize], message: impl Into<String>) -> Self { Self { path: path.to_vec(), message: message.into() } }
 }
 
 impl std::fmt::Display for FilterBuilderError {
@@ -199,13 +195,9 @@ pub fn compile_visual_rules_to_filter_dsl(
     // `!` starts a template placeholder (`!NAME!`) and is substituted textually
     // BEFORE the parser sees quoted strings, so any name containing `!` must be
     // matched with a regex that encodes it as `\x21` instead of a bare literal.
-    fn has_bang(value: &str) -> bool {
-        value.contains('!')
-    }
+    fn has_bang(value: &str) -> bool { value.contains('!') }
 
-    fn escape_dsl_string(value: &str) -> String {
-        value.replace('"', "\\\"")
-    }
+    fn escape_dsl_string(value: &str) -> String { value.replace('"', "\\\"") }
 
     fn regex_escape(value: &str) -> String {
         let mut out = String::with_capacity(value.len() + 8);
@@ -390,9 +382,7 @@ fn compile_node(
     }
 }
 
-fn escape_filter_string(value: &str) -> String {
-    value.replace('"', "\\\"")
-}
+fn escape_filter_string(value: &str) -> String { value.replace('"', "\\\"") }
 
 fn exact_managed_reference(expression: &str, rules: &[ManagedFilterRule]) -> Option<String> {
     rules.iter().find(|rule| expression == rule.placeholder()).map(|rule| rule.id.clone())

@@ -17,9 +17,7 @@ fn append_crc(mut section: Vec<u8>) -> Vec<u8> {
     section
 }
 
-fn psi_version_byte(version: u8, current: bool) -> u8 {
-    0xC0 | ((version & 0x1F) << 1) | u8::from(current)
-}
+fn psi_version_byte(version: u8, current: bool) -> u8 { 0xC0 | ((version & 0x1F) << 1) | u8::from(current) }
 
 fn pat_section_with_header(
     programs: &[(u16, u16)],
@@ -42,9 +40,7 @@ fn pat_section_with_header(
     append_crc(section)
 }
 
-fn pat_section(programs: &[(u16, u16)]) -> Vec<u8> {
-    pat_section_with_header(programs, 0, true, 0, 0)
-}
+fn pat_section(programs: &[(u16, u16)]) -> Vec<u8> { pat_section_with_header(programs, 0, true, 0, 0) }
 
 #[derive(Clone, Copy)]
 struct PmtSectionHeader {
@@ -318,9 +314,7 @@ impl VirtualTailReader {
 }
 
 impl Read for VirtualTailReader {
-    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
-        Ok(self.read_into(output))
-    }
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> { Ok(self.read_into(output)) }
 }
 
 impl AsyncRead for VirtualTailReader {

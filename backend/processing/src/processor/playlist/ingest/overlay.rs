@@ -237,13 +237,9 @@ impl StagedOverlayAssignment {
         true
     }
 
-    pub(super) fn staged_of(&self, provider_idx: usize) -> Option<usize> {
-        self.staged_by_provider[provider_idx]
-    }
+    pub(super) fn staged_of(&self, provider_idx: usize) -> Option<usize> { self.staged_by_provider[provider_idx] }
 
-    pub(super) fn is_assigned(&self, staged_idx: usize) -> bool {
-        self.provider_by_staged[staged_idx].is_some()
-    }
+    pub(super) fn is_assigned(&self, staged_idx: usize) -> bool { self.provider_by_staged[staged_idx].is_some() }
 }
 
 /// Resolves every staged group against the provider groups it overlays.

@@ -42,7 +42,5 @@ impl MetadataUpdateFailure {
     /// Per input, matching `StreamProbeFailure::dedup_key`: one broken
     /// provider should not page someone once per refresh cycle forever.
     #[must_use]
-    pub fn dedup_key(&self) -> String {
-        format!("metadata-update:{}", self.input)
-    }
+    pub fn dedup_key(&self) -> String { format!("metadata-update:{}", self.input) }
 }

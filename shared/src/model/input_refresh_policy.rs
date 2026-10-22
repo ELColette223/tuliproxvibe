@@ -33,20 +33,14 @@ impl InputRefreshPolicy {
     pub const FORCE: Self = Self { cache: CacheReadPolicy::Bypass, quality: UpdateQualityPolicy::Bypass };
 
     #[must_use]
-    pub const fn bypasses_cache(self) -> bool {
-        matches!(self.cache, CacheReadPolicy::Bypass)
-    }
+    pub const fn bypasses_cache(self) -> bool { matches!(self.cache, CacheReadPolicy::Bypass) }
 
     #[must_use]
-    pub const fn bypasses_quality(self) -> bool {
-        matches!(self.quality, UpdateQualityPolicy::Bypass)
-    }
+    pub const fn bypasses_quality(self) -> bool { matches!(self.quality, UpdateQualityPolicy::Bypass) }
 }
 
 impl Default for InputRefreshPolicy {
-    fn default() -> Self {
-        Self::NORMAL
-    }
+    fn default() -> Self { Self::NORMAL }
 }
 
 /// Applies a refresh policy to one configured input without changing its persisted configuration.

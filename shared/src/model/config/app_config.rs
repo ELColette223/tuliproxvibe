@@ -11,17 +11,11 @@ pub struct AppConfigDto {
 }
 
 impl AppConfigDto {
-    pub fn is_stream_history_enabled(&self) -> bool {
-        self.config.is_stream_history_enabled()
-    }
+    pub fn is_stream_history_enabled(&self) -> bool { self.config.is_stream_history_enabled() }
 
-    pub fn is_qos_aggregation_enabled(&self) -> bool {
-        self.config.is_qos_aggregation_enabled()
-    }
+    pub fn is_qos_aggregation_enabled(&self) -> bool { self.config.is_qos_aggregation_enabled() }
 
-    pub fn is_recording_enabled(&self) -> bool {
-        self.config.is_recording_enabled()
-    }
+    pub fn is_recording_enabled(&self) -> bool { self.config.is_recording_enabled() }
 }
 
 #[cfg(test)]

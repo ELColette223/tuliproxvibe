@@ -328,15 +328,11 @@ impl EventMessage {
 
     /// See [`EventKind::required_permission`].
     #[must_use]
-    pub const fn required_permission(&self) -> Permission {
-        self.kind().required_permission()
-    }
+    pub const fn required_permission(&self) -> Permission { self.kind().required_permission() }
 
     /// See [`EventKind::is_high_frequency`].
     #[must_use]
-    pub const fn is_high_frequency(&self) -> bool {
-        self.kind().is_high_frequency()
-    }
+    pub const fn is_high_frequency(&self) -> bool { self.kind().is_high_frequency() }
 }
 
 /// What one playlist refresh did.

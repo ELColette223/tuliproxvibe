@@ -41,9 +41,7 @@ extern "C" {
 struct ResizeSpy(JsValue);
 
 impl Drop for ResizeSpy {
-    fn drop(&mut self) {
-        restore_resize_spy(&self.0);
-    }
+    fn drop(&mut self) { restore_resize_spy(&self.0); }
 }
 
 #[component]
@@ -89,9 +87,7 @@ fn ObserverHarness() -> Html {
     }
 }
 
-async fn settle() {
-    TimeoutFuture::new(50).await;
-}
+async fn settle() { TimeoutFuture::new(50).await; }
 
 fn element(root: &Element, selector: &str) -> Result<Element, JsValue> {
     root.query_selector(selector)?.ok_or_else(|| JsValue::from_str(selector))

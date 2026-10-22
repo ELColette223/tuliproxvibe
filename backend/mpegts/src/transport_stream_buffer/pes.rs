@@ -70,9 +70,7 @@ impl HlsPendingPesHeader {
 }
 
 impl HlsTsPacketEvidence {
-    pub(super) const fn has_payload(self) -> bool {
-        self.payload_offset.is_some()
-    }
+    pub(super) const fn has_payload(self) -> bool { self.payload_offset.is_some() }
 }
 
 pub(super) fn inspect_hls_ts_packet(
@@ -222,9 +220,7 @@ fn append_pending_pes_header(
 }
 
 impl HlsPesHeaderAssembler {
-    pub(super) fn new() -> Self {
-        Self { pending: HashMap::with_capacity(8) }
-    }
+    pub(super) fn new() -> Self { Self { pending: HashMap::with_capacity(8) } }
 
     pub(super) fn push_packet(
         &mut self,

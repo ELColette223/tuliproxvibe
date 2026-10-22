@@ -43,9 +43,7 @@ use url::Url;
 /// per verdict lifetime and remembered in the process-wide memo. A name that cannot be resolved is
 /// reported as [`ResourceDestination::Private`]: callers must not hand a possibly internal name to a
 /// client, and the fetch attempt itself decides whether the destination is reachable.
-pub async fn classify_resource_destination(host: &str) -> ResourceDestination {
-    classify_host(host).await.0
-}
+pub async fn classify_resource_destination(host: &str) -> ResourceDestination { classify_host(host).await.0 }
 
 impl RequestFetchOptions {
     pub fn with_attempt_idle_timeout(timeout: Duration) -> Self {
@@ -396,9 +394,7 @@ impl TextContentBodyOptions {
 }
 
 impl TextContentFetchOptions {
-    pub const fn new(request: RequestFetchOptions, body: TextContentBodyOptions) -> Self {
-        Self { request, body }
-    }
+    pub const fn new(request: RequestFetchOptions, body: TextContentBodyOptions) -> Self { Self { request, body } }
 
     pub(super) fn with_request_options(request: RequestFetchOptions) -> Self {
         Self { body: TextContentBodyOptions::legacy_text_with_deadline(request.attempt_idle_timeout), request }

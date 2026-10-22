@@ -32,14 +32,10 @@ where
 }
 
 #[cfg(test)]
-pub(super) fn reset_internal_key_decode_count() {
-    INTERNAL_KEY_DECODE_COUNT.set(0);
-}
+pub(super) fn reset_internal_key_decode_count() { INTERNAL_KEY_DECODE_COUNT.set(0); }
 
 #[cfg(test)]
-pub(super) fn internal_key_decode_count() -> usize {
-    INTERNAL_KEY_DECODE_COUNT.get()
-}
+pub(super) fn internal_key_decode_count() -> usize { INTERNAL_KEY_DECODE_COUNT.get() }
 
 fn decode_internal_key<K>(encoded: &[u8]) -> io::Result<K>
 where
@@ -369,22 +365,14 @@ impl<K, V> BPlusTreeQuery<K, V> {
         }
     }
 
-    pub fn filepath(&self) -> &Path {
-        &self.snapshot.filepath
-    }
+    pub fn filepath(&self) -> &Path { &self.snapshot.filepath }
 
     /// The metadata carried in the database header of this snapshot.
-    pub fn metadata(&self) -> &BPlusTreeMetadata {
-        &self.header.metadata
-    }
+    pub fn metadata(&self) -> &BPlusTreeMetadata { &self.header.metadata }
 
-    pub fn snapshot_identity(&self) -> ([u8; 16], u64) {
-        (self.header.database_id, self.header.generation)
-    }
+    pub fn snapshot_identity(&self) -> ([u8; 16], u64) { (self.header.database_id, self.header.generation) }
 
-    pub(crate) fn snapshot_metadata(&self) -> &BPlusTreeMetadata {
-        &self.header.metadata
-    }
+    pub(crate) fn snapshot_metadata(&self) -> &BPlusTreeMetadata { &self.header.metadata }
 
     fn value_allocation_limit(&self) -> usize {
         self.file_len.saturating_mul(256).min(usize::try_from(u32::MAX).unwrap_or(usize::MAX))
@@ -676,13 +664,9 @@ where
         self.decode_entry_range(leaf_id, range).map(|entry| entry.map(|(_, value)| value))
     }
 
-    pub fn query(&mut self, key: &K) -> Result<Option<V>, BPlusTreeError> {
-        self.query_io(key).map_err(Into::into)
-    }
+    pub fn query(&mut self, key: &K) -> Result<Option<V>, BPlusTreeError> { self.query_io(key).map_err(Into::into) }
 
-    pub fn query_zero_copy(&mut self, key: &K) -> Result<Option<V>, BPlusTreeError> {
-        self.query(key)
-    }
+    pub fn query_zero_copy(&mut self, key: &K) -> Result<Option<V>, BPlusTreeError> { self.query(key) }
 
     fn locator_cell_range(&mut self, locator: Locator) -> io::Result<Range<usize>> {
         if self.locator_page_id != locator.leaf_page_id {
@@ -919,13 +903,9 @@ where
         }
     }
 
-    pub fn iter(&mut self) -> BPlusTreeDiskIterator<'_, K, V> {
-        BPlusTreeDiskIterator::new(self)
-    }
+    pub fn iter(&mut self) -> BPlusTreeDiskIterator<'_, K, V> { BPlusTreeDiskIterator::new(self) }
 
-    pub fn disk_iter(self) -> BPlusTreeDiskIteratorOwned<K, V> {
-        BPlusTreeDiskIteratorOwned::new(self)
-    }
+    pub fn disk_iter(self) -> BPlusTreeDiskIteratorOwned<K, V> { BPlusTreeDiskIteratorOwned::new(self) }
 
     pub fn range_iter(&mut self, start: Bound<&K>, end: Bound<&K>) -> BPlusTreeRangeIterator<'_, K, V>
     where

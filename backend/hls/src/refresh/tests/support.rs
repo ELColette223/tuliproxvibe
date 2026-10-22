@@ -201,9 +201,7 @@ pub(in crate::refresh::tests) type TestOriginHandler =
     Arc<dyn Fn(String) -> (u16, Vec<(&'static str, String)>, String) + Send + Sync>;
 
 impl Drop for TestOriginServer {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    fn drop(&mut self) { self.task.abort(); }
 }
 
 pub(in crate::refresh::tests) async fn spawn_test_origin(handler: TestOriginHandler) -> TestOriginServer {
@@ -511,9 +509,7 @@ pub(in crate::refresh::tests) struct ControlledSwitchOriginServer {
 }
 
 impl Drop for ControlledSwitchOriginServer {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    fn drop(&mut self) { self.task.abort(); }
 }
 
 pub(in crate::refresh::tests) async fn await_controlled_switch_segment_prefix<T: std::fmt::Debug>(
@@ -542,9 +538,7 @@ pub(in crate::refresh::tests) struct CriticalEmergencyOriginServer {
 }
 
 impl Drop for CriticalEmergencyOriginServer {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    fn drop(&mut self) { self.task.abort(); }
 }
 
 pub(in crate::refresh::tests) async fn read_test_request_path(socket: &mut tokio::net::TcpStream) -> Option<String> {

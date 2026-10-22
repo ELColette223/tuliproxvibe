@@ -21,9 +21,7 @@ fn build_season_episode_field(season: u32, episode: u32, field: &str) -> String 
 }
 
 #[inline]
-fn build_season_field(season: u32, field: &str) -> String {
-    concat_string!("nfo_s_", &season.to_string(), "_", field)
-}
+fn build_season_field(season: u32, field: &str) -> String { concat_string!("nfo_s_", &season.to_string(), "_", field) }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct XtreamSeriesInfoDoc {

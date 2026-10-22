@@ -139,9 +139,7 @@ async fn order_candidate(
     tuliprox_iptv::provider::PlaylistFetch::groups(groups)
 }
 
-fn group_names(groups: &[PlaylistGroup]) -> Vec<String> {
-    groups.iter().map(|group| group.title.to_string()).collect()
-}
+fn group_names(groups: &[PlaylistGroup]) -> Vec<String> { groups.iter().map(|group| group.title.to_string()).collect() }
 
 #[tokio::test]
 async fn m3u_update_quality_preserves_candidate_group_order_when_disabled() {

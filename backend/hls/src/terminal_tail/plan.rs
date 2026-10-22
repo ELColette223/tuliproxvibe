@@ -156,9 +156,7 @@ impl HlsTerminalTailPlan {
         self.prepared_segment(path).and_then(|segment| u64::try_from(segment.bytes.len()).ok())
     }
 
-    pub fn segment_content_type(&self) -> &'static str {
-        self.segment_content_type
-    }
+    pub fn segment_content_type(&self) -> &'static str { self.segment_content_type }
 
     /// Clones one immutable pre-rendered segment only for this plan generation.
     pub fn segment_bytes(&self, path: HlsTerminalSegmentPath) -> Option<Bytes> {
@@ -189,9 +187,7 @@ impl HlsTerminalTailPlan {
             .cloned()
     }
 
-    pub fn key_bindings(&self) -> Arc<[HlsTerminalKeyBinding]> {
-        Arc::clone(&self.key_bindings)
-    }
+    pub fn key_bindings(&self) -> Arc<[HlsTerminalKeyBinding]> { Arc::clone(&self.key_bindings) }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

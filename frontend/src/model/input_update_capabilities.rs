@@ -9,9 +9,7 @@ pub trait InputUpdateCapabilitiesExt {
 }
 
 impl InputUpdateCapabilitiesExt for InputUpdateCapabilities {
-    fn for_input(input: &ConfigInputDto) -> Self {
-        Self::for_input_type(input.input_type, input.enabled)
-    }
+    fn for_input(input: &ConfigInputDto) -> Self { Self::for_input_type(input.input_type, input.enabled) }
 
     fn selected_action(self, policy: InputRefreshPolicy) -> InputUpdateAction {
         match self {

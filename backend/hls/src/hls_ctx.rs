@@ -27,9 +27,7 @@ pub struct HlsCtx {
 
 impl HlsCtx {
     /// Give request-independent lease completion its authoritative user registry.
-    pub fn attach_lease_user_accounting(&self) {
-        self.hls_proxy.bind_lease_user_accounting(&self.active_users);
-    }
+    pub fn attach_lease_user_accounting(&self) { self.hls_proxy.bind_lease_user_accounting(&self.active_users); }
     /// The subset admission reads: it decides over connections and users, not
     /// over the cache.
     pub fn admission_ctx(&self) -> tuliprox_session::admission::AdmissionCtx {

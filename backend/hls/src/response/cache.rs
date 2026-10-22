@@ -74,9 +74,7 @@ impl HlsCacheResponseContext {
         }
     }
 
-    pub fn set_qos_meter(&self, qos_meter: Option<Arc<StreamMeterHandle>>) {
-        self.qos_meter.store(qos_meter);
-    }
+    pub fn set_qos_meter(&self, qos_meter: Option<Arc<StreamMeterHandle>>) { self.qos_meter.store(qos_meter); }
 
     pub async fn mark_media_activity(&self) {
         if let Some(marker) = &self.media_activity_marker {

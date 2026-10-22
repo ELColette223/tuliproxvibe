@@ -20,9 +20,7 @@ fn format_episode_code(season: u32, episode: u32) -> Option<String> {
     }
 }
 
-fn title_contains_episode_code(title: &str) -> bool {
-    CONSTANTS.re_episode_code.is_match(title)
-}
+fn title_contains_episode_code(title: &str) -> bool { CONSTANTS.re_episode_code.is_match(title) }
 
 pub(super) fn first_series_episode_value<T, F>(series: &SeriesStreamProperties, selector: F) -> Option<T>
 where

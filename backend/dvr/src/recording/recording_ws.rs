@@ -59,9 +59,7 @@ pub fn recording_view_denial(claims: &Claims) -> Option<RecordingViewDenial> {
     None
 }
 
-pub fn can_view_recording(claims: &Claims) -> bool {
-    recording_view_denial(claims).is_none()
-}
+pub fn can_view_recording(claims: &Claims) -> bool { recording_view_denial(claims).is_none() }
 
 pub fn task_visible_to(meta: &RecordingMetadata, claims: &Claims, subject_id: &UserId) -> bool {
     if claims.subject_id.is_none() || !can_view_recording(claims) {
@@ -134,9 +132,7 @@ fn quota_summary_for(
     }
 }
 
-fn current_revision(queue: &RecordingQueue) -> QueueRevision {
-    QueueRevision(queue.revision.load(Ordering::SeqCst))
-}
+fn current_revision(queue: &RecordingQueue) -> QueueRevision { QueueRevision(queue.revision.load(Ordering::SeqCst)) }
 
 #[cfg(test)]
 mod tests {
@@ -160,13 +156,9 @@ mod tests {
         }
     }
 
-    fn alice_claims() -> Claims {
-        claims_for("alice", Some(UserId::from("web:alice")), false)
-    }
+    fn alice_claims() -> Claims { claims_for("alice", Some(UserId::from("web:alice")), false) }
 
-    fn bob_claims() -> Claims {
-        claims_for("bob", Some(UserId::from("web:bob")), false)
-    }
+    fn bob_claims() -> Claims { claims_for("bob", Some(UserId::from("web:bob")), false) }
 
     fn no_read_claims() -> Claims {
         let mut c = alice_claims();

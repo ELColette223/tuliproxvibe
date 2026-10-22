@@ -14,9 +14,7 @@ pub(in crate::api::endpoints::hls_api::tests) struct TestSegmentOrigin {
 }
 
 impl Drop for TestSegmentOrigin {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    fn drop(&mut self) { self.task.abort(); }
 }
 
 impl TestSegmentOrigin {
@@ -131,9 +129,7 @@ pub(in crate::api::endpoints::hls_api::tests) struct TestEncodedManifestOrigin {
 }
 
 impl Drop for TestEncodedManifestOrigin {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    fn drop(&mut self) { self.task.abort(); }
 }
 
 pub(in crate::api::endpoints::hls_api::tests) async fn spawn_test_encoded_manifest_origin(
@@ -226,9 +222,7 @@ pub(in crate::api::endpoints::hls_api::tests) struct TestTransientOrigin {
 }
 
 impl Drop for TestTransientOrigin {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    fn drop(&mut self) { self.task.abort(); }
 }
 
 pub(in crate::api::endpoints::hls_api::tests) async fn spawn_test_transient_origin() -> TestTransientOrigin {

@@ -135,9 +135,7 @@ pub struct ApiProxyConfig {
 
 macros::from_impl!(ApiProxyConfig);
 impl From<&ApiProxyConfigDto> for ApiProxyConfig {
-    fn from(dto: &ApiProxyConfigDto) -> Self {
-        Self::from_dto_with_templates(dto, None)
-    }
+    fn from(dto: &ApiProxyConfigDto) -> Self { Self::from_dto_with_templates(dto, None) }
 }
 
 impl ApiProxyConfig {

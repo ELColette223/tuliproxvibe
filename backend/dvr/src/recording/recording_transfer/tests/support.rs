@@ -237,13 +237,9 @@ impl RecordingCapacityPort for LimitedCapacity {
         })
     }
 
-    fn capacity_changed(&self) -> Arc<Notify> {
-        self.notify.clone()
-    }
+    fn capacity_changed(&self) -> Arc<Notify> { self.notify.clone() }
 
-    fn is_input_in_maintenance(&self, _input_name: &str) -> bool {
-        false
-    }
+    fn is_input_in_maintenance(&self, _input_name: &str) -> bool { false }
 }
 
 #[cfg(unix)]
@@ -379,9 +375,7 @@ impl ConcurrentLiveFixture {
 
 #[cfg(unix)]
 impl Drop for ConcurrentLiveFixture {
-    fn drop(&mut self) {
-        self.cancel.cancel();
-    }
+    fn drop(&mut self) { self.cancel.cancel(); }
 }
 
 pub(in crate::recording::recording_transfer::tests) async fn read_request(

@@ -24,20 +24,14 @@ pub struct SharedSubscriberId(u32);
 
 impl SharedSubscriberId {
     #[inline]
-    pub const fn from_stream_uid(value: u32) -> Self {
-        Self(value)
-    }
+    pub const fn from_stream_uid(value: u32) -> Self { Self(value) }
 
     #[inline]
-    pub const fn stream_uid(self) -> u32 {
-        self.0
-    }
+    pub const fn stream_uid(self) -> u32 { self.0 }
 }
 
 impl fmt::Display for SharedSubscriberId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "sub#{}", self.0)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "sub#{}", self.0) }
 }
 
 /// Server-side unique number of one playback request.
@@ -46,26 +40,18 @@ pub struct PlaybackRequestId(u64);
 
 impl PlaybackRequestId {
     #[inline]
-    pub fn next() -> Self {
-        Self(NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed))
-    }
+    pub fn next() -> Self { Self(NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed)) }
 
     /// Constructs a caller-supplied id for tests or diagnostics.
     #[inline]
-    pub const fn from_raw(value: u64) -> Self {
-        Self(value)
-    }
+    pub const fn from_raw(value: u64) -> Self { Self(value) }
 
     #[inline]
-    pub const fn as_u64(self) -> u64 {
-        self.0
-    }
+    pub const fn as_u64(self) -> u64 { self.0 }
 }
 
 impl fmt::Display for PlaybackRequestId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "req#{}", self.0)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "req#{}", self.0) }
 }
 
 /// Identifier of one logical provider capacity slot lease.
@@ -74,25 +60,17 @@ pub struct PlaybackLeaseId(u64);
 
 impl PlaybackLeaseId {
     #[inline]
-    pub fn next() -> Self {
-        Self(NEXT_LEASE_ID.fetch_add(1, Ordering::Relaxed))
-    }
+    pub fn next() -> Self { Self(NEXT_LEASE_ID.fetch_add(1, Ordering::Relaxed)) }
 
     #[inline]
-    pub const fn from_raw(value: u64) -> Self {
-        Self(value)
-    }
+    pub const fn from_raw(value: u64) -> Self { Self(value) }
 
     #[inline]
-    pub const fn as_u64(self) -> u64 {
-        self.0
-    }
+    pub const fn as_u64(self) -> u64 { self.0 }
 }
 
 impl fmt::Display for PlaybackLeaseId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "lease#{}", self.0)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "lease#{}", self.0) }
 }
 
 /// Unambiguous identity of one provider binding incarnation.
@@ -109,9 +87,7 @@ pub struct ProviderBindingTag {
 
 impl ProviderBindingTag {
     #[inline]
-    pub const fn new(lease_id: PlaybackLeaseId, generation: u64) -> Self {
-        Self { lease_id, generation }
-    }
+    pub const fn new(lease_id: PlaybackLeaseId, generation: u64) -> Self { Self { lease_id, generation } }
 }
 
 /// Media class of a playback. Part of the family key, so a live TS playback and a
@@ -180,9 +156,7 @@ impl PlaybackKind {
 }
 
 impl fmt::Display for PlaybackKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.as_str()) }
 }
 
 /// Why a playback request ended. Each outcome has an explicit lease policy.
@@ -205,9 +179,7 @@ impl PlaybackRequestOutcome {
     /// Only a clean end of a playback that already produced media keeps the slot;
     /// failures and forced terminations release capacity immediately.
     #[inline]
-    pub const fn keeps_idle_lease(self) -> bool {
-        matches!(self, Self::Completed | Self::ClientClosed)
-    }
+    pub const fn keeps_idle_lease(self) -> bool { matches!(self, Self::Completed | Self::ClientClosed) }
 
     #[inline]
     pub const fn as_str(self) -> &'static str {
@@ -226,9 +198,7 @@ impl PlaybackRequestOutcome {
 }
 
 impl fmt::Display for PlaybackRequestOutcome {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.as_str()) }
 }
 
 /// Explains a provider selection or rejection decision in logs and metrics.
@@ -263,9 +233,7 @@ impl PlaybackSelectionReason {
 }
 
 impl fmt::Display for PlaybackSelectionReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.as_str()) }
 }
 
 #[cfg(test)]

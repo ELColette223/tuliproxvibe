@@ -228,9 +228,7 @@ pub(super) fn sort_account_aliases_keep_root_first(accounts: &mut Vec<AccountCre
     accounts.extend(aliases);
 }
 
-pub(super) fn is_account_valid(exp_date: Option<i64>) -> bool {
-    exp_date.is_some() && !is_input_expired(exp_date)
-}
+pub(super) fn is_account_valid(exp_date: Option<i64>) -> bool { exp_date.is_some() && !is_input_expired(exp_date) }
 
 pub(super) fn count_valid_accounts(accounts: &[AccountCredentials]) -> usize {
     accounts.iter().filter(|acct| is_account_valid(acct.exp_date)).count()

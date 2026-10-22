@@ -297,15 +297,9 @@ mod tests {
         recording: RecordingMetadata,
     }
     impl super::QuotaRecordingTaskView for T {
-        fn state(&self) -> &RecordingTaskState {
-            &self.state
-        }
-        fn recording(&self) -> &RecordingMetadata {
-            &self.recording
-        }
-        fn uuid(&self) -> &str {
-            &self.uuid
-        }
+        fn state(&self) -> &RecordingTaskState { &self.state }
+        fn recording(&self) -> &RecordingMetadata { &self.recording }
+        fn uuid(&self) -> &str { &self.uuid }
     }
 
     fn completed(

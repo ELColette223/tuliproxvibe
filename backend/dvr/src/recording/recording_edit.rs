@@ -39,9 +39,7 @@ pub struct PaddingBounds {
 ///
 /// Delegates to the transition graph so the edit cutoff cannot drift from the
 /// action the UI offers.
-pub fn state_is_editable(state: RecordingTaskState) -> bool {
-    recording_transition::can_edit(state)
-}
+pub fn state_is_editable(state: RecordingTaskState) -> bool { recording_transition::can_edit(state) }
 
 pub fn validate_padding(pre_roll_secs: u64, post_roll_secs: u64, bounds: PaddingBounds) -> Result<(), EditError> {
     if pre_roll_secs > bounds.max_pre_roll_secs || post_roll_secs > bounds.max_post_roll_secs {
@@ -67,9 +65,7 @@ pub fn channel_changed(
 mod tests {
     use super::*;
 
-    fn bounds() -> PaddingBounds {
-        PaddingBounds { max_pre_roll_secs: 900, max_post_roll_secs: 1800 }
-    }
+    fn bounds() -> PaddingBounds { PaddingBounds { max_pre_roll_secs: 900, max_post_roll_secs: 1800 } }
 
     #[test]
     fn state_is_editable_accepts_only_upcoming_states() {

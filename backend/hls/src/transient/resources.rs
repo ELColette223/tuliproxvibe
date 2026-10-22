@@ -12,9 +12,7 @@ impl TransientPassthroughState {
         self.rolling_event_rewrite_seed = None;
     }
 
-    pub(crate) fn origin_account_generation(&self) -> u64 {
-        self.origin_account_generation
-    }
+    pub(crate) fn origin_account_generation(&self) -> u64 { self.origin_account_generation }
 
     /// Whether this mapping may initiate origin work for the current account.
     pub fn origin_resource_is_fetchable(&self, resource: &TransientResourceRef, now_ms: u64) -> bool {
@@ -129,9 +127,7 @@ impl TransientPassthroughState {
         self.resolve_current_resource(resource_id, now_ms)
     }
 
-    pub fn prune_expired(&mut self, now_ms: u64) {
-        self.prune_expired_except(now_ms, &HashSet::new());
-    }
+    pub fn prune_expired(&mut self, now_ms: u64) { self.prune_expired_except(now_ms, &HashSet::new()); }
 
     pub fn prune_expired_except(&mut self, now_ms: u64, protected: &HashSet<TransientResourceId>) {
         let expired_resource_ids = self

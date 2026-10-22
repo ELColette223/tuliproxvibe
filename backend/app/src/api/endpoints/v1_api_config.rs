@@ -42,9 +42,7 @@ use std::{
     sync::Arc,
 };
 
-fn file_revision_from_bytes(bytes: &[u8]) -> String {
-    blake3::hash(bytes).to_hex().to_string()
-}
+fn file_revision_from_bytes(bytes: &[u8]) -> String { blake3::hash(bytes).to_hex().to_string() }
 
 /// Target-bouquet file updates derived from a sources configuration change.
 struct BouquetMutationBatch {

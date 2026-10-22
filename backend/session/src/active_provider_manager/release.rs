@@ -17,17 +17,11 @@ use tuliprox_core::model::{
 pub(super) struct ProviderAllocationGuard(pub(super) Option<ProviderAllocation>);
 
 impl ProviderAllocationGuard {
-    pub(super) fn new(allocation: ProviderAllocation) -> Self {
-        Self(Some(allocation))
-    }
+    pub(super) fn new(allocation: ProviderAllocation) -> Self { Self(Some(allocation)) }
 
-    pub(super) fn allocation(&self) -> &ProviderAllocation {
-        self.0.as_ref().unwrap_or(&ProviderAllocation::Exhausted)
-    }
+    pub(super) fn allocation(&self) -> &ProviderAllocation { self.0.as_ref().unwrap_or(&ProviderAllocation::Exhausted) }
 
-    pub(super) fn take(&mut self) -> ProviderAllocation {
-        self.0.take().unwrap_or(ProviderAllocation::Exhausted)
-    }
+    pub(super) fn take(&mut self) -> ProviderAllocation { self.0.take().unwrap_or(ProviderAllocation::Exhausted) }
 }
 
 impl Drop for ProviderAllocationGuard {
@@ -53,9 +47,7 @@ impl Drop for ManagedProviderHandle {
 }
 
 impl ActiveProviderManagerCore {
-    pub fn complete_release(&self, alloc_id: AllocationId) {
-        self.complete_release_with_generation(alloc_id, None);
-    }
+    pub fn complete_release(&self, alloc_id: AllocationId) { self.complete_release_with_generation(alloc_id, None); }
 
     pub fn complete_release_with_generation(&self, alloc_id: AllocationId, generation: Option<u64>) {
         let _transition = self.lock_capacity_transition();

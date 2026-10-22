@@ -148,22 +148,16 @@ mod tests {
     struct CollectSink(Arc<Mutex<Vec<EventMessage>>>);
 
     impl EventSink for CollectSink {
-        fn emit(&self, event: EventMessage) {
-            self.0.lock().expect("event sink lock").push(event);
-        }
+        fn emit(&self, event: EventMessage) { self.0.lock().expect("event sink lock").push(event); }
     }
 
     fn rejection(cluster: XtreamCluster) -> ClusterUpdateRejection {
         ClusterUpdateRejection { cluster, current_count: 12_543, candidate_count: 217, threshold: 90, quality: 1 }
     }
 
-    fn run_id() -> PlaylistUpdateRunId {
-        "fetch-outcome-run".into()
-    }
+    fn run_id() -> PlaylistUpdateRunId { "fetch-outcome-run".into() }
 
-    fn execution_order() -> PlaylistUpdateRunOrder {
-        PlaylistUpdateRunOrder::from(41)
-    }
+    fn execution_order() -> PlaylistUpdateRunOrder { PlaylistUpdateRunOrder::from(41) }
 
     #[test]
     fn playlist_update_run_mixed_cluster_fetch_reports_correlated_rejection() {

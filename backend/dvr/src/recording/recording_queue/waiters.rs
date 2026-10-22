@@ -8,9 +8,7 @@ use tokio::sync::{Notify, RwLock};
 pub(super) type RecordingWaiters = Arc<StdMutex<Vec<RecordingWaiter>>>;
 
 impl Drop for RecordingWaitRegistration {
-    fn drop(&mut self) {
-        lock_unpoisoned(&self.waiters).retain(|waiter| waiter.id != self.id);
-    }
+    fn drop(&mut self) { lock_unpoisoned(&self.waiters).retain(|waiter| waiter.id != self.id); }
 }
 
 #[derive(Clone)]
@@ -29,9 +27,7 @@ pub enum RecordingWaitOutcome {
 }
 
 impl Default for RecordingSlotWaitQueue {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl RecordingSlotWaitQueue {

@@ -118,9 +118,7 @@ impl HlsPostProcessingDeadline {
         Self { started: Instant::now(), timeout: Duration::from_millis(timeout_ms.max(100)) }
     }
 
-    pub(super) fn remaining(&self) -> Option<Duration> {
-        self.timeout.checked_sub(self.started.elapsed())
-    }
+    pub(super) fn remaining(&self) -> Option<Duration> { self.timeout.checked_sub(self.started.elapsed()) }
 }
 
 #[derive(Debug, Default)]

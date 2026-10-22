@@ -35,9 +35,7 @@ pub(super) enum XmlTagType {
 
 impl XmlTagType {
     #[inline]
-    pub fn is_tv(self) -> bool {
-        self == XmlTagType::Tv
-    }
+    pub fn is_tv(self) -> bool { self == XmlTagType::Tv }
 }
 
 pub(super) fn get_tag_type(name: &str) -> XmlTagType {
@@ -88,9 +86,7 @@ pub(super) type FinishedEpgChannels = (Option<HashMap<Arc<str>, Arc<str>>>, Vec<
 pub type MergedEpgWithIconOverrides = (Epg, HashSet<Arc<str>>);
 
 impl EpgMergeAccumulator {
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     pub(super) fn channel_ids_with_programmes(&self) -> HashSet<Arc<str>> {
         self.channels

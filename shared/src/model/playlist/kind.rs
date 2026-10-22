@@ -26,16 +26,12 @@ pub enum XtreamCluster {
 }
 
 impl XtreamCluster {
-    pub fn as_str(&self) -> &str {
-        self.as_ref()
-    }
+    pub fn as_str(&self) -> &str { self.as_ref() }
 
     /// True when this cluster is the Xtream `Series` cluster. Used in
     /// bucket-key computations and dispatch sites that previously
     /// spelled out `== XtreamCluster::Series` inline.
-    pub fn is_series(self) -> bool {
-        matches!(self, Self::Series)
-    }
+    pub fn is_series(self) -> bool { matches!(self, Self::Series) }
 
     pub fn as_stream_type(&self) -> &str {
         match self {
@@ -65,9 +61,7 @@ impl XtreamCluster {
 /// call sites in four crates. See [`PlaylistItemType::cluster`].
 impl From<PlaylistItemType> for XtreamCluster {
     #[inline]
-    fn from(item_type: PlaylistItemType) -> Self {
-        item_type.cluster()
-    }
+    fn from(item_type: PlaylistItemType) -> Self { item_type.cluster() }
 }
 
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, Serialize, Deserialize, Default, EnumIter)]
@@ -150,19 +144,13 @@ impl PlaylistItemType {
         )
     }
 
-    pub fn is_live_adaptive(&self) -> bool {
-        matches!(self, PlaylistItemType::LiveHls | PlaylistItemType::LiveDash)
-    }
+    pub fn is_live_adaptive(&self) -> bool { matches!(self, PlaylistItemType::LiveHls | PlaylistItemType::LiveDash) }
 
     /// True for VOD item types (`Video` or `LocalVideo`).
-    pub fn is_video(&self) -> bool {
-        matches!(self, PlaylistItemType::Video | PlaylistItemType::LocalVideo)
-    }
+    pub fn is_video(&self) -> bool { matches!(self, PlaylistItemType::Video | PlaylistItemType::LocalVideo) }
 
     /// True for concrete series item types (`Series` or `LocalSeries`); excludes the `SeriesInfo` containers.
-    pub fn is_series(&self) -> bool {
-        matches!(self, PlaylistItemType::Series | PlaylistItemType::LocalSeries)
-    }
+    pub fn is_series(&self) -> bool { matches!(self, PlaylistItemType::Series | PlaylistItemType::LocalSeries) }
 
     /// Controls address tracking only.
     /// Do not use this to decide whether a playback request should use session-based admission
@@ -189,9 +177,7 @@ impl PlaylistItemType {
         )
     }
 
-    pub fn as_u8(self) -> u8 {
-        self as u8
-    }
+    pub fn as_u8(self) -> u8 { self as u8 }
 
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -236,34 +222,24 @@ impl PlaylistItemType {
     }
 
     #[inline]
-    pub const fn is_cluster(&self, cluster: XtreamCluster) -> bool {
-        self.cluster() as u8 == cluster as u8
-    }
+    pub const fn is_cluster(&self, cluster: XtreamCluster) -> bool { self.cluster() as u8 == cluster as u8 }
 }
 
 impl Display for PlaylistItemType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.as_str()) }
 }
 
 impl Internable for PlaylistItemType {
-    fn intern(self) -> Arc<str> {
-        self.as_str().intern()
-    }
+    fn intern(self) -> Arc<str> { self.as_str().intern() }
 }
 
 impl Internable for XtreamCluster {
-    fn intern(self) -> Arc<str> {
-        self.as_str().intern()
-    }
+    fn intern(self) -> Arc<str> { self.as_str().intern() }
 }
 
 impl PlaylistItemTypeSet {
     #[inline]
-    pub fn empty() -> Self {
-        Self(0)
-    }
+    pub fn empty() -> Self { Self(0) }
 
     #[inline]
     pub fn from_item(item: PlaylistItemType) -> Self {
@@ -272,22 +248,14 @@ impl PlaylistItemTypeSet {
     }
 
     #[inline]
-    pub fn insert(&mut self, item: PlaylistItemType) {
-        self.0 |= 1u16 << ((item as u8) - 1);
-    }
+    pub fn insert(&mut self, item: PlaylistItemType) { self.0 |= 1u16 << ((item as u8) - 1); }
 
     #[inline]
-    pub fn remove(&mut self, item: PlaylistItemType) {
-        self.0 &= !(1u16 << ((item as u8) - 1));
-    }
+    pub fn remove(&mut self, item: PlaylistItemType) { self.0 &= !(1u16 << ((item as u8) - 1)); }
 
     #[inline]
-    pub fn is_set(&self, item: PlaylistItemType) -> bool {
-        (self.0 & (1u16 << ((item as u8) - 1))) != 0
-    }
+    pub fn is_set(&self, item: PlaylistItemType) -> bool { (self.0 & (1u16 << ((item as u8) - 1))) != 0 }
 
     #[inline]
-    pub fn bits(self) -> u16 {
-        self.0
-    }
+    pub fn bits(self) -> u16 { self.0 }
 }

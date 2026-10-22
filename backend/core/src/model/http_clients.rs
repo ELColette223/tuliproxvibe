@@ -41,7 +41,5 @@ impl HttpClients {
 
 impl Default for HttpClients {
     /// Unconfigured clients; for tests and contexts built without a server.
-    fn default() -> Self {
-        Self::new(Client::new(), Client::new(), Client::new(), Client::new(), Client::new())
-    }
+    fn default() -> Self { Self::new(Client::new(), Client::new(), Client::new(), Client::new(), Client::new()) }
 }

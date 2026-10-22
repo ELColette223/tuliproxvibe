@@ -32,9 +32,7 @@ pub struct PlaylistService {
     epg_grid_path: String,
 }
 impl Default for PlaylistService {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl PlaylistService {
@@ -261,9 +259,7 @@ fn build_playlist_update_request(targets: &[&str]) -> PlaylistUpdateRequestDto {
     }
 }
 
-fn build_playlist_update_bulk_request() -> PlaylistUpdateRequestDto {
-    PlaylistUpdateRequestDto::default()
-}
+fn build_playlist_update_bulk_request() -> PlaylistUpdateRequestDto { PlaylistUpdateRequestDto::default() }
 
 fn build_manual_input_update_request(
     target_ids: &[u16],

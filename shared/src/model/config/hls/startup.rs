@@ -25,14 +25,10 @@ crate::impl_str_enum!(HlsStartupMode, "HLS startup mode",
 
 impl HlsStartupMode {
     /// Raw revisions stream to the first viewer before origin EOF.
-    pub const fn streams_raw_revisions(self) -> bool {
-        matches!(self, Self::Progressive | Self::Optimistic)
-    }
+    pub const fn streams_raw_revisions(self) -> bool { matches!(self, Self::Progressive | Self::Optimistic) }
 
     /// Startup successors are publishable once the origin accepted them, before body bytes arrive.
-    pub const fn publishes_pending_successors(self) -> bool {
-        matches!(self, Self::Optimistic)
-    }
+    pub const fn publishes_pending_successors(self) -> bool { matches!(self, Self::Optimistic) }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -60,9 +56,7 @@ impl Default for HlsStartupConfigDto {
 }
 
 impl HlsStartupConfigDto {
-    pub fn is_empty(&self) -> bool {
-        self == &Self::default()
-    }
+    pub fn is_empty(&self) -> bool { self == &Self::default() }
 
     pub fn prepare(&self) -> Result<(), TuliproxError> {
         let segment =

@@ -132,9 +132,7 @@ pub fn get_api_user_db_path(cfg: &AppConfig) -> PathBuf {
 ///
 /// `backup_dir` keeps its own role: `backup_api_user_db_file` still copies
 /// there, which is an independent safety net rather than a competing one.
-fn api_user_recovery_root(cfg: &AppConfig) -> PathBuf {
-    PathBuf::from(&cfg.paths.load().config_path)
-}
+fn api_user_recovery_root(cfg: &AppConfig) -> PathBuf { PathBuf::from(&cfg.paths.load().config_path) }
 
 /// Open the User API database with its recovery history.
 ///

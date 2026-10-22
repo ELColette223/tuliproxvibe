@@ -83,9 +83,7 @@ impl HlsTransientDirectResponseFinalizer {
         }))
     }
 
-    pub(super) fn finish_client_aborted(&mut self) {
-        self.context.take();
-    }
+    pub(super) fn finish_client_aborted(&mut self) { self.context.take(); }
 }
 
 impl Drop for HlsTransientDirectResponseFinalizer {

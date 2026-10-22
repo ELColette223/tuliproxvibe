@@ -287,9 +287,7 @@ mod tests {
     use std::{collections::BTreeSet, sync::Arc};
     use tuliprox_core::model::ConfigWatch;
 
-    fn set(names: &[&str]) -> BTreeSet<Arc<str>> {
-        names.iter().map(|n| Arc::from(*n)).collect()
-    }
+    fn set(names: &[&str]) -> BTreeSet<Arc<str>> { names.iter().map(|n| Arc::from(*n)).collect() }
 
     fn titles(count: usize) -> BTreeSet<Arc<str>> {
         // Zero-padded so the `BTreeSet` order matches the numeric order.

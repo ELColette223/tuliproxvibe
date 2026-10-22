@@ -25,17 +25,13 @@ use yew::prelude::*;
 /// section at all? Any user with `recording.read` can list rules; creation
 /// needs `recording.manage`.
 #[allow(dead_code)]
-pub fn can_show_rules_section(has_recording_read: bool) -> bool {
-    has_recording_read
-}
+pub fn can_show_rules_section(has_recording_read: bool) -> bool { has_recording_read }
 
 /// Permission gate: may the principal create new rules? Owners
 /// can create private rules; only administrators can create shared
 /// rules.
 #[allow(dead_code)]
-pub fn can_create_rule(has_recording_manage: bool) -> bool {
-    has_recording_manage
-}
+pub fn can_create_rule(has_recording_manage: bool) -> bool { has_recording_manage }
 
 /// Permission gate: may the principal create a *shared* rule?
 /// Administrators with `recording.manage` only.
@@ -175,9 +171,7 @@ pub fn rule_schedule_label(translate: &YewI18n, rule: &RecordingRuleResponse) ->
 }
 
 /// Translate a rule-service failure for display.
-fn error_message(translate: &YewI18n, error: &RecordingError) -> String {
-    translate.t(error.i18n_key())
-}
+fn error_message(translate: &YewI18n, error: &RecordingError) -> String { translate.t(error.i18n_key()) }
 
 pub const fn should_fetch_recording_rules(active: bool, recording_enabled: bool, has_loaded: bool) -> bool {
     active && recording_enabled && !has_loaded

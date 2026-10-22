@@ -1,12 +1,8 @@
 use super::*;
 
-fn test_source() -> RecordingSource {
-    RecordingSource::new("target-1", "v-1", "input-a")
-}
+fn test_source() -> RecordingSource { RecordingSource::new("target-1", "v-1", "input-a") }
 
-fn test_owner() -> RecordingOwner {
-    RecordingOwner::User(UserId::from("web:abc"))
-}
+fn test_owner() -> RecordingOwner { RecordingOwner::User(UserId::from("web:abc")) }
 
 #[test]
 fn legacy_recording_source_defaults_to_live_cluster() {

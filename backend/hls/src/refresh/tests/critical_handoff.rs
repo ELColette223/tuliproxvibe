@@ -150,9 +150,7 @@ async fn critical_handoff_lock_busy_retry_retains_staged_state_until_acquired() 
     }
 
     impl Drop for StagedRetentionProbe {
-        fn drop(&mut self) {
-            self.drops.fetch_add(1, Ordering::SeqCst);
-        }
+        fn drop(&mut self) { self.drops.fetch_add(1, Ordering::SeqCst); }
     }
 
     let drops = Arc::new(AtomicUsize::new(0));

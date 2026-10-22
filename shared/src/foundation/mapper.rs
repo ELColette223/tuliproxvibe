@@ -17,9 +17,7 @@ pub struct ValueAccessor<'a> {
 }
 
 impl ValueAccessor<'_> {
-    pub fn get(&self, field: &str) -> Option<Arc<str>> {
-        self.pli.header.get_field(field)
-    }
+    pub fn get(&self, field: &str) -> Option<Arc<str>> { self.pli.header.get_field(field) }
 
     pub fn set(&mut self, field: &str, value: &str) {
         if self.pli.header.set_field(field, value) {

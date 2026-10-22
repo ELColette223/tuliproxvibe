@@ -142,9 +142,7 @@ impl Config {
         self.video.as_ref().and_then(|video| video.recording.as_ref())
     }
 
-    fn lexical_normalize(path: &Path) -> PathBuf {
-        path.components().collect::<PathBuf>()
-    }
+    fn lexical_normalize(path: &Path) -> PathBuf { path.components().collect::<PathBuf>() }
 
     fn normalize_storage_path(
         raw_storage_dir: &str,

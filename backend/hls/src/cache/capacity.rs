@@ -55,9 +55,7 @@ pub enum CacheInvalidationOutcome {
 }
 
 impl Drop for CapacityInvalidationGuard {
-    fn drop(&mut self) {
-        invalidate_capacity_state(&self.capacity, &self.changed);
-    }
+    fn drop(&mut self) { invalidate_capacity_state(&self.capacity, &self.changed); }
 }
 
 impl CapacityMutationReservation {
@@ -132,9 +130,7 @@ impl CapacityMutationReservation {
         Ok(())
     }
 
-    pub(super) fn mark_filesystem_mutation_started(&mut self) {
-        self.filesystem_mutation_started = true;
-    }
+    pub(super) fn mark_filesystem_mutation_started(&mut self) { self.filesystem_mutation_started = true; }
 
     pub(super) fn finish_replacement(mut self) {
         let mut capacity = self.capacity.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

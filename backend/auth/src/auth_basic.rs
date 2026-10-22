@@ -24,9 +24,7 @@ where
 }
 
 impl AuthBasic {
-    fn from_header(contents: (String, String)) -> Self {
-        Self(contents)
-    }
+    fn from_header(contents: (String, String)) -> Self { Self(contents) }
 
     fn decode_request_parts(req: &mut Parts) -> Result<Self, Rejection> {
         let authorization = req

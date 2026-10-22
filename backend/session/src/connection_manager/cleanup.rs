@@ -489,19 +489,13 @@ impl ConnectionManager {
         })
     }
 
-    pub fn send_cleanup(&self, event: CleanupEvent) {
-        self.cleanup_sender.enqueue(event);
-    }
+    pub fn send_cleanup(&self, event: CleanupEvent) { self.cleanup_sender.enqueue(event); }
 
-    pub fn cleanup_tx(&self) -> mpsc::Sender<CleanupEvent> {
-        self.cleanup_sender.tx.clone()
-    }
+    pub fn cleanup_tx(&self) -> mpsc::Sender<CleanupEvent> { self.cleanup_sender.tx.clone() }
 
     /// Reserved control lane for cleanup permits that must never be starved by a
     /// saturated body-cleanup queue (HLS origin I/O, shutdown).
-    pub fn control_cleanup_tx(&self) -> mpsc::Sender<CleanupEvent> {
-        self.control_cleanup_tx.clone()
-    }
+    pub fn control_cleanup_tx(&self) -> mpsc::Sender<CleanupEvent> { self.control_cleanup_tx.clone() }
 
     pub fn dropped_cleanup_events(&self) -> u64 {
         self.cleanup_sender.dropped_count() + self.user_manager.dropped_cleanup_events.load(Ordering::Relaxed)

@@ -18,27 +18,19 @@ impl PlaylistUpdateRunId {
 }
 
 impl AsRef<str> for PlaylistUpdateRunId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
+    fn as_ref(&self) -> &str { &self.0 }
 }
 
 impl fmt::Display for PlaylistUpdateRunId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result { formatter.write_str(&self.0) }
 }
 
 impl From<&str> for PlaylistUpdateRunId {
-    fn from(value: &str) -> Self {
-        Self(value.into())
-    }
+    fn from(value: &str) -> Self { Self(value.into()) }
 }
 
 impl From<String> for PlaylistUpdateRunId {
-    fn from(value: String) -> Self {
-        Self(value.into())
-    }
+    fn from(value: String) -> Self { Self(value.into()) }
 }
 
 /// Monotonic order assigned when a playlist update enters actual execution.
@@ -51,15 +43,11 @@ pub struct PlaylistUpdateRunOrder(u64);
 
 impl PlaylistUpdateRunOrder {
     #[must_use]
-    pub const fn get(self) -> u64 {
-        self.0
-    }
+    pub const fn get(self) -> u64 { self.0 }
 }
 
 impl From<u64> for PlaylistUpdateRunOrder {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
+    fn from(value: u64) -> Self { Self(value) }
 }
 
 /// Terminal state of one playlist update run.

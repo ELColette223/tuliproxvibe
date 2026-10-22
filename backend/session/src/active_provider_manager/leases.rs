@@ -20,15 +20,11 @@ pub(super) enum OwnerProviderPin {
 
 impl<'a> PlaybackLeaseRef<'a> {
     /// Compatibility view of a bare session owner: one request, live TS semantics.
-    pub fn for_session_owner(owner: &'a str) -> Self {
-        Self::new(owner, PlaybackKind::LiveTs)
-    }
+    pub fn for_session_owner(owner: &'a str) -> Self { Self::new(owner, PlaybackKind::LiveTs) }
 }
 
 impl CapacityReleases for ProviderLeaseTable {
-    fn take_released_providers(&mut self) -> Vec<Arc<str>> {
-        ProviderLeaseTable::take_released_providers(self)
-    }
+    fn take_released_providers(&mut self) -> Vec<Arc<str>> { ProviderLeaseTable::take_released_providers(self) }
 }
 
 impl ManagedProviderHandle {
@@ -269,9 +265,7 @@ impl ActiveProviderManager {
 
     /// Confirms real media activity for a playback lease. Only a confirmed lease may
     /// outlive its request as a reconnect slot.
-    pub fn confirm_playback_activity(&self, owner: &str) -> Option<PlaybackLeaseId> {
-        self.confirm_owner(owner, None)
-    }
+    pub fn confirm_playback_activity(&self, owner: &str) -> Option<PlaybackLeaseId> { self.confirm_owner(owner, None) }
 
     /// Confirms real media activity for a specific request ID of a playback lease.
     pub fn confirm_identified_playback_activity(

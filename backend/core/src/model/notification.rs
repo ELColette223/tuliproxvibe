@@ -424,9 +424,7 @@ mod tests {
         }
     }
 
-    fn watch_items(names: &[&str]) -> WatchItems {
-        WatchItems::complete(names.iter().map(|n| Arc::from(*n)).collect())
-    }
+    fn watch_items(names: &[&str]) -> WatchItems { WatchItems::complete(names.iter().map(|n| Arc::from(*n)).collect()) }
 
     #[test]
     fn watch_text_lists_groups_then_channels_instead_of_dumping_json() {

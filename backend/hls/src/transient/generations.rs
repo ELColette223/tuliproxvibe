@@ -10,9 +10,7 @@ use tuliprox_parser::hls::origin_manifest::HlsManifestWindowPolicy;
 
 impl TransientPassthroughState {
     #[cfg(test)]
-    pub(crate) const fn manifest_generation(&self) -> u64 {
-        self.manifest_generation
-    }
+    pub(crate) const fn manifest_generation(&self) -> u64 { self.manifest_generation }
 
     pub const fn current_finalized_manifest_generation(&self) -> Option<TransientManifestGeneration> {
         self.current_finalized_manifest_generation
@@ -31,9 +29,7 @@ impl TransientPassthroughState {
         self.last_manifest_commit_identity = Some(identity);
     }
 
-    pub(crate) const fn last_manifest_finalized(&self) -> bool {
-        self.last_manifest_validity.is_finalized()
-    }
+    pub(crate) const fn last_manifest_finalized(&self) -> bool { self.last_manifest_validity.is_finalized() }
 
     pub fn last_manifest_template(&self) -> Option<Arc<HlsTransientManifestTemplate>> {
         self.last_manifest_template.clone()
@@ -91,9 +87,7 @@ impl TransientPassthroughState {
     }
 
     #[cfg(test)]
-    pub(crate) fn finalized_manifest_generation_count(&self) -> usize {
-        self.finalized_manifest_generations.len()
-    }
+    pub(crate) fn finalized_manifest_generation_count(&self) -> usize { self.finalized_manifest_generations.len() }
 
     #[cfg(test)]
     pub(crate) fn finalized_manifest_lease_binding_count(&self) -> usize {

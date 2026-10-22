@@ -17,9 +17,7 @@ use std::sync::{
 const ORIGIN_WINDOW_SEGMENTS: u64 = 6;
 const SEGMENT_BODY: &[u8] = &[0x47; 8_192];
 
-fn origin_playlist(head: u64) -> Vec<u8> {
-    origin_playlist_with_duration(head, 2)
-}
+fn origin_playlist(head: u64) -> Vec<u8> { origin_playlist_with_duration(head, 2) }
 
 pub(super) fn origin_playlist_with_duration(head: u64, target_duration: u64) -> Vec<u8> {
     use std::fmt::Write;

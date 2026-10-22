@@ -81,55 +81,37 @@ impl Default for InputUpdateCardRuntime {
 
 impl InputUpdateCardRuntime {
     #[must_use]
-    pub const fn status(&self) -> InputUpdateCardStatus {
-        self.status
-    }
+    pub const fn status(&self) -> InputUpdateCardStatus { self.status }
 
     /// Completion of the correlated input-to-target run, independent of input success.
     #[must_use]
-    pub const fn action_status(&self) -> InputUpdateCardStatus {
-        self.action_status
-    }
+    pub const fn action_status(&self) -> InputUpdateCardStatus { self.action_status }
 
     #[must_use]
-    pub fn details(&self) -> &[String] {
-        &self.details
-    }
+    pub fn details(&self) -> &[String] { &self.details }
 
     #[must_use]
-    pub fn localized_details(&self) -> &[PlaylistUpdateProgressDetail] {
-        &self.localized_details
-    }
+    pub fn localized_details(&self) -> &[PlaylistUpdateProgressDetail] { &self.localized_details }
 
     /// Stable identity of the run that currently determines this card's status.
     #[must_use]
-    pub fn run_id(&self) -> Option<&PlaylistUpdateRunId> {
-        self.run_id.as_ref()
-    }
+    pub fn run_id(&self) -> Option<&PlaylistUpdateRunId> { self.run_id.as_ref() }
 
     /// Execution order of the run that currently determines this card's status.
     #[must_use]
-    pub const fn execution_order(&self) -> Option<PlaylistUpdateRunOrder> {
-        self.execution_order
-    }
+    pub const fn execution_order(&self) -> Option<PlaylistUpdateRunOrder> { self.execution_order }
 
     /// Effective policy proven by request acceptance or typed backend telemetry.
     #[must_use]
-    pub const fn refresh_policy(&self) -> Option<InputRefreshPolicy> {
-        self.refresh_policy
-    }
+    pub const fn refresh_policy(&self) -> Option<InputRefreshPolicy> { self.refresh_policy }
 
     /// Typed input facts emitted by the backend for this effective run.
     #[must_use]
-    pub const fn input_telemetry(&self) -> Option<&PlaylistUpdateInputTelemetry> {
-        self.input_telemetry.as_ref()
-    }
+    pub const fn input_telemetry(&self) -> Option<&PlaylistUpdateInputTelemetry> { self.input_telemetry.as_ref() }
 
     /// Scanner result belonging exclusively to this effective run and input.
     #[must_use]
-    pub const fn library_scan_result(&self) -> Option<&LibraryScanResult> {
-        self.library_scan_result.as_ref()
-    }
+    pub const fn library_scan_result(&self) -> Option<&LibraryScanResult> { self.library_scan_result.as_ref() }
 }
 
 struct EffectiveInputRun<'a> {
@@ -219,9 +201,7 @@ pub struct PlaylistUpdateCardStatuses {
 }
 
 impl Default for PlaylistUpdateCardStatuses {
-    fn default() -> Self {
-        Self::for_connection(WebSocketConnectionContext::default())
-    }
+    fn default() -> Self { Self::for_connection(WebSocketConnectionContext::default()) }
 }
 
 impl PlaylistUpdateCardStatuses {
@@ -652,9 +632,7 @@ pub enum PlaylistUpdateCardStatusAction {
 impl Reducible for PlaylistUpdateCardStatuses {
     type Action = PlaylistUpdateCardStatusAction;
 
-    fn reduce(self: Rc<Self>, action: Self::Action) -> Rc<Self> {
-        Rc::new((*self).clone().apply(action))
-    }
+    fn reduce(self: Rc<Self>, action: Self::Action) -> Rc<Self> { Rc::new((*self).clone().apply(action)) }
 }
 
 /// Two deliberately separate scopes for the global action: server-side
@@ -714,13 +692,9 @@ mod tests {
     };
     use std::sync::Arc;
 
-    fn run_id(value: &str) -> PlaylistUpdateRunId {
-        value.into()
-    }
+    fn run_id(value: &str) -> PlaylistUpdateRunId { value.into() }
 
-    fn execution_order(value: u64) -> PlaylistUpdateRunOrder {
-        PlaylistUpdateRunOrder::from(value)
-    }
+    fn execution_order(value: u64) -> PlaylistUpdateRunOrder { PlaylistUpdateRunOrder::from(value) }
 
     const fn connection(socket_epoch: u64) -> WebSocketConnectionContext {
         WebSocketConnectionContext::new(socket_epoch, true)
@@ -730,9 +704,7 @@ mod tests {
         WebSocketConnectionContext::new(socket_epoch, false)
     }
 
-    fn statuses() -> PlaylistUpdateCardStatuses {
-        PlaylistUpdateCardStatuses::for_connection(connection(1))
-    }
+    fn statuses() -> PlaylistUpdateCardStatuses { PlaylistUpdateCardStatuses::for_connection(connection(1)) }
 
     const fn connection_changed(connection_context: WebSocketConnectionContext) -> PlaylistUpdateCardStatusAction {
         PlaylistUpdateCardStatusAction::ConnectionChanged(connection_context)

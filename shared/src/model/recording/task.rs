@@ -16,14 +16,10 @@ pub enum RecordingKind {
 
 impl RecordingKind {
     /// Live is captured within a programme window; VOD and Series run to EOF.
-    pub fn is_scheduled(self) -> bool {
-        matches!(self, Self::Live)
-    }
+    pub fn is_scheduled(self) -> bool { matches!(self, Self::Live) }
 
     /// Only VOD and Series may be paused and resumed.
-    pub fn is_resumable(self) -> bool {
-        matches!(self, Self::Vod | Self::Series)
-    }
+    pub fn is_resumable(self) -> bool { matches!(self, Self::Vod | Self::Series) }
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -35,9 +31,7 @@ impl RecordingKind {
 }
 
 impl fmt::Display for RecordingKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.as_str()) }
 }
 
 /// Which controls a recording currently offers.
@@ -171,9 +165,7 @@ pub enum RecordingTaskState {
 }
 
 impl RecordingTaskState {
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
-    }
+    pub fn is_terminal(self) -> bool { matches!(self, Self::Completed | Self::Failed | Self::Cancelled) }
 
     /// Stable label used by the edit rules, logs and errors.
     pub fn label(self) -> &'static str {
@@ -216,7 +208,5 @@ impl From<RecordingTaskState> for super::super::transfer::TransferStatusDto {
 pub struct QueueRevision(pub u64);
 
 impl fmt::Display for QueueRevision {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
 }

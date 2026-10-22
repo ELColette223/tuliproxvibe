@@ -104,9 +104,7 @@ fn provider_cookie_pairs(headers: &HeaderMap) -> impl Iterator<Item = &str> {
         .filter(|pair| !pair.is_empty())
 }
 
-fn provider_cookie_name(pair: &str) -> &str {
-    pair.split_once('=').map_or(pair, |(name, _)| name).trim()
-}
+fn provider_cookie_name(pair: &str) -> &str { pair.split_once('=').map_or(pair, |(name, _)| name).trim() }
 
 pub fn hls_origin_headers_with_provider_session(
     source_headers: &HeaderMap,

@@ -45,9 +45,7 @@ pub(super) struct HlsObservedFill {
 }
 
 impl Drop for HlsObservedFill {
-    fn drop(&mut self) {
-        self.revision.revision().fail();
-    }
+    fn drop(&mut self) { self.revision.revision().fail(); }
 }
 
 impl HlsObservedFill {

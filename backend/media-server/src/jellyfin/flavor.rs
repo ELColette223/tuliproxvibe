@@ -36,9 +36,7 @@ mod tests {
     use crate::{emby::flavor::EmbyFamilyFlavor, MediaServerErrorKind};
     use shared::utils::short_hash;
 
-    fn identity() -> EmbyClientIdentity {
-        EmbyClientIdentity::new("input", Some("alice"))
-    }
+    fn identity() -> EmbyClientIdentity { EmbyClientIdentity::new("input", Some("alice")) }
 
     fn expected_identity() -> String {
         format!(

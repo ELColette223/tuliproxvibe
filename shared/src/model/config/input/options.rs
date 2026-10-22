@@ -33,9 +33,7 @@ pub enum FlussonicHlsCatchup {
 }
 
 impl FlussonicHlsCatchup {
-    pub fn is_native(value: &Self) -> bool {
-        matches!(value, Self::Native)
-    }
+    pub fn is_native(value: &Self) -> bool { matches!(value, Self::Native) }
 }
 
 /// How the local connection cap of a provider is treated when it is reached.
@@ -54,13 +52,9 @@ pub enum ConnectionLimitPolicy {
     RotateOnFull,
 }
 
-pub fn is_default_connection_limit_policy(v: &ConnectionLimitPolicy) -> bool {
-    *v == ConnectionLimitPolicy::default()
-}
+pub fn is_default_connection_limit_policy(v: &ConnectionLimitPolicy) -> bool { *v == ConnectionLimitPolicy::default() }
 
-pub const fn default_flussonic_hls_catchup_max_duration_secs() -> u32 {
-    4 * 60 * 60
-}
+pub const fn default_flussonic_hls_catchup_max_duration_secs() -> u32 { 4 * 60 * 60 }
 
 fn is_default_flussonic_hls_catchup_max_duration_secs(value: &u32) -> bool {
     *value == default_flussonic_hls_catchup_max_duration_secs()

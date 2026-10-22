@@ -163,9 +163,7 @@ impl HlsMediaActivityMarker {
         });
     }
 
-    pub(super) fn completed_segment_marker(&self) -> Option<Self> {
-        self.completed_segment.map(|_| self.clone())
-    }
+    pub(super) fn completed_segment_marker(&self) -> Option<Self> { self.completed_segment.map(|_| self.clone()) }
 
     pub(super) fn record_startup_segment_request(&self, proxy_seq: u64, now_ms: u64) {
         self.manager.startup_observability().record_first_visible_segment_request(&self.lease_id, proxy_seq, now_ms);

@@ -263,7 +263,5 @@ impl RecordingQueue {
         }
     }
 
-    pub async fn promote_due_scheduled_now(&self) -> usize {
-        self.promote_due_scheduled(Utc::now().timestamp()).await
-    }
+    pub async fn promote_due_scheduled_now(&self) -> usize { self.promote_due_scheduled(Utc::now().timestamp()).await }
 }

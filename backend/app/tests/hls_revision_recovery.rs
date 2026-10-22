@@ -153,9 +153,7 @@ impl Fixture {
         }
     }
 
-    fn log(&self) -> String {
-        std::fs::read_to_string(self.directory.path().join("sut.log")).unwrap()
-    }
+    fn log(&self) -> String { std::fs::read_to_string(self.directory.path().join("sut.log")).unwrap() }
 
     async fn playback(&mut self, client: &reqwest::Client) -> String {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(30);

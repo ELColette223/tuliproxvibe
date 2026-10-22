@@ -84,9 +84,7 @@ const RETRYABLE_FFMPEG_PHRASES: &[&str] = &[
 /// `connection_refused` would flip every fatal error into a retryable
 /// one and the worker would spin until the recording window closed.
 /// The classifier must only see ffmpeg's own words.
-fn is_url_token(token: &str) -> bool {
-    token.contains("://")
-}
+fn is_url_token(token: &str) -> bool { token.contains("://") }
 
 /// Rebuild `message` with every URL token replaced, or dropped when
 /// `replacement` is `None`.
@@ -98,15 +96,11 @@ fn replace_url_tokens(message: &str, replacement: Option<&str>) -> String {
         .join(" ")
 }
 
-fn strip_url_tokens(message: &str) -> String {
-    replace_url_tokens(message, None).to_ascii_lowercase()
-}
+fn strip_url_tokens(message: &str) -> String { replace_url_tokens(message, None).to_ascii_lowercase() }
 
 /// Keep a transfer failure readable without exposing stream URLs or
 /// access tokens in logs, recording status and lifecycle notifications.
-pub(crate) fn redact_url_tokens(message: &str) -> String {
-    replace_url_tokens(message, Some("[stream URL]"))
-}
+pub(crate) fn redact_url_tokens(message: &str) -> String { replace_url_tokens(message, Some("[stream URL]")) }
 
 fn is_retryable_ffmpeg_failure_message(message: &str) -> bool {
     let msg = strip_url_tokens(message);
@@ -177,9 +171,7 @@ async fn recording_resume_or_retry_is_unsupported(download: &RecordingTask) -> b
 /// not leak half-written output on disk. Best-effort: missing file or
 /// permission errors are swallowed because the next attempt's `-y` flag
 /// will overwrite any survivor anyway.
-async fn cleanup_partial(partial_path: &Path) {
-    let _ = tokio::fs::remove_file(partial_path).await;
-}
+async fn cleanup_partial(partial_path: &Path) { let _ = tokio::fs::remove_file(partial_path).await; }
 
 async fn finalize_stopped_recording(
     output: Result<std::io::Result<std::process::Output>, tokio::time::error::Elapsed>,

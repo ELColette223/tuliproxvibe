@@ -12,9 +12,7 @@ impl ProbeHandleGuard {
     }
 
     #[inline]
-    pub fn handle(&self) -> Option<&ProviderHandle> {
-        self.0.handle()
-    }
+    pub fn handle(&self) -> Option<&ProviderHandle> { self.0.handle() }
 
     pub fn release(self) {
         // The inner managed handle releases the slot synchronously on drop.

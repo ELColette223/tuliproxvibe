@@ -56,9 +56,7 @@ pub(super) struct CommonInputFormProps {
 }
 
 impl PartialEq for CommonInputFormProps {
-    fn eq(&self, _other: &Self) -> bool {
-        false
-    }
+    fn eq(&self, _other: &Self) -> bool { false }
 }
 
 #[component]
@@ -188,9 +186,7 @@ pub(super) enum OptionsKind {
 }
 
 impl OptionsKind {
-    pub(super) const fn supports_update_quality(self) -> bool {
-        !matches!(self, Self::Basic)
-    }
+    pub(super) const fn supports_update_quality(self) -> bool { !matches!(self, Self::Basic) }
 }
 
 fn update_quality_value(update_quality: ConfigInputUpdateQualityDto, cluster: XtreamCluster) -> u8 {
@@ -326,9 +322,7 @@ pub(super) struct InputOptionsFormProps {
 }
 
 impl PartialEq for InputOptionsFormProps {
-    fn eq(&self, _other: &Self) -> bool {
-        false
-    }
+    fn eq(&self, _other: &Self) -> bool { false }
 }
 
 #[component]

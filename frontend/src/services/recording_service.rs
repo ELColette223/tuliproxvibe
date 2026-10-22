@@ -353,17 +353,11 @@ impl RecordingService {
 
     /// Override the base path. Tests use this to point at a mock
     /// server; production uses the default constructed by `new`.
-    pub fn with_base_path(base_path: String) -> Self {
-        Self { base_path }
-    }
+    pub fn with_base_path(base_path: String) -> Self { Self { base_path } }
 
-    fn requests_path(&self) -> String {
-        concat_path_leading_slash(&self.base_path, "requests")
-    }
+    fn requests_path(&self) -> String { concat_path_leading_slash(&self.base_path, "requests") }
 
-    fn request_path(&self, id: &str) -> String {
-        concat_path_leading_slash(&self.base_path, &format!("requests/{id}"))
-    }
+    fn request_path(&self, id: &str) -> String { concat_path_leading_slash(&self.base_path, &format!("requests/{id}")) }
 
     /// The physical recording behind an entry. Administrator-only on the
     /// server, and a different id space from a request.
@@ -371,21 +365,13 @@ impl RecordingService {
         concat_path_leading_slash(&self.base_path, &format!("materializations/{id}"))
     }
 
-    fn conflicts_path(&self) -> String {
-        concat_path_leading_slash(&self.base_path, "conflicts/preview")
-    }
+    fn conflicts_path(&self) -> String { concat_path_leading_slash(&self.base_path, "conflicts/preview") }
 
-    fn rules_path(&self) -> String {
-        concat_path_leading_slash(&self.base_path, "rules")
-    }
+    fn rules_path(&self) -> String { concat_path_leading_slash(&self.base_path, "rules") }
 
-    fn rule_path(&self, id: &str) -> String {
-        concat_path_leading_slash(&self.base_path, &format!("rules/{id}"))
-    }
+    fn rule_path(&self, id: &str) -> String { concat_path_leading_slash(&self.base_path, &format!("rules/{id}")) }
 
-    fn availability_path(&self) -> String {
-        concat_path_leading_slash(&self.base_path, "availability")
-    }
+    fn availability_path(&self) -> String { concat_path_leading_slash(&self.base_path, "availability") }
 
     /// POST /recording/requests — create a recording. The request must
     /// carry source identifiers, never a free-form URL. Answers 204: the
@@ -599,9 +585,7 @@ fn extract_error_code(e: &Error) -> Option<String> {
 }
 
 impl Default for RecordingService {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[cfg(test)]

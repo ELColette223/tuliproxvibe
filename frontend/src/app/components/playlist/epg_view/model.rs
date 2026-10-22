@@ -43,9 +43,7 @@ pub(super) struct EpgGridModel {
 pub(super) struct ModelRef(pub Rc<EpgGridModel>);
 
 impl PartialEq for ModelRef {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
+    fn eq(&self, other: &Self) -> bool { Rc::ptr_eq(&self.0, &other.0) }
 }
 
 fn hours_minutes(secs_of_day: i64) -> (i64, i64) {
@@ -80,9 +78,7 @@ impl RequestSeq {
         self.0
     }
 
-    pub fn is_current(&self, token: u32) -> bool {
-        self.0 == token
-    }
+    pub fn is_current(&self, token: u32) -> bool { self.0 == token }
 }
 
 /// Completes one load: applies `result` only if `token` is still current, and always hides

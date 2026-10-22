@@ -18,14 +18,10 @@ pub struct LanguageInfo {
     pub dir: String,
 }
 
-fn default_dir() -> String {
-    "ltr".to_string()
-}
+fn default_dir() -> String { "ltr".to_string() }
 
 impl LanguageInfo {
-    pub fn is_rtl(&self) -> bool {
-        self.dir.eq_ignore_ascii_case("rtl")
-    }
+    pub fn is_rtl(&self) -> bool { self.dir.eq_ignore_ascii_case("rtl") }
 
     pub fn display_label(&self) -> String {
         if self.label.is_empty() {
@@ -81,9 +77,7 @@ pub struct YewI18n {
 }
 
 impl PartialEq for YewI18n {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.inner, &other.inner)
-    }
+    fn eq(&self, other: &Self) -> bool { Rc::ptr_eq(&self.inner, &other.inner) }
 }
 
 impl YewI18n {
@@ -113,9 +107,7 @@ impl YewI18n {
         Self { inner: Rc::new(i18n) }
     }
 
-    pub fn t(&self, key: &str) -> String {
-        self.inner.t(key)
-    }
+    pub fn t(&self, key: &str) -> String { self.inner.t(key) }
 }
 
 #[derive(Debug, Clone, PartialEq, Properties)]
@@ -147,9 +139,7 @@ pub fn i18n_provider(props: &I18nProviderProps) -> Html {
 }
 
 #[hook]
-pub fn use_translation() -> YewI18n {
-    use_context::<YewI18n>().expect("No I18n context provided")
-}
+pub fn use_translation() -> YewI18n { use_context::<YewI18n>().expect("No I18n context provided") }
 
 #[cfg(test)]
 mod locale_file_tests {
@@ -173,9 +163,7 @@ mod locale_file_tests {
             struct KeysVisitor;
             impl<'de> Visitor<'de> for KeysVisitor {
                 type Value = Keys;
-                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    f.write_str("a translation object")
-                }
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("a translation object") }
                 fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Keys, A::Error> {
                     let mut keys = BTreeSet::new();
                     let mut own = BTreeSet::new();

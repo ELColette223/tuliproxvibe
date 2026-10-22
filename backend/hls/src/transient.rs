@@ -185,15 +185,11 @@ pub struct TransientPassthroughState {
 }
 
 impl TransientPassthroughState {
-    pub fn has_active_resource_readers(&self) -> bool {
-        self.active_resource_readers() > 0
-    }
+    pub fn has_active_resource_readers(&self) -> bool { self.active_resource_readers() > 0 }
 }
 
 impl Default for TransientPassthroughState {
-    fn default() -> Self {
-        Self::new(DEFAULT_TRANSIENT_RESOURCE_TTL_MS)
-    }
+    fn default() -> Self { Self::new(DEFAULT_TRANSIENT_RESOURCE_TTL_MS) }
 }
 
 impl fmt::Debug for TransientPassthroughState {
@@ -235,9 +231,7 @@ impl fmt::Debug for TransientPassthroughState {
 pub struct TransientResourceStore;
 
 impl TransientResourceStore {
-    pub fn new() -> Self {
-        Self
-    }
+    pub fn new() -> Self { Self }
 }
 
 fn default_content_type_for_transient_ext(extension: &str) -> Option<&'static str> {

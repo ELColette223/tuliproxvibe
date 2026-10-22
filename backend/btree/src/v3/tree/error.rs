@@ -6,13 +6,9 @@ pub(in crate::v3) enum PublishDatabaseError {
 
 use std::io;
 
-pub(super) fn invalid_data(message: &'static str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message)
-}
+pub(super) fn invalid_data(message: &'static str) -> io::Error { io::Error::new(io::ErrorKind::InvalidData, message) }
 
-pub(super) fn invalid_input(message: &'static str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, message)
-}
+pub(super) fn invalid_input(message: &'static str) -> io::Error { io::Error::new(io::ErrorKind::InvalidInput, message) }
 
 impl PublishDatabaseError {
     pub(in crate::v3) const fn database_was_published(&self) -> bool {
@@ -27,7 +23,5 @@ impl PublishDatabaseError {
 }
 
 impl From<PublishDatabaseError> for io::Error {
-    fn from(error: PublishDatabaseError) -> Self {
-        error.into_io()
-    }
+    fn from(error: PublishDatabaseError) -> Self { error.into_io() }
 }

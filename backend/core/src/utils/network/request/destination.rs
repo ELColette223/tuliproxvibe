@@ -182,14 +182,10 @@ fn classify_ipv6(address: Ipv6Addr) -> ResourceDestination {
 /// Whether an address is publicly routable.
 ///
 /// Derived from [`classify_ip`] so classification and this answer cannot drift apart.
-pub fn is_public_ip(address: IpAddr) -> bool {
-    classify_ip(address) == ResourceDestination::Public
-}
+pub fn is_public_ip(address: IpAddr) -> bool { classify_ip(address) == ResourceDestination::Public }
 
 /// Strips the brackets of an IPv6 literal so that it parses as an address.
-fn host_literal(host: &str) -> &str {
-    host.strip_prefix('[').and_then(|value| value.strip_suffix(']')).unwrap_or(host)
-}
+fn host_literal(host: &str) -> &str { host.strip_prefix('[').and_then(|value| value.strip_suffix(']')).unwrap_or(host) }
 
 struct RememberedDestination {
     verdict: ResourceDestination,

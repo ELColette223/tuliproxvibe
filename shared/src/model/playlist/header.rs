@@ -113,9 +113,7 @@ impl PlaylistItemHeader {
     }
 
     #[inline]
-    pub const fn get_uuid(&self) -> &UUIDType {
-        &self.uuid
-    }
+    pub const fn get_uuid(&self) -> &UUIDType { &self.uuid }
 
     pub fn get_provider_id(&mut self) -> Option<u32> {
         match get_provider_id(&self.id, &self.url) {

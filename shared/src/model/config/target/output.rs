@@ -146,9 +146,7 @@ pub struct HdHomeRunTargetOutputDto {
 }
 
 impl Default for HdHomeRunTargetOutputDto {
-    fn default() -> Self {
-        Self { device: String::new(), username: String::new(), use_output: Some(TargetType::M3u) }
-    }
+    fn default() -> Self { Self { device: String::new(), username: String::new(), use_output: Some(TargetType::M3u) } }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]

@@ -112,9 +112,7 @@ impl HlsTransientReadGuard {
 }
 
 impl Drop for HlsTransientReadGuard {
-    fn drop(&mut self) {
-        self.access.reader_finished();
-    }
+    fn drop(&mut self) { self.access.reader_finished(); }
 }
 
 impl HlsTransientOriginIoGuard {

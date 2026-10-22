@@ -8,9 +8,7 @@ pub struct CompiledRegex {
 }
 
 impl PartialEq for CompiledRegex {
-    fn eq(&self, other: &Self) -> bool {
-        self.restr == other.restr
-    }
+    fn eq(&self, other: &Self) -> bool { self.restr == other.restr }
 }
 
 #[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]

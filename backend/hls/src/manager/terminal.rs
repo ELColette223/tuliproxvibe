@@ -261,9 +261,7 @@ impl HlsProxyManager {
         }
     }
 
-    pub fn terminal_pending(&self) -> Arc<HlsTerminalPendingCoordinator> {
-        Arc::clone(&self.terminal_pending)
-    }
+    pub fn terminal_pending(&self) -> Arc<HlsTerminalPendingCoordinator> { Arc::clone(&self.terminal_pending) }
 
     /// Cancels terminal work frozen before newly committed shared media
     /// progress. Callers must not hold the session or lease-store lock; late
@@ -273,9 +271,7 @@ impl HlsProxyManager {
         self.terminal_commit_retries.cancel_session(proxy_session_id);
     }
 
-    pub fn terminal_commit_now_ms(&self) -> u64 {
-        self.terminal_commit_clock.now_ms()
-    }
+    pub fn terminal_commit_now_ms(&self) -> u64 { self.terminal_commit_clock.now_ms() }
 
     #[cfg(any(test, feature = "test-support"))]
     pub async fn wait_for_prepared_terminal_bundle(

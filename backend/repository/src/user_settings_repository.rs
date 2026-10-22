@@ -18,9 +18,7 @@ pub struct SettingsOwner {
 }
 
 impl SettingsOwner {
-    pub fn local() -> Self {
-        Self { subject_id: "local:no_auth".into(), username: "no_auth".into() }
-    }
+    pub fn local() -> Self { Self { subject_id: "local:no_auth".into(), username: "no_auth".into() } }
 
     pub fn authenticated(subject: &UserId, username: &str) -> Result<Self, SettingsError> {
         if username.is_empty()

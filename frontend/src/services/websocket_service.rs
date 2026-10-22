@@ -34,28 +34,18 @@ pub struct WebSocketConnectionContext {
 
 impl WebSocketConnectionContext {
     #[must_use]
-    pub const fn new(socket_epoch: u64, connected: bool) -> Self {
-        Self { socket_epoch, connected }
-    }
+    pub const fn new(socket_epoch: u64, connected: bool) -> Self { Self { socket_epoch, connected } }
 
     #[must_use]
-    pub const fn is_connected(self) -> bool {
-        self.connected
-    }
+    pub const fn is_connected(self) -> bool { self.connected }
 
     #[must_use]
-    pub fn is_same_live_connection(self, other: Self) -> bool {
-        self.connected && self == other
-    }
+    pub fn is_same_live_connection(self, other: Self) -> bool { self.connected && self == other }
 }
 
-const fn next_socket_epoch(current: u64) -> u64 {
-    current.saturating_add(1)
-}
+const fn next_socket_epoch(current: u64) -> u64 { current.saturating_add(1) }
 
-const fn socket_epoch_is_current(current: u64, candidate: u64) -> bool {
-    current == candidate
-}
+const fn socket_epoch_is_current(current: u64, candidate: u64) -> bool { current == candidate }
 
 fn reconnect_delay(attempt: u16) -> u32 {
     if attempt < 6 {
@@ -77,9 +67,7 @@ const fn is_idempotent_request(msg: &ProtocolMessage) -> bool {
 }
 
 /// User commands act on live server state; a delayed or silently dropped delivery is worse than an error.
-const fn requires_live_connection(msg: &ProtocolMessage) -> bool {
-    matches!(msg, ProtocolMessage::UserAction(_))
-}
+const fn requires_live_connection(msg: &ProtocolMessage) -> bool { matches!(msg, ProtocolMessage::UserAction(_)) }
 
 /// Queues `bytes` until the connection is authorized. Idempotent requests are queued once,
 /// and the oldest message is dropped when the queue is full.
@@ -125,9 +113,7 @@ impl ActiveSocket {
         }
     }
 
-    pub(crate) fn websocket(&self) -> &WebSocket {
-        &self.ws
-    }
+    pub(crate) fn websocket(&self) -> &WebSocket { &self.ws }
 }
 
 impl Drop for ActiveSocket {
@@ -162,9 +148,7 @@ pub struct WebSocketService(Rc<WebSocketInner>);
 impl Deref for WebSocketService {
     type Target = WebSocketInner;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 impl WebSocketService {
@@ -184,9 +168,7 @@ impl WebSocketService {
         }))
     }
 
-    pub fn is_connected(&self) -> bool {
-        self.connected.get()
-    }
+    pub fn is_connected(&self) -> bool { self.connected.get() }
 
     #[must_use]
     pub fn connection_context(&self) -> WebSocketConnectionContext {
@@ -606,9 +588,7 @@ mod browser_tests {
         service.socket.borrow().as_ref().map(|socket| socket.ws.clone())
     }
 
-    fn reconnect_wait_ms() -> u32 {
-        reconnect_delay(1) + 100
-    }
+    fn reconnect_wait_ms() -> u32 { reconnect_delay(1) + 100 }
 
     #[wasm_bindgen_test]
     fn unauthorized_callback_disconnects_and_allows_signing_in_again() -> Result<(), JsValue> {

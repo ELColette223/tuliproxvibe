@@ -24,9 +24,7 @@ fn strm_without_username() -> TargetOutputDto {
     TargetOutputDto::Strm(StrmTargetOutputDto { directory: "/tmp/strm".to_string(), ..StrmTargetOutputDto::default() })
 }
 
-fn xtream_output() -> TargetOutputDto {
-    TargetOutputDto::Xtream(XtreamTargetOutputDto::default())
-}
+fn xtream_output() -> TargetOutputDto { TargetOutputDto::Xtream(XtreamTargetOutputDto::default()) }
 
 #[test]
 fn shipped_tmdb_example_is_safe_by_default_and_prepares_when_explicitly_enabled() {

@@ -36,9 +36,7 @@ impl Default for MediaServerCatalogConfigDto {
 }
 
 impl MediaServerCatalogConfigDto {
-    pub fn is_default(&self) -> bool {
-        self == &Self::default()
-    }
+    pub fn is_default(&self) -> bool { self == &Self::default() }
 
     pub fn prepare(&self, input_name: &Arc<str>) -> Result<(), TuliproxError> {
         if self.page_size == 0 {

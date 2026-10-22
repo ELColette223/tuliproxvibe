@@ -176,9 +176,7 @@ pub fn UserSettingsProvider(props: &UserSettingsProviderProps) -> Html {
 }
 
 #[hook]
-pub fn use_user_settings() -> Option<UserSettingsContext> {
-    use_context::<UserSettingsContext>()
-}
+pub fn use_user_settings() -> Option<UserSettingsContext> { use_context::<UserSettingsContext>() }
 
 #[cfg(test)]
 mod tests {

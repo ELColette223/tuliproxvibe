@@ -38,9 +38,7 @@ pub struct HlsPlaylistHandoffCache {
 }
 
 impl HlsPlaylistHandoffCache {
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     pub fn insert(
         &self,
@@ -107,9 +105,7 @@ impl HlsPlaylistHandoffCache {
     }
 
     #[cfg(test)]
-    fn len(&self) -> usize {
-        self.sessions.lock().unwrap_or_else(PoisonError::into_inner).values().map(Vec::len).sum()
-    }
+    fn len(&self) -> usize { self.sessions.lock().unwrap_or_else(PoisonError::into_inner).values().map(Vec::len).sum() }
 }
 
 fn handoff_ttl(content: &str) -> Duration {

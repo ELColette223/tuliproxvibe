@@ -208,9 +208,7 @@ struct CacheCapacityPressure {
 }
 
 impl Default for HlsSegmentCache {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 /// A peak reservation includes raw data, cache staging, repair output and immutable revisions.

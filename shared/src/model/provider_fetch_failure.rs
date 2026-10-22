@@ -73,7 +73,5 @@ impl ProviderFetchFailure {
     /// Per input, not per error: a provider that is down fails every request
     /// behind it in the same run.
     #[must_use]
-    pub fn dedup_key(&self) -> String {
-        format!("provider-fetch:{}", self.input)
-    }
+    pub fn dedup_key(&self) -> String { format!("provider-fetch:{}", self.input) }
 }

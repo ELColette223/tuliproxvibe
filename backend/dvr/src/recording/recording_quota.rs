@@ -158,36 +158,22 @@ pub trait QuotaRecordingTaskView {
     ///
     /// Defaults to a key of its own, so a view that does not know about sharing
     /// is counted separately rather than silently merged with another file.
-    fn media_key(&self) -> String {
-        format!("uuid:{}", self.uuid())
-    }
+    fn media_key(&self) -> String { format!("uuid:{}", self.uuid()) }
 }
 
 impl QuotaRecordingTaskView for RecordingTask {
-    fn state(&self) -> &RecordingTaskState {
-        &self.state
-    }
-    fn recording(&self) -> &RecordingMetadata {
-        &self.recording
-    }
-    fn uuid(&self) -> &str {
-        &self.uuid
-    }
+    fn state(&self) -> &RecordingTaskState { &self.state }
+    fn recording(&self) -> &RecordingMetadata { &self.recording }
+    fn uuid(&self) -> &str { &self.uuid }
     fn media_key(&self) -> String {
         crate::recording::recording_service::recording_identity_key(&self.recording, self.url.as_str())
     }
 }
 
 impl QuotaRecordingTaskView for PersistedRecordingTask {
-    fn state(&self) -> &RecordingTaskState {
-        &self.state
-    }
-    fn recording(&self) -> &RecordingMetadata {
-        &self.recording
-    }
-    fn uuid(&self) -> &str {
-        &self.uuid
-    }
+    fn state(&self) -> &RecordingTaskState { &self.state }
+    fn recording(&self) -> &RecordingMetadata { &self.recording }
+    fn uuid(&self) -> &str { &self.uuid }
     fn media_key(&self) -> String {
         if self.media_identity.is_empty() {
             // An unresolved identity is nobody else's file.
@@ -200,9 +186,7 @@ impl QuotaRecordingTaskView for PersistedRecordingTask {
 /// `charge_for_task` is the public surface that walks a real
 /// `RecordingTask`. The shape-based test below covers the same
 /// state→charge logic.
-pub fn charge_for_task<V: QuotaRecordingTaskView>(task: &V) -> u64 {
-    charge_for_state(task.state(), task.recording())
-}
+pub fn charge_for_task<V: QuotaRecordingTaskView>(task: &V) -> u64 { charge_for_state(task.state(), task.recording()) }
 
 /// Pure state-driven charge. Kept separate from `charge_for_task`
 /// so it can be unit-tested without a full `RecordingTask`.
@@ -390,12 +374,8 @@ mod tests {
     }
 
     impl QuotaRecordingTaskView for TaskShape {
-        fn state(&self) -> &RecordingTaskState {
-            &self.state
-        }
-        fn recording(&self) -> &RecordingMetadata {
-            &self.recording
-        }
+        fn state(&self) -> &RecordingTaskState { &self.state }
+        fn recording(&self) -> &RecordingMetadata { &self.recording }
         fn uuid(&self) -> &'static str {
             // The shape fixture has no uuid field; tests that
             // depend on the uuid path (retention) use a richer
@@ -410,13 +390,9 @@ mod tests {
 
     // Mirror the `charge_for_task` body against `TaskShape` so the
     // tests can exercise the function without a real RecordingTask.
-    fn charge_task_shape(t: &TaskShape) -> u64 {
-        charge_for_task(t)
-    }
+    fn charge_task_shape(t: &TaskShape) -> u64 { charge_for_task(t) }
 
-    fn pool_for_shape(t: &TaskShape) -> QuotaPool {
-        quota_pool_for_task(t)
-    }
+    fn pool_for_shape(t: &TaskShape) -> QuotaPool { quota_pool_for_task(t) }
 
     #[test]
     fn charge_scheduled_is_reservation() {
@@ -574,18 +550,10 @@ mod tests {
     }
 
     impl QuotaRecordingTaskView for SharedView {
-        fn state(&self) -> &RecordingTaskState {
-            &self.state
-        }
-        fn recording(&self) -> &RecordingMetadata {
-            &self.recording
-        }
-        fn uuid(&self) -> &str {
-            &self.uuid
-        }
-        fn media_key(&self) -> String {
-            self.media.clone()
-        }
+        fn state(&self) -> &RecordingTaskState { &self.state }
+        fn recording(&self) -> &RecordingMetadata { &self.recording }
+        fn uuid(&self) -> &str { &self.uuid }
+        fn media_key(&self) -> String { self.media.clone() }
     }
 
     fn holder(uuid: &str, media: &str, measured: u64) -> SharedView {
