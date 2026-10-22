@@ -3,20 +3,16 @@ use crate::{
     defaults::{default_as_true, is_true, is_zero_i16, is_zero_u16},
     error::TuliproxError,
     model::StalkerInputConfigDto,
-    utils::{
-        arc_str_serde, deserialize_timestamp, is_blank_optional_string, trim_last_slash, Internable,
-        BATCH_SCHEME_PREFIX, PROVIDER_SCHEME_PREFIX,
-    },
+    utils::{arc_str_serde, deserialize_timestamp, is_blank_optional_string, Internable},
 };
-use log::warn;
 use std::sync::Arc;
 
 /// One subscription account of an input.
 ///
-/// The account replaces the old `aliases` entry: it carries the credentials and the
-/// per-account quota, while the provider addresses live in the input's `url_aliases`
-/// (optionally narrowed per account). The account has no `name` — its identity is the
-/// `username`, and no `url` — the address is a lateral of the owning input.
+/// The account replaces the old `aliases` entry: it carries only credentials and the
+/// per-account quota. The provider addresses live in the input's `url_aliases` and are shared
+/// by every account — an account cannot narrow or replace them. The account has no `name` —
+/// its identity is the `username` — and no `url`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigInputAccountDto {
@@ -36,10 +32,6 @@ pub struct ConfigInputAccountDto {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stalker: Option<StalkerInputConfigDto>,
-    /// Narrows the input's lateral list for this account. Replaces (never merges with)
-    /// `ConfigInputDto::url_aliases`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url_aliases: Option<Vec<Arc<str>>>,
 }
 
 /// The account has no `name` — its identity is the `username`, and no `url` — the address is a
@@ -56,7 +48,6 @@ impl Default for ConfigInputAccountDto {
             // Must match the serde default: a hand-built account behaves like a parsed one.
             enabled: default_as_true(),
             stalker: None,
-            url_aliases: None,
         }
     }
 }
@@ -64,17 +55,11 @@ impl Default for ConfigInputAccountDto {
 impl ConfigInputAccountDto {
     /// Validates and normalizes one account.
     ///
-    /// `input_has_url_aliases` tells whether the owning input declares laterals: a
-    /// lateral-backed account has no address of its own, so only the batch credential
-    /// rules apply to it. `input_name` is used for error messages and for the Stalker
-    /// device identity check, which names the failing portal.
-    pub fn prepare(
-        &mut self,
-        index: u16,
-        input_type: &InputType,
-        input_name: &str,
-        input_has_url_aliases: bool,
-    ) -> Result<u16, TuliproxError> {
+    /// The account has no address of its own: it reaches the provider through the input's
+    /// laterals, so the URL-shaped M3U credential extraction does not apply and credentials
+    /// must come from the account itself. `input_name` is used for error messages and for the
+    /// Stalker device identity check, which names the failing portal.
+    pub fn prepare(&mut self, index: u16, input_type: &InputType, input_name: &str) -> Result<u16, TuliproxError> {
         self.id = index + 1;
         self.username = self.username.trim().intern();
         if self.username.is_empty() {
@@ -91,19 +76,9 @@ impl ConfigInputAccountDto {
                     )));
                 }
             }
-            // An account carries no URL, so the URL-shaped M3U credential extraction does
-            // not apply; credentials must come from the account itself.
-            InputType::M3u | InputType::M3uBatch => {
-                if !input_has_url_aliases {
-                    return Err(TuliproxError::ConfigInput(format!(
-                        "m3u account requires the input to declare url_aliases (input: {input_name}, account: {})",
-                        self.username
-                    )));
-                }
-            }
-            InputType::Stalker | InputType::StalkerBatch => {
-                // Stalker authenticates with a MAC, credentials, or both; the identity
-                // check that needs both sources lives in `prepare_stalker_config`.
+            InputType::M3u | InputType::M3uBatch | InputType::Stalker | InputType::StalkerBatch => {
+                // These types can address the provider through the input's laterals; their
+                // credential rules are input-level and were already validated.
             }
             InputType::Library | InputType::Emby | InputType::Jellyfin | InputType::Plex | InputType::Staged => {
                 return Err(TuliproxError::ConfigInput(format!(
@@ -112,8 +87,6 @@ impl ConfigInputAccountDto {
                 )));
             }
         }
-
-        self.normalize_url_aliases(input_name)?;
 
         prepare_stalker_config(
             self.username.as_ref(),
@@ -125,40 +98,5 @@ impl ConfigInputAccountDto {
         )?;
 
         Ok(self.id)
-    }
-
-    fn normalize_url_aliases(&mut self, input_name: &str) -> Result<(), TuliproxError> {
-        let Some(url_aliases) = self.url_aliases.as_mut() else {
-            return Ok(());
-        };
-        let mut normalized: Vec<Arc<str>> = Vec::with_capacity(url_aliases.len());
-        for url in url_aliases.drain(..) {
-            let url = url.trim();
-            if url.is_empty() {
-                continue;
-            }
-            if url.starts_with(PROVIDER_SCHEME_PREFIX) || url.starts_with(BATCH_SCHEME_PREFIX) {
-                return Err(TuliproxError::ConfigInput(format!(
-                    "account url_aliases accepts only http(s) base URLs, not '{url}' (input: {input_name}, account: {})",
-                    self.username
-                )));
-            }
-            let url = trim_last_slash(url).into_owned();
-            if !normalized.iter().any(|existing| existing.as_ref() == url.as_str()) {
-                normalized.push(url.intern());
-            }
-        }
-        if normalized.is_empty() {
-            // An empty list means "no override": fall back to the input's laterals rather
-            // than leaving the account without any address.
-            warn!(
-                "account '{}' of input '{}' declares an empty url_aliases list; using the input's url_aliases",
-                self.username, input_name
-            );
-            self.url_aliases = None;
-        } else {
-            self.url_aliases = Some(normalized);
-        }
-        Ok(())
     }
 }

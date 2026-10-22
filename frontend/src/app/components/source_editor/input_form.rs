@@ -353,7 +353,6 @@ fn accounts_from_input(input: &ConfigInputDto) -> Vec<ConfigInputAccountDto> {
             exp_date: alias.exp_date,
             enabled: alias.enabled,
             stalker: alias.stalker.clone(),
-            url_aliases: None,
         })
         .collect()
 }
@@ -1020,9 +1019,6 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                                             <div class="tp__form-list__item-content">
                                                 <span class={if account.enabled {""} else {"inactive"}}>
                                                     <strong>{account.username.as_ref()}</strong>
-                                                    if let Some(laterals) = account.url_aliases.as_ref() {
-                                                        {" - "}{laterals.len().to_string()}{" URLs"}
-                                                    }
                                                 </span>
                                             </div>
                                         </div>

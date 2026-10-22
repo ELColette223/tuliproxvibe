@@ -108,7 +108,6 @@ pub fn AccountItemForm(props: &AccountItemFormProps) -> Html {
             exp_date: None,
             enabled: true,
             stalker: None,
-            url_aliases: None,
         }),
         modified: false,
     });

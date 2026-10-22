@@ -193,7 +193,6 @@ impl ConfigInputDto {
                 exp_date,
                 enabled,
                 stalker,
-                url_aliases: None,
             };
             if let Some(existing) = folded.iter_mut().find(|candidate| candidate.username == account.username) {
                 warn!(
@@ -219,7 +218,6 @@ impl ConfigInputDto {
                 exp_date: self.exp_date,
                 enabled: !self.account_disabled,
                 stalker: self.stalker.clone(),
-                url_aliases: None,
             };
             // The root's own row may also be present in the aliases list (the configuration
             // does that to give the root a second domain); fold it into the root so the
@@ -243,20 +241,8 @@ impl ConfigInputDto {
             }
         }
 
-        // An account that could only reach a subset keeps its own list, so the migration never
-        // introduces a domain that the subscription has never used.
-        for account in &mut folded {
-            if let Some(urls) = reach.get(account.username.as_ref()) {
-                let mut subset: Vec<Arc<str>> = Vec::new();
-                for url in urls {
-                    push_lateral(&mut subset, url);
-                }
-                if !subset.is_empty() && subset.len() < union.len() {
-                    account.url_aliases = Some(subset);
-                }
-            }
-        }
-
+        // Every account reaches the provider through the input's laterals, so the union is the
+        // single list. Accounts do not carry addresses of their own.
         self.url_aliases = (!union.is_empty()).then_some(union);
         self.accounts = Some(folded);
         self.derive_root_from_accounts();
@@ -276,16 +262,15 @@ impl ConfigInputDto {
         self.exp_date = root.exp_date;
         self.account_disabled = !root.enabled;
         if self.url.trim().is_empty() {
-            let lateral = root.url_aliases.as_ref().or(self.url_aliases.as_ref());
-            if let Some(first) = lateral.and_then(|aliases| aliases.first()) {
+            if let Some(first) = self.url_aliases.as_ref().and_then(|aliases| aliases.first()) {
                 self.url = first.as_ref().to_string();
             }
         }
     }
 
-    /// Laterals an account may use: its own override, otherwise the input's list.
-    pub fn account_laterals<'a>(&'a self, account: &'a ConfigInputAccountDto) -> Option<&'a [Arc<str>]> {
-        account.url_aliases.as_deref().or(self.url_aliases.as_deref())
+    /// Laterals every account of this input may use.
+    pub fn account_laterals<'a>(&'a self) -> Option<&'a [Arc<str>]> {
+        self.url_aliases.as_deref()
     }
 
     /// Rejects a file that mixes the two schemas for the same data.
@@ -337,7 +322,7 @@ impl ConfigInputDto {
         let mut current_index = start_index;
         let mut seen: Vec<Arc<str>> = Vec::with_capacity(accounts.len());
         for account in accounts.iter_mut() {
-            current_index = account.prepare(current_index, &input_type, input_name.as_ref(), has_url_aliases)?;
+            current_index = account.prepare(current_index, &input_type, input_name.as_ref())?;
             if seen.iter().any(|username| username == &account.username) {
                 return Err(TuliproxError::ConfigInput(format!(
                     "duplicate account username '{}' in input '{}'",
@@ -345,18 +330,6 @@ impl ConfigInputDto {
                 )));
             }
             seen.push(account.username.clone());
-            if account.url_aliases.as_ref().is_some_and(|laterals| laterals.is_empty()) {
-                return Err(TuliproxError::ConfigInput(format!(
-                    "account '{}' of input '{}' declares an empty url_aliases list",
-                    account.username, self.name
-                )));
-            }
-            if account.url_aliases.is_some() && !has_url_aliases {
-                return Err(TuliproxError::ConfigInput(format!(
-                    "account '{}' of input '{}' declares url_aliases but the input does not",
-                    account.username, self.name
-                )));
-            }
         }
 
         if !has_url_aliases && self.url.trim().is_empty() {

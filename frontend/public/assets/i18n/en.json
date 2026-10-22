@@ -1949,6 +1949,7 @@
     "ACCOUNTS": "Accounts",
     "ADD_ACCOUNT": "Add Account",
     "URL_ALIASES": "Alternative URLs",
+    "URL_ALIAS": "URL",
     "ADD_URL_ALIAS": "Add URL",
     "REMOVE": "Remove"
   },

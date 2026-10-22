@@ -153,7 +153,14 @@ pub(crate) fn find_input_by_provider_name(app_state: &AppState, provider_name: &
         if &*input.name == provider_name {
             return Some(Arc::clone(input));
         }
-        if input.aliases.as_ref().is_some_and(|aliases| aliases.iter().any(|alias| &*alias.name == provider_name)) {
+        // The pool keys an account by `<input>/<username>`; the bare username is accepted too so
+        // callers that still pass a label keep working.
+        if input.aliases.as_ref().is_some_and(|aliases| {
+            aliases.iter().any(|alias| {
+                &*alias.name == provider_name
+                    || alias.account_name(input.name.as_ref()).as_ref() == provider_name
+            })
+        }) {
             return Some(Arc::clone(input));
         }
     }

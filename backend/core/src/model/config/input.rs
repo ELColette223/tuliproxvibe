@@ -604,14 +604,14 @@ impl From<&ConfigInputAliasDto> for ConfigInputAlias {
 }
 
 impl ConfigInputAlias {
-    /// Builds the runtime account from the account DTO plus the laterals it may use.
+    /// Builds the runtime account from the account DTO plus the input's shared laterals.
     ///
-    /// The DTO has no address: the account reaches the provider through the input's laterals (or
-    /// its own override). The first lateral becomes the account's `url`, which is what the
+    /// The DTO has no address: every account of an input reaches the provider through the same
+    /// `url_aliases` list. The first lateral becomes the account's `url`, which is what the
     /// playlist is built from; the whole list becomes `lateral_urls`, which is what the retry
     /// rotates through.
-    pub fn from_account_dto(dto: &shared::model::ConfigInputAccountDto, laterals: Option<&[Arc<str>]>) -> Self {
-        let lateral_urls: Vec<Arc<str>> = laterals.map(<[Arc<str>]>::to_vec).unwrap_or_default();
+    pub fn from_account_dto(dto: &shared::model::ConfigInputAccountDto, laterals: &[Arc<str>]) -> Self {
+        let lateral_urls: Vec<Arc<str>> = laterals.to_vec();
         let url = lateral_urls.first().map_or_else(String::new, |url| url.as_ref().to_string());
         Self {
             id: dto.id,
@@ -1183,7 +1183,23 @@ impl From<&ConfigInputDto> for ConfigInput {
     fn from(dto: &ConfigInputDto) -> Self {
         let options =
             dto.options.as_ref().map_or_else(|| ConfigInputOptions::defaults().clone(), ConfigInputOptions::from);
-
+        // The addresses an account may use: the input's laterals, or the root URL when the input
+        // declares no laterals. `accounts[0]` is the root and is projected onto the input fields,
+        // so only the remaining rows become runtime aliases.
+        let laterals: Vec<Arc<str>> = if let Some(url_aliases) = dto.url_aliases.as_ref().filter(|list| !list.is_empty())
+        {
+            url_aliases.iter().map(|url| url.as_ref().intern()).collect()
+        } else if dto.url.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![dto.url.trim().intern()]
+        };
+        let aliases = match dto.accounts.as_ref().filter(|accounts| !accounts.is_empty()) {
+            Some(accounts) => {
+                Some(accounts.iter().skip(1).map(|account| ConfigInputAlias::from_account_dto(account, &laterals)).collect())
+            }
+            None => dto.aliases.as_ref().map(|list| list.iter().map(ConfigInputAlias::from).collect()),
+        };
         Self {
             id: dto.id,
             name: dto.name.clone(),
@@ -1200,7 +1216,7 @@ impl From<&ConfigInputDto> for ConfigInput {
             sequential_group: dto.sequential_group,
             options: Some(options),
             media_server: dto.media_server.as_ref().map(MediaServerInputConfig::from),
-            aliases: dto.aliases.as_ref().map(|list| list.iter().map(ConfigInputAlias::from).collect()),
+            aliases,
             priority: dto.priority,
             max_connections: dto.max_connections,
             method: dto.method,
@@ -1211,11 +1227,7 @@ impl From<&ConfigInputDto> for ConfigInput {
             panel_api: dto.panel_api.as_ref().map(PanelApiConfig::from),
             cache_duration_seconds: dto.cache_duration_seconds,
             provider_configs: None,
-            url_aliases: dto
-                .url_aliases
-                .as_ref()
-                .map(|aliases| aliases.iter().map(|url| url.as_ref().intern()).collect())
-                .unwrap_or_default(),
+            url_aliases: laterals,
             stalker: dto
                 .stalker
                 .as_ref()
@@ -1436,6 +1448,50 @@ mod tests {
         assert_eq!(options.update_quality.threshold(XtreamCluster::Live), 95);
         assert_eq!(options.update_quality.threshold(XtreamCluster::Video), 90);
         assert_eq!(options.update_quality.threshold(XtreamCluster::Series), 85);
+    }
+
+    /// The DTO's `accounts` list must reach the runtime, not just the config file.
+    ///
+    /// The migration consumes `aliases` when it builds `accounts`, so a conversion that reads only
+    /// `dto.aliases` drops every non-root login from the pool: the editor shows them, the file
+    /// stores them, and nothing is ever allocated. This pins the bridge.
+    #[test]
+    fn accounts_become_runtime_aliases_and_share_the_input_laterals() {
+        let dto = ConfigInputDto {
+            name: Arc::from("provider"),
+            input_type: InputType::Xtream,
+            enabled: true,
+            url: String::new(),
+            username: Some("root".to_string()),
+            password: Some("root-pass".to_string()),
+            url_aliases: Some(vec![
+                shared::utils::Internable::intern("http://main.example"),
+                shared::utils::Internable::intern("http://mirror.example"),
+            ]),
+            accounts: Some(vec![
+                shared::model::ConfigInputAccountDto {
+                    username: Arc::from("root"),
+                    password: Some("root-pass".to_string()),
+                    enabled: true,
+                    ..Default::default()
+                },
+                shared::model::ConfigInputAccountDto {
+                    username: Arc::from("second"),
+                    password: Some("second-pass".to_string()),
+                    enabled: true,
+                    ..Default::default()
+                },
+            ]),
+            ..ConfigInputDto::default()
+        };
+
+        let input = ConfigInput::from(&dto);
+
+        assert_eq!(input.url_aliases.len(), 2, "the input keeps the shared laterals");
+        let aliases = input.aliases.as_ref().expect("non-root accounts become runtime aliases");
+        assert_eq!(aliases.len(), 1, "account 1 is the root and is projected onto the input, not duplicated");
+        assert_eq!(aliases[0].username.as_deref(), Some("second"));
+        assert_eq!(aliases[0].lateral_urls.len(), 2, "every account reaches the same shared list");
     }
 
     #[test]

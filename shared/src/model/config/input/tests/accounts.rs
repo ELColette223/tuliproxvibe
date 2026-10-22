@@ -20,7 +20,7 @@ fn account(username: &str, password: &str) -> ConfigInputAccountDto {
 
 #[test]
 fn accounts_round_trip_through_yaml_and_json() {
-    let yaml = "name: provider\ntype: xtream\nurl_aliases:\n- http://a.net\n- http://b.net\naccounts:\n- username: one\n  password: pw1\n- username: two\n  password: pw2\n  max_connections: 4\n  url_aliases:\n  - http://a.net\n  exp_date: 1788779145\n";
+    let yaml = "name: provider\ntype: xtream\nurl_aliases:\n- http://a.net\n- http://b.net\naccounts:\n- username: one\n  password: pw1\n- username: two\n  password: pw2\n  max_connections: 4\n  exp_date: 1788779145\n";
     let input: ConfigInputDto = serde_saphyr::from_str(yaml).expect("parse accounts");
     assert_eq!(input.accounts.as_ref().expect("accounts").len(), 2);
     assert_eq!(input.url_aliases.as_ref().expect("laterals").len(), 2);
@@ -31,6 +31,14 @@ fn accounts_round_trip_through_yaml_and_json() {
 
     let json = serde_json::to_string(&input).expect("json");
     assert_eq!(serde_json::from_str::<ConfigInputDto>(&json).expect("json roundtrip"), input);
+}
+
+#[test]
+fn an_account_cannot_declare_its_own_urls() {
+    // The URL list belongs to the input and is shared by every login; a per-account list would
+    // let one login narrow it, which the schema no longer allows.
+    let yaml = "name: provider\ntype: xtream\nurl_aliases:\n- http://a.net\naccounts:\n- username: one\n  password: pw\n  url_aliases:\n  - http://a.net\n";
+    assert!(serde_saphyr::from_str::<ConfigInputDto>(yaml).is_err(), "accepted a per-account URL list");
 }
 
 #[test]
@@ -148,21 +156,16 @@ fn legacy_aliases_merge_by_field_not_by_position() {
 }
 
 #[test]
-fn legacy_migration_keeps_a_narrower_lateral_list_per_account() {
-    // `wide` reaches both domains; `narrow` only reaches the first. The union is both, but
-    // `narrow` must not start trying the second domain.
+fn legacy_migration_shares_one_lateral_list_across_accounts() {
+    // `wide` reaches both domains and `narrow` only the first. The accounts carry no address of
+    // their own, so the input keeps the union and every account rotates through it.
     let yaml = "name: provider\ntype: xtream\nurl: http://a.net\nusername: wide\npassword: pw\naliases:\n- name: wide\n  url: http://b.net\n  username: wide\n  password: pw\n- name: narrow\n  url: http://a.net\n  username: narrow\n  password: pw\n";
     let mut input: ConfigInputDto = serde_saphyr::from_str(yaml).expect("parse");
     prepare_dto(&mut input).expect("prepare");
 
-    let accounts = input.accounts.as_ref().expect("accounts");
-    let narrow = accounts.iter().find(|account| account.username.as_ref() == "narrow").expect("narrow account");
-    let laterals = input.account_laterals(narrow).expect("laterals");
-    assert_eq!(laterals.len(), 1, "the narrow account keeps only the domain it used");
-    assert_eq!(laterals[0].as_ref(), "http://a.net");
-
-    let wide = accounts.iter().find(|account| account.username.as_ref() == "wide").expect("wide account");
-    assert_eq!(input.account_laterals(wide).expect("laterals").len(), 2);
+    let laterals = input.account_laterals().expect("laterals");
+    assert_eq!(laterals.len(), 2, "the union is shared: {laterals:?}");
+    assert_eq!(input.accounts.as_ref().expect("accounts").len(), 2);
 }
 
 #[test]
@@ -238,26 +241,24 @@ aliases:
     let usernames: Vec<&str> = accounts.iter().map(|account| account.username.as_ref()).collect();
     assert_eq!(usernames, ["892958", "564381", "035679"], "one account per subscription");
 
-    // The root and the alias that repeats it are one account reaching two domains.
+    // The root and the alias that repeats it are one account; both domains it used stay on the
+    // input, because the laterals are shared and an account carries no list of its own.
     let root = &accounts[0];
     assert_eq!(root.password.as_deref(), Some("secret"));
     assert_eq!(root.max_connections, 10, "the largest declared quota survives");
-    let root_laterals = input.account_laterals(root).expect("root laterals");
-    assert_eq!(root_laterals.len(), 2, "both domains the root used: {:?}", root_laterals);
 
     // The three copies of `564381` fold into one usable account.
     let account = &accounts[1];
     assert!(account.enabled, "enabled is any-true across the copies");
     assert_eq!(account.exp_date, Some(1792810799), "the renewal is the newest date");
     assert_eq!(account.priority, 1, "the declared non-default priority survives");
-    assert_eq!(input.account_laterals(account).expect("laterals").len(), 3);
 
     // A legacy `name` that disagreed with the username keeps the username.
     assert_eq!(accounts[2].username.as_ref(), "035679");
     assert_eq!(accounts[2].password.as_deref(), Some("pw-b"));
 
-    // The input carries every domain it ever used, deduplicated.
-    let input_laterals = input.url_aliases.as_ref().expect("input laterals");
+    // The input carries every domain it ever used, deduplicated, and every account shares it.
+    let input_laterals = input.account_laterals().expect("input laterals");
     assert_eq!(input_laterals.len(), 4, "{input_laterals:?}");
     assert!(input.aliases.is_none(), "the legacy list is consumed");
 }

@@ -499,29 +499,40 @@ impl TryFrom<&SourcesConfigDto> for SourcesConfig {
     }
 }
 
-/// Rejects duplicate input and alias names.
+/// Rejects duplicate input and account names.
 ///
-/// Input names and alias names share one namespace: both name a member in `group_lookup`, and that map
-/// decides which input a member belongs to. A duplicate would silently resolve to whichever member was
-/// inserted last, so a request would run against another input's playlist, credentials, and limits.
-/// Such a configuration is a load error, and it must be reported while the sources are read - a reload
-/// that returns an error leaves the running configuration in place.
+/// A member is named by its qualified `<input>/<username>` key, which is what `group_lookup` and the
+/// provider pool use. The bare username is deliberately not the key: the same subscription is often
+/// declared by more than one input, and those accounts are distinct members with distinct limits.
+/// A duplicate would silently resolve to whichever member was inserted last, so a request would run
+/// against another input's playlist, credentials, and limits. Such a configuration is a load error,
+/// and it must be reported while the sources are read - a reload that returns an error leaves the
+/// running configuration in place.
 fn check_unique_member_names(inputs: &[ConfigInput]) -> Result<(), TuliproxError> {
-    let mut seen: HashMap<&str, &str> = HashMap::with_capacity(inputs.len());
+    let mut names: HashSet<Arc<str>> = HashSet::with_capacity(inputs.len());
     for input in inputs {
-        if seen.insert(input.name.as_ref(), "input").is_some() {
+        if !names.insert(input.name.clone()) {
             return Err(TuliproxError::ConfigSource(format!("input names should be unique: {}", input.name)));
         }
     }
+    let mut accounts: HashSet<Arc<str>> = HashSet::new();
     for input in inputs {
         for alias in input.aliases.iter().flatten() {
-            if let Some(owner) = seen.get(alias.name.as_ref()) {
+            // A label that repeats an input name is ambiguous for the lookups that still accept a
+            // bare name (`find_owner`, legacy observations), so it stays an error.
+            if names.contains(&alias.name) {
                 return Err(TuliproxError::ConfigSource(format!(
-                    "input alias names should be unique: '{}' of input '{}' already names an {owner}",
+                    "input alias names should be unique: '{}' of input '{}' already names an input",
                     alias.name, input.name
                 )));
             }
-            seen.insert(alias.name.as_ref(), "alias");
+            let account = alias.account_name(input.name.as_ref());
+            if !accounts.insert(account.clone()) {
+                return Err(TuliproxError::ConfigSource(format!(
+                    "input alias names should be unique: '{}' of input '{}' already names an alias",
+                    account, input.name
+                )));
+            }
         }
     }
     Ok(())
@@ -669,28 +680,30 @@ mod tests {
         assert!(error.to_string().contains("input names should be unique"), "{error}");
     }
 
+    /// The same subscription may be declared by two inputs; the accounts are distinct members
+    /// because the pool keys them by `<input>/<username>`.
     #[test]
-    fn duplicate_alias_names_fail_the_config_load() {
+    fn the_same_username_in_two_inputs_loads() {
         let mut dto = sources_dto();
         dto.inputs[0].aliases = Some(vec![ConfigInputAliasDto {
-            name: "shared-alias".into(),
+            name: "shared-account".into(),
             url: "https://provider.example/alias.m3u".to_string(),
+            username: Some("shared-account".to_string()),
             ..ConfigInputAliasDto::default()
         }]);
         dto.inputs.push(ConfigInputDto {
             name: "second-input".into(),
             url: "https://second.example/playlist.m3u".to_string(),
             aliases: Some(vec![ConfigInputAliasDto {
-                name: "shared-alias".into(),
+                name: "shared-account".into(),
                 url: "https://second.example/alias.m3u".to_string(),
+                username: Some("shared-account".to_string()),
                 ..ConfigInputAliasDto::default()
             }]),
             ..ConfigInputDto::default()
         });
 
-        let error = SourcesConfig::try_from(&dto).expect_err("duplicate alias name must be rejected");
-
-        assert!(error.to_string().contains("input alias names should be unique"), "{error}");
+        SourcesConfig::try_from(&dto).expect("distinct inputs keep their same-named accounts apart");
     }
 
     #[test]

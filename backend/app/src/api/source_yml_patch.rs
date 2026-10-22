@@ -1040,9 +1040,7 @@ pub(crate) fn merge_runtime_document(
                 let laterals = input.url_aliases.clone();
                 let mut converted = Vec::with_capacity(accounts.len());
                 for account in accounts {
-                    let account_laterals: Option<&[Arc<str>]> =
-                        account.url_aliases.as_deref().or((!laterals.is_empty()).then_some(laterals.as_slice()));
-                    let mut runtime = crate::model::ConfigInputAlias::from_account_dto(&account, account_laterals);
+                    let mut runtime = crate::model::ConfigInputAlias::from_account_dto(&account, &laterals);
                     match previous.iter().find(|old| old.username.as_deref() == Some(account.username.as_ref())) {
                         Some(old) => {
                             runtime.id = old.id;

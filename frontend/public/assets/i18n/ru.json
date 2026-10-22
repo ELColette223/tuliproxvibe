@@ -1949,6 +1949,7 @@
     "ACCOUNTS": "Учетные записи",
     "ADD_ACCOUNT": "Добавить учетную запись",
     "URL_ALIASES": "Альтернативные URL",
+    "URL_ALIAS": "URL",
     "ADD_URL_ALIAS": "Добавить URL",
     "REMOVE": "Удалить"
   },

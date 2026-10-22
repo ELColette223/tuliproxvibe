@@ -112,7 +112,6 @@ pub struct ConfigInputDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounts: Option<Vec<ConfigInputAccountDto>>,
     /// Alternative provider base URLs (laterals) shared by every account of this input.
-    /// An account may narrow the list with its own `url_aliases`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url_aliases: Option<Vec<Arc<str>>>,
     #[serde(default, skip_serializing_if = "is_zero_i16")]

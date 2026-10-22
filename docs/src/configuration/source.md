@@ -883,9 +883,6 @@ inputs:
       - username: sub_2
         password: pw2
         priority: 1
-        # Restricts this account to one of the input's addresses
-        url_aliases:
-          - 'http://provider-mirror.net'
 ```
 
 **Result:** a single source with 1 + 2 = **3** concurrent connections. Two inputs may declare
@@ -893,8 +890,9 @@ the same subscription; each one keeps its own quota accounting.
 
 #### Account fields
 
-An account has no `name` (its username is the label) and no `url` (it uses the input's
-`url_aliases`, or its own override). The input-level `headers`, `epg`, `options`, `persist`,
+An account has no `name` (its username is the label) and no `url`. Every account reaches the
+provider through the input's `url_aliases`, which are shared by all of them; an account cannot
+declare or restrict a list of its own. The input-level `headers`, `epg`, `options`, `persist`,
 `method`, `panel_api`, `cache_duration`, `proxy` and `sequential_group` are inherited.
 
 | Parameter         | Type   | Required | Default | Technical impact                                                                                                                                        |
@@ -906,7 +904,6 @@ An account has no `name` (its username is the label) and no `url` (it uses the i
 | `max_connections` | Int    |    No    | input   | Concurrent streams for this account. `0` means unlimited. When omitted, the input's value applies; a larger account value is honoured.                   |
 | `exp_date`        | Mixed  |    No    |         | Expiration as `"YYYY-MM-DD HH:MM:SS"` (UTC) or a Unix timestamp. Xtream dates join the automatic refresh described below.                                |
 | `enabled`         | Bool   |    No    | `true`  | A disabled account is excluded from the pool.                                                                                                            |
-| `url_aliases`     | List   |    No    | input   | Narrows the addresses this account may use. **Replaces** the input list instead of adding to it, so an account never reaches a domain it did not use.     |
 | `stalker`         | Block  | Stalker  |         | Per-account Stalker device settings. A missing block inherits the input's.                                                                                |
 
 #### Input fields
@@ -919,14 +916,15 @@ An account has no `name` (its username is the label) and no `url` (it uses the i
 
 > **Note:** a file that still uses `aliases` keeps working. On load it is converted to
 > `accounts` + `url_aliases`: copies of one username are merged field by field (enabled is
-> true if any copy is enabled, the newest expiration wins), and each account keeps only the
-> addresses it actually used. The next save writes the `accounts` form.
+> true if any copy is enabled, the newest expiration wins), and the input keeps the union of
+> every address as its shared list. The next save writes the `accounts` form.
 
 #### Failover between alternative URLs
 
-When a request fails, Tuliprox retries it against the next address of the account's list and
-remembers the address that worked. Only addresses that belong to the account are rewritten: a
-CDN or tokenised URL keeps its host, because its signature depends on it.
+When a request fails, Tuliprox retries it against the next address of the input's list and
+remembers the address that worked. The list is shared, so every account of the input fails over
+through the same addresses. Only addresses that belong to the list are rewritten: a CDN or
+tokenised URL keeps its host, because its signature depends on it.
 
 
 #### Automatic Xtream Expiration Refresh
@@ -1046,8 +1044,8 @@ and the catalog page limit are configured on the parent input in the Web UI or Y
 
 | Parameter                 | Technical Impact & Details                                                                                                                                                                                                                          |
 |:--------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **`url`**                 | Provider base URL or full M3U playlist URL. Required in CSV rows.                                                                                                                                                                                   |
-| **`name`**                | Account label. When the input declares `url_aliases`, a row may omit `url` and inherit the input's addresses. |
+| **`url`**                 | Provider base URL or full M3U playlist URL. Optional when the parent input declares `url_aliases`: the row then uses the input's shared addresses.                                                                                                  |
+| **`name`**                | Account label. A row may omit `url` when the input declares `url_aliases`; every account of the input shares that list.                                                                                                                            |
 | **`username`**            | Xtream or Stalker account username. For M3U CSV rows, Tuliprox can also extract credentials from the URL query parameters.                                                                                                                          |
 | **`password`**            | Xtream or Stalker account password. For M3U CSV rows, Tuliprox can also extract credentials from the URL query parameters.                                                                                                                          |
 | **`mac_address`**         | Stalker alias MAC address. Required by `mac_only` and `mac_plus_credentials`; optional for credentials-only authentication.                                                                                                                         |

@@ -1949,6 +1949,7 @@
     "ACCOUNTS": "الحسابات",
     "ADD_ACCOUNT": "إضافة حساب",
     "URL_ALIASES": "عناوين URL بديلة",
+    "URL_ALIAS": "عنوان URL",
     "ADD_URL_ALIAS": "إضافة عنوان URL",
     "REMOVE": "إزالة"
   },

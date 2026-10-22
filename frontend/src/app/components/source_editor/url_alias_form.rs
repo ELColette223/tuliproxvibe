@@ -194,4 +194,20 @@ mod tests {
         }
         assert!(source.contains("<Input"), "URL values should use the native Input component");
     }
+
+    /// The row's `aria-label` is built from `LABEL.URL_ALIAS`; a missing key reaches the user as
+    /// `Key '...' not found for language 'en'` in the accessibility name.
+    #[test]
+    fn every_locale_defines_the_url_alias_label() {
+        for (locale, json) in [
+            ("en", include_str!("../../../../public/assets/i18n/en.json")),
+            ("ru", include_str!("../../../../public/assets/i18n/ru.json")),
+            ("ar", include_str!("../../../../public/assets/i18n/ar.json")),
+            ("es", include_str!("../../../../public/assets/i18n/es.json")),
+        ] {
+            let value: serde_json::Value = serde_json::from_str(json).expect("valid locale json");
+            let label = value.pointer("/LABEL/URL_ALIAS").and_then(serde_json::Value::as_str);
+            assert!(label.is_some_and(|label| !label.trim().is_empty()), "{locale} is missing LABEL.URL_ALIAS");
+        }
+    }
 }
