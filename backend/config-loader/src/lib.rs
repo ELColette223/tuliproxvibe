@@ -1227,11 +1227,31 @@ pub async fn sanitize_sources_for_persist(mut source_config: SourcesConfigDto) -
             }
             input.aliases = None;
         }
+        // Sorted for a stable file; the pool order is what matters at runtime, not the file.
+        if let Some(accounts) = input.accounts.as_mut() {
+            if input.panel_api.as_ref().is_some_and(|panel| panel.alias_pool.is_some()) {
+                accounts.sort_by(|a, b| {
+                    let a_ts = a.exp_date.unwrap_or(i64::MIN);
+                    let b_ts = b.exp_date.unwrap_or(i64::MIN);
+                    b_ts.cmp(&a_ts).then_with(|| a.username.cmp(&b.username))
+                });
+            }
+        }
         input.id = 0;
         if let Some(aliases) = input.aliases.as_mut() {
             for alias in aliases {
                 alias.id = 0;
             }
+        }
+        if let Some(accounts) = input.accounts.as_mut() {
+            for account in accounts {
+                account.id = 0;
+            }
+        }
+        // One schema on disk, never both: `aliases` is a read-only compatibility form and is
+        // replaced by `accounts` as soon as the file is written.
+        if input.accounts.is_some() {
+            input.aliases = None;
         }
     }
     for source in &mut source_config.sources {

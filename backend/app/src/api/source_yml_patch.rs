@@ -991,6 +991,27 @@ pub(crate) fn runtime_patch_document(sources: &crate::model::SourcesConfig) -> S
                         })
                         .collect()
                 }),
+                // The account schema has to travel with the patch document. Without it every
+                // account patch would be planned against an empty list and silently lost.
+                accounts: input.aliases.as_ref().map(|aliases| {
+                    aliases
+                        .iter()
+                        .map(|alias| shared::model::ConfigInputAccountDto {
+                            id: alias.id,
+                            username: alias.username.as_deref().unwrap_or(alias.name.as_ref()).intern(),
+                            password: alias.password.clone(),
+                            priority: alias.priority,
+                            max_connections: alias.max_connections,
+                            exp_date: alias.exp_date,
+                            enabled: alias.enabled,
+                            stalker: None,
+                            url_aliases: (!alias.lateral_urls.is_empty())
+                                .then(|| alias.lateral_urls.clone())
+                                .filter(|laterals| *laterals != input.url_aliases),
+                        })
+                        .collect()
+                }),
+                url_aliases: (!input.url_aliases.is_empty()).then(|| input.url_aliases.clone()),
                 ..shared::model::ConfigInputDto::default()
             })
             .collect(),
@@ -1024,6 +1045,9 @@ pub(crate) fn merge_runtime_document(
         input.max_connections = updated.max_connections;
         input.priority = updated.priority;
         input.panel_api = updated.panel_api.as_ref().map(crate::model::PanelApiConfig::from);
+        if let Some(url_aliases) = updated.url_aliases {
+            input.url_aliases = url_aliases;
+        }
 
         if let Some(aliases) = updated.aliases {
             let previous = input.aliases.take().unwrap_or_default();
