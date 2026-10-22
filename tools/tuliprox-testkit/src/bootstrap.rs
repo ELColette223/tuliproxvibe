@@ -201,13 +201,34 @@ fn render_provider_pool(run_id: &str, origin_address: SocketAddr, policy: Option
             let _ = writeln!(rendered, "    priority: {priority}");
         }
         if !aliases.is_empty() {
-            rendered.push_str("    aliases:\n");
+            // The account selector lives in the URL, so the laterals carry the addresses and the
+            // accounts only vary the quota. Each account keeps its own URL entry so the scenario
+            // can still address it by `account=`.
+            let _ = writeln!(rendered, "    url_aliases:");
+            let _ = writeln!(
+                rendered,
+                "      - http://{origin_address}/catalog/input.m3u?run={run_id}&account={}",
+                root.name
+            );
             for alias in aliases {
                 let _ = writeln!(
                     rendered,
-                    "      - name: {}\n        url: http://{origin_address}/catalog/input.m3u?run={run_id}&account={}\n        max_connections: {}",
+                    "      - http://{origin_address}/catalog/input.m3u?run={run_id}&account={}",
+                    alias.name
+                );
+            }
+            let _ = writeln!(rendered, "    accounts:");
+            let _ = writeln!(
+                rendered,
+                "      - username: {}\n        password: testkit-password\n        max_connections: {}",
+                yaml_string(&root.name),
+                root.max_connections
+            );
+            for alias in aliases {
+                let _ = writeln!(
+                    rendered,
+                    "      - username: {}\n        password: testkit-password\n        max_connections: {}",
                     yaml_string(&alias.name),
-                    alias.name,
                     alias.max_connections
                 );
                 if let Some(priority) = alias.priority {

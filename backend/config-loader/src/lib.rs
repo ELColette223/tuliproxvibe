@@ -33,8 +33,8 @@ use tuliprox_core::{
     },
 };
 use tuliprox_repository::{
-    backup_api_user_db_file, csv_read_inputs, csv_write_inputs, get_api_user_db_path, is_csv_file, load_api_user,
-    merge_api_user,
+    backup_api_user_db_file, csv_read_inputs_with_defaults, csv_write_inputs, get_api_user_db_path, is_csv_file,
+    load_api_user, merge_api_user, CsvAccountDefaults,
 };
 use url::Url;
 
@@ -490,7 +490,9 @@ pub async fn prepare_sources_batch(
         .inputs
         .iter()
         .flat_map(|item| {
-            std::iter::once(item.id).chain(item.aliases.as_ref().into_iter().flatten().map(|alias| alias.id))
+            std::iter::once(item.id)
+                .chain(item.aliases.as_ref().into_iter().flatten().map(|alias| alias.id))
+                .chain(item.accounts.as_ref().into_iter().flatten().map(|account| account.id))
         })
         .max()
         .unwrap_or(0);
@@ -500,7 +502,14 @@ pub async fn prepare_sources_batch(
     for input in &mut sources.inputs {
         // Normalize batch type from URL before deciding whether aliases must be loaded from CSV.
         input.prepare_type()?;
-        match get_batch_aliases(input.input_type, input.url.as_str()).await {
+        // A CSV row without a URL is valid once the input declares laterals; the row inherits
+        // them instead of being skipped. The borrow ends before `input.prepare_batch` mutates.
+        let defaults = CsvAccountDefaults {
+            input_url_aliases: input.url_aliases.as_deref(),
+            input_max_connections: input.max_connections,
+            input_priority: input.priority,
+        };
+        match get_batch_aliases_with_defaults(input.input_type, input.url.as_str(), defaults).await {
             Ok(Some((_, aliases))) => {
                 if let Some(idx) = input.prepare_batch(aliases, current_index)? {
                     current_index = idx;
@@ -522,6 +531,15 @@ pub async fn get_batch_aliases(
     input_type: InputType,
     url: &str,
 ) -> Result<Option<(PathBuf, Vec<ConfigInputAliasDto>)>, TuliproxError> {
+    get_batch_aliases_with_defaults(input_type, url, CsvAccountDefaults::none()).await
+}
+
+/// Reads a batch CSV, letting rows inherit the input's laterals when they carry no address.
+pub async fn get_batch_aliases_with_defaults(
+    input_type: InputType,
+    url: &str,
+    defaults: CsvAccountDefaults<'_>,
+) -> Result<Option<(PathBuf, Vec<ConfigInputAliasDto>)>, TuliproxError> {
     if matches!(input_type, InputType::M3uBatch | InputType::XtreamBatch | InputType::StalkerBatch) {
         if url.starts_with(PROVIDER_SCHEME_PREFIX) {
             return Err(TuliproxError::Config(format!(
@@ -530,7 +548,7 @@ Use a batch:// URL or a local CSV path (absolute/relative)."
             )));
         }
 
-        return match csv_read_inputs(input_type, url).await {
+        return match csv_read_inputs_with_defaults(input_type, url, defaults).await {
             Ok((file_path, batch_aliases)) => Ok(Some((file_path, batch_aliases))),
             Err(err) => Err(TuliproxError::Config(format!("{err}"))),
         };

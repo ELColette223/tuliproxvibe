@@ -77,10 +77,32 @@ fn validate_provider_pool(contract: &PolicyContract, config: &Value) -> Result<(
         .find(|input| input.get("name").and_then(Value::as_str) == Some("testkit-origin"))
         .ok_or_else(|| TestkitError::Configuration("fixture sources omit testkit-origin".to_owned()))?;
     let mut configured = Vec::with_capacity(contract.provider_pool.len());
-    configured.push((input.get("url").and_then(Value::as_str), input.get("max_connections").and_then(Value::as_u64)));
-    if let Some(aliases) = input.get("aliases").and_then(Value::as_array) {
-        configured.extend(aliases.iter().map(|alias| {
-            (alias.get("url").and_then(Value::as_str), alias.get("max_connections").and_then(Value::as_u64))
+    if input.get("accounts").and_then(Value::as_array).is_none() {
+        // The legacy schema lists the root separately from its aliases.
+        configured
+            .push((input.get("url").and_then(Value::as_str), input.get("max_connections").and_then(Value::as_u64)));
+    }
+    if let Some(accounts) = input.get("accounts").and_then(Value::as_array) {
+        // The account's address is one of the input's laterals, selected by the `account` query
+        // parameter it carries, so the check resolves the lateral matching the username.
+        let laterals: Vec<&str> = input
+            .get("url_aliases")
+            .and_then(Value::as_array)
+            .map(|laterals| laterals.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        configured.extend(accounts.iter().map(|account| {
+            let username = account.get("username").and_then(Value::as_str);
+            let url = username.and_then(|username| {
+                laterals.iter().copied().find(|lateral| {
+                    Url::parse(lateral).is_ok_and(|parsed| {
+                        parsed
+                            .query_pairs()
+                            .find(|(key, _)| key == "account")
+                            .is_some_and(|(_, value)| value == username)
+                    })
+                })
+            });
+            (url, account.get("max_connections").and_then(Value::as_u64))
         }));
     }
     if configured.len() != contract.provider_pool.len() {
@@ -331,12 +353,18 @@ mod tests {
             "inputs": [{
                 "name": "testkit-origin",
                 "url": "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=alpha",
+
                 "max_connections": 2,
-                "aliases": [{
-                    "name": "beta-alias",
-                    "url": "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=beta",
-                    "max_connections": 3
-                }]
+
+                "url_aliases": ["http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=alpha", "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=beta"],
+
+                "accounts": [
+
+                    {"username": "alpha", "max_connections": 2},
+
+                    {"username": "beta", "max_connections": 3}
+
+                ]
             }]
         });
         assert!(validate_fixture_policy(&contract_with_pool, &config_matching).is_ok());
@@ -346,12 +374,18 @@ mod tests {
             "inputs": [{
                 "name": "testkit-origin",
                 "url": "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=al%70ha",
+
                 "max_connections": 2,
-                "aliases": [{
-                    "name": "beta-alias",
-                    "url": "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=beta",
-                    "max_connections": 3
-                }]
+
+                "url_aliases": ["http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=al%70ha", "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=beta"],
+
+                "accounts": [
+
+                    {"username": "alpha", "max_connections": 2},
+
+                    {"username": "beta", "max_connections": 3}
+
+                ]
             }]
         });
         assert!(validate_fixture_policy(&contract_with_pool, &config_encoded).is_ok());
@@ -361,12 +395,18 @@ mod tests {
             "inputs": [{
                 "name": "testkit-origin",
                 "url": "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=alpha-extra",
+
                 "max_connections": 2,
-                "aliases": [{
-                    "name": "beta-alias",
-                    "url": "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=beta",
-                    "max_connections": 3
-                }]
+
+                "url_aliases": ["http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=alpha-extra", "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=beta"],
+
+                "accounts": [
+
+                    {"username": "alpha", "max_connections": 2},
+
+                    {"username": "beta", "max_connections": 3}
+
+                ]
             }]
         });
         assert!(validate_fixture_policy(&contract_with_pool, &config_substring).is_err());
@@ -376,12 +416,18 @@ mod tests {
             "inputs": [{
                 "name": "testkit-origin",
                 "url": "http://127.0.0.1:8080/catalog/input.m3u?run=r1&other_account=alpha",
+
                 "max_connections": 2,
-                "aliases": [{
-                    "name": "beta-alias",
-                    "url": "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=beta",
-                    "max_connections": 3
-                }]
+
+                "url_aliases": ["http://127.0.0.1:8080/catalog/input.m3u?run=r1&other_account=alpha", "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=beta"],
+
+                "accounts": [
+
+                    {"username": "alpha", "max_connections": 2},
+
+                    {"username": "beta", "max_connections": 3}
+
+                ]
             }]
         });
         assert!(validate_fixture_policy(&contract_with_pool, &config_wrong_key).is_err());
@@ -391,12 +437,18 @@ mod tests {
             "inputs": [{
                 "name": "testkit-origin",
                 "url": "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=alpha",
+
                 "max_connections": 1,
-                "aliases": [{
-                    "name": "beta-alias",
-                    "url": "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=beta",
-                    "max_connections": 3
-                }]
+
+                "url_aliases": ["http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=alpha", "http://127.0.0.1:8080/catalog/input.m3u?run=r1&account=beta"],
+
+                "accounts": [
+
+                    {"username": "alpha", "max_connections": 1},
+
+                    {"username": "beta", "max_connections": 3}
+
+                ]
             }]
         });
         assert!(validate_fixture_policy(&contract_with_pool, &config_limit_mismatch).is_err());
