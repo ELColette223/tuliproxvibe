@@ -169,7 +169,10 @@ async fn open_provider_stream_with_optional_rotation(
     session_owner: Option<&str>,
     request_url: &mut Arc<str>,
 ) -> (Option<BoxedProviderStream>, ProviderStreamInfo, ProviderSessionHeaders, Option<CancellationToken>) {
-    let build_options = |url: &Url| {
+    // The provider this attempt rotates through. It comes from the allocated account, not from
+    // the URL: a persisted playlist URL is a plain `http(s)` address, so `get_resolve_provider`
+    // returns `None` for it and the account's laterals would never reach the retry engine.
+    let build_options = |url: &Url, account_provider: Option<Arc<crate::model::ConfigProvider>>| {
         let default_user_agent = app_state.app_config.config.load().default_user_agent.clone();
         let disabled_headers = app_state.get_disabled_headers();
         let mut options = ProviderStreamFactoryOptions::new(&crate::api::model::ProviderStreamFactoryParams {
@@ -193,7 +196,7 @@ async fn open_provider_stream_with_optional_rotation(
         if let Some(stream_index) = user_agent_stream_index {
             options.apply_user_agent_stream_index(stream_index);
         }
-        options.set_provider(input.get_resolve_provider(url.as_str()));
+        options.set_provider(account_provider.or_else(|| input.get_resolve_provider(url.as_str())));
         options.set_proxy(input.proxy.clone());
         options.apply_input_options(input);
         if input.input_type.is_stalker() {
@@ -214,7 +217,18 @@ async fn open_provider_stream_with_optional_rotation(
         let Ok(parsed_url) = Url::parse(request_url.as_ref()) else {
             return (None, None, ProviderSessionHeaders::default(), None);
         };
-        let options = build_options(&parsed_url);
+        // Read the account from the handle on every attempt: a rotation retry replaces the
+        // handle, and the new account may have a different lateral list.
+        // A `provider://` URL already names its provider; the account's laterals are only the
+        // fallback for a plain address, which carries no provider reference at all.
+        let account_provider = streaming_strategy
+            .provider_handle
+            .as_ref()
+            .and_then(|managed| managed.handle())
+            .and_then(|handle| handle.allocation.get_provider_config())
+            .filter(|_config| input.get_resolve_provider(request_url.as_ref()).is_none())
+            .and_then(|config| config.to_config_provider(&input.name));
+        let options = build_options(&parsed_url, account_provider);
         let reconnect_flag = options.get_reconnect_flag_clone();
         let lifecycle = streaming_strategy.provider_handle.as_ref().and_then(ProviderStreamOpenLifecycle::from_managed);
         match open_provider_stream_outcome_with_lifecycle(
@@ -579,7 +593,17 @@ pub(super) async fn create_stream_response_details(
                                     if let Some(stream_index) = user_agent_stream_index {
                                         options.apply_user_agent_stream_index(stream_index);
                                     }
-                                    options.set_provider(input.get_resolve_provider(url.as_ref()));
+                                    // Same rule as the primary open: the account's laterals
+                                    // travel with the allocation, not with the URL.
+                                    let account_provider = streaming_strategy
+                                        .provider_handle
+                                        .as_ref()
+                                        .and_then(|managed| managed.handle())
+                                        .and_then(|handle| handle.allocation.get_provider_config())
+                                        .and_then(|config| config.to_config_provider(&input.name));
+                                    options.set_provider(
+                                        account_provider.or_else(|| input.get_resolve_provider(url.as_ref())),
+                                    );
                                     options.set_proxy(input.proxy.clone());
                                     options.apply_input_options(input);
                                     options.require_public_destination();

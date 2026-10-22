@@ -16,6 +16,22 @@ use shared::{
 use std::sync::Arc;
 use url::Url;
 
+/// Whether `url` is an address the input itself uses (its root or one of its accounts).
+///
+/// Compares origins, because the configured value is a base URL while the requested URL
+/// carries the stream path and query.
+fn origin_belongs_to_input(url: &str, input: &ConfigInput) -> bool {
+    let Ok(candidate) = Url::parse(url) else { return false };
+    let matches = |base: &str| Url::parse(base).is_ok_and(|base| base.origin() == candidate.origin());
+    matches(&input.url)
+        || input
+            .aliases
+            .iter()
+            .flatten()
+            .any(|alias| matches(&alias.url) || alias.lateral_urls.iter().any(|lateral| matches(lateral)))
+        || input.url_aliases.iter().any(|lateral| matches(lateral))
+}
+
 pub fn get_stream_alternative_url(
     stream_url: &str,
     input: &ConfigInput,
@@ -33,6 +49,11 @@ pub fn get_stream_alternative_url(
             (base_url, username, password, true)
         };
     if matched_via_external_signature && !input.input_type.is_m3u() {
+        return None;
+    }
+    // Rewrite only between addresses the input actually uses. A CDN or tokenised URL belongs
+    // to none of them, and replacing its host would invalidate the signature the provider issued.
+    if !origin_belongs_to_input(&source_base_url, input) {
         return None;
     }
     let alt_input_user_info = alias_input.get_user_info()?;

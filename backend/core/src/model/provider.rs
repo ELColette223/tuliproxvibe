@@ -272,7 +272,9 @@ impl ProviderConfig {
     /// account is what makes laterals work, because the persisted playlist URL is a plain
     /// `http(s)` address and never carries a `provider://` reference to resolve.
     pub fn to_config_provider(&self, input_name: &str) -> Option<Arc<ConfigProvider>> {
-        if self.lateral_urls.is_empty() {
+        // With a single address there is nothing to rotate to, and handing the retry a provider
+        // would only add a rewrite step that cannot change the origin.
+        if self.lateral_urls.len() < 2 {
             return None;
         }
         let account_name =
