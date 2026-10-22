@@ -125,7 +125,8 @@ inputs:
     headers: { }
     options: { }
     epg: { }
-    aliases: [ ]
+    url_aliases: [ ]
+    accounts: [ ]
     panel_api: { }
 ```
 
@@ -135,7 +136,7 @@ inputs:
 |:------------------------|:-------|:--------:|:--------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `name`                  | String |   Yes    |         | Internal reference ID for Tuliprox. Must be strictly unique. Critical for persistent UUID generation!                                                                                                                                                                                                                                                                                                                                    |
 | `type`                  | Enum   |    No    | `m3u`   | Allowed: `m3u`, `xtream`, `stalker`, `library`, `staged`, `emby`, `jellyfin`, `plex` (see [Media server inputs](#27-media-server-inputs-plex-emby-jellyfin)), and `m3u_batch` / `xtream_batch` / `stalker_batch` (CSV offloading). Stalker inputs use the portal handshake/catalog flow instead of a plain playlist download.                                                                                                            |
-| `url`                   | String |   Yes    |         | The Provider URL. Tuliprox supports magic scheme prefixes: `http(s)://`, `file://`, `batch://`, and **`provider://my_failover_provider`** (for the Failover System above).                                                                                                                                                                                                                                                               |
+| `url`                   | String |  Yes*   |         | The Provider URL. *Optional when the input declares `url_aliases`, which then supply the address. Tuliprox supports magic scheme prefixes: `http(s)://`, `file://`, `batch://`, and **`provider://my_failover_provider`** (for the Failover System above).                                                                                                                                                                                                                                                               |
 | `username` / `password` | String |  Often   |         | Mandatory for `xtream` and for Stalker inputs using `credentials_only` or `mac_plus_credentials`. Stalker inputs using `mac_only` do not need them. `emby` and `jellyfin` inputs may use them instead of a token (login bootstrap).                                                                                                                                                                                                      |
 | `proxy`                 | Object |    No    |         | Xtream-only outgoing proxy (`url`, optional `username` and `password`). When present, this input proxy replaces the global `config.yml` proxy for this input's playlist, EPG, account-expiry, metadata, probe, HLS, and playback requests. Aliases inherit it. Supported URL schemes: `http`, `https`, `socks5`, and `socks5h`. Without this block, the global proxy remains the fallback.                                               |
 | `enabled`               | Bool   |    No    | `true`  | If `false`, this input is completely ignored in all processing.                                                                                                                                                                                                                                                                                                                                                                          |
@@ -146,7 +147,8 @@ inputs:
 | `exp_date`              | Mixed  |    No    |         | Expiration date as `"YYYY-MM-DD HH:MM:SS"` or Unix timestamp. In server mode, Tuliprox refreshes missing or soon-expiring Xtream account dates through the account's `player_api.php` credentials; see [Automatic Xtream Expiration Refresh](#automatic-xtream-expiration-refresh).                                                                                                                                                      |
 | `headers`               | Dict   |    No    |         | Custom HTTP headers for the download (e.g., `User-Agent: My-Player`).                                                                                                                                                                                                                                                                                                                                                                    |
 | `epg`                   | Object |    No    |         | Allows mapping of external XMLTV files (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                    |
-| `aliases`               | List   |    No    |         | Connection pooling / Sub-accounts (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                         |
+| `accounts`              | List   |    No    |         | Subscription accounts of this input; the first one is the main account (see [Accounts and Alternative URLs](#24-accounts-and-alternative-urls-accounts--url_aliases)). The legacy `aliases` list is still read and converted.                                                                         |
+| `url_aliases`           | List   |    No    |         | Alternative provider base URLs shared by the accounts, tried in order when a request fails (see [Accounts and Alternative URLs](#24-accounts-and-alternative-urls-accounts--url_aliases)).                                                                                                                                     |
 | `staged`                | Object |    No    |         | Staged overlay settings. Only valid when `type: staged` (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                   |
 | `panel_api`             | Object |    No    |         | Automated reseller account generation (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                     |
 | `media_server`          | Object |   Yes*   |         | Settings of `plex`, `emby` and `jellyfin` inputs: library selection, credentials and catalog options. *Mandatory for these input types only; see [Media server inputs](#27-media-server-inputs-plex-emby-jellyfin).                                                                                                                                                                                                                      |
@@ -853,56 +855,79 @@ Formel 1
 
 ---
 
-### 2.4 Provider Aliases (`aliases` & `batch://`)
+### 2.4 Accounts and Alternative URLs (`accounts` & `url_aliases`)
 
-Tuliprox allows you to pool multiple subscriptions from the same provider into a single logical source.
-By merging these "aliases," Tuliprox tracks connection availability across all accounts, ensuring that if one
-subscription is at its limit,
-the next available connection from the pool is used.
+Tuliprox pools several subscriptions of the same provider into one logical source. Each
+subscription is an **account**: a username and password with its own quota and expiration.
+The provider's addresses are declared once as **alternative URLs** (laterals), shared by every
+account, so the same subscription is not repeated once per domain.
 
-#### Defining Aliases in YAML
-
-Aliases are ideal for a small number of fixed accounts. Note that in YAML, `max_connections: 0` signifies "unlimited,"
-which is the default setting.
+#### Defining accounts in YAML
 
 ```yaml
 inputs:
   - type: xtream
-    name: my_provider # Mandatory: Used for stable UUID generation
-    url: 'http://provider.net'
-    username: sub_1
-    password: pw1
-    max_connections: 1
-    aliases:
-      - name: my_provider_2
-        url: 'http://provider.net'
-        username: sub_2
-        password: pw2
-        priority: 1
+    name: my_provider          # Stable identity for playlist UUIDs
+    max_connections: 1         # Default quota for accounts that declare none
+
+    # Provider base addresses, in failover order.
+    url_aliases:
+      - 'http://provider.net'
+      - 'http://provider-mirror.net'
+
+    accounts:
+      - username: sub_1        # The first account is the main one
+        password: pw1
         max_connections: 2
         exp_date: "2028-11-30 12:00:00"
-        enabled: true
+      - username: sub_2
+        password: pw2
+        priority: 1
+        # Restricts this account to one of the input's addresses
+        url_aliases:
+          - 'http://provider-mirror.net'
 ```
 
-**Result:** Tuliprox treats this as a single provider source with a total pool of 1 + 2 = **3** concurrent connections.
+**Result:** a single source with 1 + 2 = **3** concurrent connections. Two inputs may declare
+the same subscription; each one keeps its own quota accounting.
 
-#### YAML Alias Fields
+#### Account fields
 
-Alias entries use the same effective connection attributes as a normal input account. The input-level `headers`,
-`epg`, `options`, `persist`, `method`, `panel_api`, `cache_duration`, and provider failover settings remain inherited
-from the parent input; the alias fields below override the concrete account/connection identity.
+An account has no `name` (its username is the label) and no `url` (it uses the input's
+`url_aliases`, or its own override). The input-level `headers`, `epg`, `options`, `persist`,
+`method`, `panel_api`, `cache_duration`, `proxy` and `sequential_group` are inherited.
 
-| Parameter             | Type   | Required | Default | Technical Impact & Details                                                                                                                                                                                                                         |
-|:----------------------|:-------|:--------:|:--------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `id`                  | Int    |    No    |         | Internal/generated alias ID. Normally omit this; Tuliprox assigns IDs from the input/alias order during config preparation.                                                                                                                        |
-| `name`                | String |   Yes    |         | Unique alias name. Used for stable playlist UUID generation and consistent channel numbering across updates.                                                                                                                                       |
-| `url`                 | String |   Yes    |         | Provider base URL, playlist URL, or `provider://<name>` reference. For M3U aliases, credentials can also be extracted from the URL query parameters.                                                                                               |
-| `username`            | String |  Xtream  |         | Account username. Mandatory for regular Xtream YAML aliases. Optional for M3U aliases when credentials are embedded in the playlist URL.                                                                                                           |
-| `password`            | String |  Xtream  |         | Account password. Mandatory for regular Xtream YAML aliases. Optional for M3U aliases when credentials are embedded in the playlist URL.                                                                                                           |
-| `priority`            | Int    |    No    | `0`     | Connection selection priority for this alias. Lower numbers have higher priority; negative numbers are allowed.                                                                                                                                    |
-| `max_connections`     | Int    |    No    | `0`     | Allowed concurrent streams for this alias. In YAML, `0` means unlimited/no explicit limit.                                                                                                                                                         |
-| `exp_date`            | Mixed  |    No    |         | Account expiration. Supports `"YYYY-MM-DD HH:MM:SS"` interpreted as UTC or Unix timestamps in seconds. Xtream dates participate in the automatic refresh described below.                                                                          |
-| `enabled`             | Bool   |    No    | `true`  | If `false`, this alias is ignored when Tuliprox builds the usable connection pool.                                                                                                                                                                 |
+| Parameter         | Type   | Required | Default | Technical impact                                                                                                                                        |
+|:------------------|:-------|:--------:|:--------|:--------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `id`              | Int    |    No    |         | Internal ID assigned from the account order during config preparation. Omit it.                                                                          |
+| `username`        | String |   Yes    |         | Account login and its label. Must be unique **within the input**; the same username may exist in another input.                                          |
+| `password`        | String |  Xtream  |         | Mandatory for Xtream. Optional for M3U and Stalker when the address carries the credentials.                                                            |
+| `priority`        | Int    |    No    | `0`     | Connection selection priority. Lower numbers win; negative values are allowed.                                                                           |
+| `max_connections` | Int    |    No    | input   | Concurrent streams for this account. `0` means unlimited. When omitted, the input's value applies; a larger account value is honoured.                   |
+| `exp_date`        | Mixed  |    No    |         | Expiration as `"YYYY-MM-DD HH:MM:SS"` (UTC) or a Unix timestamp. Xtream dates join the automatic refresh described below.                                |
+| `enabled`         | Bool   |    No    | `true`  | A disabled account is excluded from the pool.                                                                                                            |
+| `url_aliases`     | List   |    No    | input   | Narrows the addresses this account may use. **Replaces** the input list instead of adding to it, so an account never reaches a domain it did not use.     |
+| `stalker`         | Block  | Stalker  |         | Per-account Stalker device settings. A missing block inherits the input's.                                                                                |
+
+#### Input fields
+
+| Parameter     | Type   | Required | Default | Technical impact                                                                                                                                  |
+|:--------------|:-------|:--------:|:--------|:--------------------------------------------------------------------------------------------------------------------------------------------------|
+| `url`         | String |    No    |         | Primary address of the main account. When omitted, the first `url_aliases` entry is used.                                                          |
+| `url_aliases` | List   |    No    |         | Provider base URLs shared by the accounts. Only `http(s)` values are accepted; `provider://` and `batch://` are rejected.                          |
+| `accounts`    | List   |    No    |         | Subscription accounts. The first one is the main account. Mutually exclusive with the legacy `aliases` list.                                        |
+
+> **Note:** a file that still uses `aliases` keeps working. On load it is converted to
+> `accounts` + `url_aliases`: copies of one username are merged field by field (enabled is
+> true if any copy is enabled, the newest expiration wins), and each account keeps only the
+> addresses it actually used. The next save writes the `accounts` form.
+
+#### Failover between alternative URLs
+
+When a request fails, Tuliprox retries it against the next address of the account's list and
+remembers the address that worked. Only addresses that belong to the account are rewritten: a
+CDN or tokenised URL keeps its host, because its signature depends on it.
+
 
 #### Automatic Xtream Expiration Refresh
 
@@ -1022,7 +1047,7 @@ and the catalog page limit are configured on the parent input in the Web UI or Y
 | Parameter                 | Technical Impact & Details                                                                                                                                                                                                                          |
 |:--------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **`url`**                 | Provider base URL or full M3U playlist URL. Required in CSV rows.                                                                                                                                                                                   |
-| **`name`**                | **Crucial:** The first alias is automatically renamed with the `name` from the input definition (e.g., `my_provider_1` gets `my_provider`). This is necessary for stable playlist UUID generation and consistent channel numbering across updates.  |
+| **`name`**                | Account label. When the input declares `url_aliases`, a row may omit `url` and inherit the input's addresses. |
 | **`username`**            | Xtream or Stalker account username. For M3U CSV rows, Tuliprox can also extract credentials from the URL query parameters.                                                                                                                          |
 | **`password`**            | Xtream or Stalker account password. For M3U CSV rows, Tuliprox can also extract credentials from the URL query parameters.                                                                                                                          |
 | **`mac_address`**         | Stalker alias MAC address. Required by `mac_only` and `mac_plus_credentials`; optional for credentials-only authentication.                                                                                                                         |
@@ -1142,7 +1167,7 @@ Tuliprox can optionally interface with a provider's reseller panel API to automa
 This allows the system to fetch credit balances, sync expiration dates, and automatically provision or renew alias
 accounts based on demand.
 
-> **Important:** Panel API accounts are managed as individual connections/aliases.
+> **Important:** Panel API accounts are managed as individual accounts of their input.
 > Tuliprox does **not** assume unlimited provider access; each alias consumes a slot or credit according to your
 > provider's rules.
 
