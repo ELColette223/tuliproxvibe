@@ -62,10 +62,14 @@ impl TargetFilterBuilderState {
 
     /// Rules whose match excludes an item at the persist stage. Paths for exclusion
     /// actions start with the index in this list.
-    pub fn exclusion_rules(&self) -> Vec<FilterNode> { extract_persist_exclusions(self.persist.as_ref()).rules }
+    pub fn exclusion_rules(&self) -> Vec<FilterNode> {
+        extract_persist_exclusions(self.persist.as_ref()).rules
+    }
 
     /// The existing persist predicate that must still match for an item to survive.
-    pub fn exclusion_base(&self) -> Option<FilterNode> { extract_persist_exclusions(self.persist.as_ref()).keep }
+    pub fn exclusion_base(&self) -> Option<FilterNode> {
+        extract_persist_exclusions(self.persist.as_ref()).keep
+    }
 
     pub fn rule_usage_count(&self, rule_id: &str) -> usize {
         validate_filter_library(&self.rules, &self.roots_with_owners())

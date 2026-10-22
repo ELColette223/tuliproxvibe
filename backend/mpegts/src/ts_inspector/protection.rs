@@ -98,7 +98,9 @@ impl HlsAes128CbcPrefixDecoder {
 }
 
 impl Drop for HlsAes128CbcPrefixDecoder {
-    fn drop(&mut self) { self.previous_ciphertext.zeroize(); }
+    fn drop(&mut self) {
+        self.previous_ciphertext.zeroize();
+    }
 }
 
 pub(super) enum HlsTsSourceDecoder {

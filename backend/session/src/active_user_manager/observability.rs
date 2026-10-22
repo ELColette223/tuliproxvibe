@@ -100,14 +100,20 @@ impl ActiveUserManager {
     /// Exposed so the admission path can report a refusal without
     /// `AdmissionCtx` growing a second handle to the same manager.
     #[must_use]
-    pub fn events(&self) -> &Arc<EventManager> { &self.event_manager }
+    pub fn events(&self) -> &Arc<EventManager> {
+        &self.event_manager
+    }
 
     /// Cumulative count of admission requests quietly suppressed by the recent-eviction
     /// reentry guard. A diagnostic counter, not a failure metric.
-    pub fn reentry_suppressed_total(&self) -> u64 { self.reentry_suppressed_total.load(Ordering::Relaxed) }
+    pub fn reentry_suppressed_total(&self) -> u64 {
+        self.reentry_suppressed_total.load(Ordering::Relaxed)
+    }
 
     /// Records one suppressed reentry retry.
-    pub fn record_reentry_suppressed(&self) { self.reentry_suppressed_total.fetch_add(1, Ordering::Relaxed); }
+    pub fn record_reentry_suppressed(&self) {
+        self.reentry_suppressed_total.fetch_add(1, Ordering::Relaxed);
+    }
 
     /// Collect a snapshot of all currently active streams for shutdown history recording.
     pub async fn get_all_active_streams(&self) -> Vec<shared::model::StreamInfo> {
@@ -217,7 +223,9 @@ impl ActiveUserManager {
         })
     }
 
-    pub(super) fn is_log_user_enabled(&self) -> bool { self.log_active_user.load(Ordering::Relaxed) }
+    pub(super) fn is_log_user_enabled(&self) -> bool {
+        self.log_active_user.load(Ordering::Relaxed)
+    }
 
     pub async fn active_streams(&self) -> Vec<StreamInfo> {
         self.gc();

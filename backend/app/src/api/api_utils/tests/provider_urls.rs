@@ -1072,7 +1072,7 @@ async fn resolve_streaming_strategy_rewrites_url_on_fallback_even_when_accept_re
     else {
         panic!("fallback-enabled request should allocate fallback provider")
     };
-    assert_eq!(fallback_provider.as_ref(), "provider_2");
+    assert_eq!(fallback_provider.as_ref(), "provider_1/user2");
     assert_eq!(url.as_ref(), "http://provider-2.example/movie/user2/pass2/1.mkv");
 
     app_state.active_provider.release_connection(&busy_addr);

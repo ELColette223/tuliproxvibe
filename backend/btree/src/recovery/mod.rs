@@ -69,7 +69,9 @@ pub struct RecoveryBatch<K, V> {
 }
 
 impl<K, V> RecoveryBatch<K, V> {
-    pub fn new(operations: Vec<RecoveryOperation<K, V>>) -> Self { Self { operations } }
+    pub fn new(operations: Vec<RecoveryOperation<K, V>>) -> Self {
+        Self { operations }
+    }
 }
 
 /// When a checkpoint replaces the accumulated journal.
@@ -692,7 +694,9 @@ where
 
     /// Reads every live entry. Callers outside this crate use it to project a
     /// committed in-memory view after `open`.
-    pub fn entries(&mut self) -> io::Result<Vec<(K, V)>> { self.live_entries() }
+    pub fn entries(&mut self) -> io::Result<Vec<(K, V)>> {
+        self.live_entries()
+    }
 
     pub fn query(&mut self, key: &K) -> io::Result<Option<V>> {
         let mut query = BPlusTreeQuery::<K, V>::try_new(&self.paths.database)?;
@@ -831,7 +835,9 @@ where
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn inject_fault(&mut self, point: Option<RecoveryFaultPoint>) { self.fault = point; }
+    pub fn inject_fault(&mut self, point: Option<RecoveryFaultPoint>) {
+        self.fault = point;
+    }
 
     #[cfg(any(test, feature = "test-support"))]
     fn check_fault(&mut self, point: RecoveryFaultPointCheck) -> io::Result<()> {
@@ -853,7 +859,9 @@ where
     // variant trivially successful and independent of `self`.
     #[cfg(not(any(test, feature = "test-support")))]
     #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
-    fn check_fault(&mut self, _point: RecoveryFaultPointCheck) -> io::Result<()> { Ok(()) }
+    fn check_fault(&mut self, _point: RecoveryFaultPointCheck) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -983,6 +991,10 @@ fn detect_placement(paths: &RecoveryPaths) -> RecoveryStoragePlacement {
     }
 }
 
-fn new_database_id() -> String { hex16(*uuid::Uuid::new_v4().as_bytes()) }
+fn new_database_id() -> String {
+    hex16(*uuid::Uuid::new_v4().as_bytes())
+}
 
-fn hex16(bytes: [u8; 16]) -> String { format::hex_bytes(&bytes) }
+fn hex16(bytes: [u8; 16]) -> String {
+    format::hex_bytes(&bytes)
+}

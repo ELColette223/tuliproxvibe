@@ -14,15 +14,21 @@ pub struct ConfigTargetFilterDto {
 }
 
 impl PartialEq for ConfigTargetFilterDto {
-    fn eq(&self, other: &Self) -> bool { self.processing == other.processing && self.persist == other.persist }
+    fn eq(&self, other: &Self) -> bool {
+        self.processing == other.processing && self.persist == other.persist
+    }
 }
 
 impl From<String> for ConfigTargetFilterDto {
-    fn from(processing: String) -> Self { Self { processing: Some(processing), ..Self::default() } }
+    fn from(processing: String) -> Self {
+        Self { processing: Some(processing), ..Self::default() }
+    }
 }
 
 impl From<&str> for ConfigTargetFilterDto {
-    fn from(processing: &str) -> Self { processing.to_string().into() }
+    fn from(processing: &str) -> Self {
+        processing.to_string().into()
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -50,7 +56,9 @@ impl<'de> serde::Deserialize<'de> for ConfigTargetFilterDto {
 }
 
 impl ConfigTargetFilterDto {
-    pub const fn is_empty(&self) -> bool { self.processing.is_none() && self.persist.is_none() }
+    pub const fn is_empty(&self) -> bool {
+        self.processing.is_none() && self.persist.is_none()
+    }
 
     pub(super) fn prepare(&mut self, templates: Option<&[PatternTemplate]>) -> Result<(), TuliproxError> {
         fn compile_filter(

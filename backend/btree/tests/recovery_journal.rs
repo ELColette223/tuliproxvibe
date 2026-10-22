@@ -28,7 +28,9 @@ struct Key {
 }
 
 impl Key {
-    fn new(id: &str) -> Self { Self { id: id.to_owned() } }
+    fn new(id: &str) -> Self {
+        Self { id: id.to_owned() }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -49,7 +51,9 @@ struct V3 {
     tags: Vec<String>,
 }
 
-fn invalid(message: &str) -> io::Error { io::Error::new(io::ErrorKind::InvalidData, message.to_owned()) }
+fn invalid(message: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.to_owned())
+}
 
 fn encode<T: Serialize>(value: &T) -> io::Result<Value> {
     serde_json::to_value(value).map_err(|error| invalid(&error.to_string()))
@@ -73,11 +77,17 @@ fn step_v2_to_v3(value: Value) -> io::Result<Value> {
 
 macro_rules! key_schema {
     () => {
-        fn encode_key(&self, key: &Key) -> io::Result<Value> { encode(key) }
+        fn encode_key(&self, key: &Key) -> io::Result<Value> {
+            encode(key)
+        }
 
-        fn migrate_key_one(&self, _from: u32, key: Value) -> io::Result<Value> { Ok(key) }
+        fn migrate_key_one(&self, _from: u32, key: Value) -> io::Result<Value> {
+            Ok(key)
+        }
 
-        fn decode_current_key(&self, key: Value) -> io::Result<Key> { decode(key) }
+        fn decode_current_key(&self, key: Value) -> io::Result<Key> {
+            decode(key)
+        }
     };
 }
 
@@ -89,13 +99,17 @@ impl RecoverySchema<Key, V1> for SchemaV1 {
 
     key_schema!();
 
-    fn encode_current(&self, value: &V1) -> io::Result<Value> { encode(value) }
+    fn encode_current(&self, value: &V1) -> io::Result<Value> {
+        encode(value)
+    }
 
     fn migrate_one(&self, from: u32, _value: Value) -> io::Result<Value> {
         Err(invalid(&format!("schema v1 has no migration from {from}")))
     }
 
-    fn decode_current(&self, value: Value) -> io::Result<V1> { decode(value) }
+    fn decode_current(&self, value: Value) -> io::Result<V1> {
+        decode(value)
+    }
 }
 
 struct SchemaV2;
@@ -106,7 +120,9 @@ impl RecoverySchema<Key, V2> for SchemaV2 {
 
     key_schema!();
 
-    fn encode_current(&self, value: &V2) -> io::Result<Value> { encode(value) }
+    fn encode_current(&self, value: &V2) -> io::Result<Value> {
+        encode(value)
+    }
 
     fn migrate_one(&self, from: u32, value: Value) -> io::Result<Value> {
         match from {
@@ -115,7 +131,9 @@ impl RecoverySchema<Key, V2> for SchemaV2 {
         }
     }
 
-    fn decode_current(&self, value: Value) -> io::Result<V2> { decode(value) }
+    fn decode_current(&self, value: Value) -> io::Result<V2> {
+        decode(value)
+    }
 }
 
 struct SchemaV3;
@@ -126,7 +144,9 @@ impl RecoverySchema<Key, V3> for SchemaV3 {
 
     key_schema!();
 
-    fn encode_current(&self, value: &V3) -> io::Result<Value> { encode(value) }
+    fn encode_current(&self, value: &V3) -> io::Result<Value> {
+        encode(value)
+    }
 
     fn migrate_one(&self, from: u32, value: Value) -> io::Result<Value> {
         match from {
@@ -136,7 +156,9 @@ impl RecoverySchema<Key, V3> for SchemaV3 {
         }
     }
 
-    fn decode_current(&self, value: Value) -> io::Result<V3> { decode(value) }
+    fn decode_current(&self, value: Value) -> io::Result<V3> {
+        decode(value)
+    }
 }
 
 /// A schema whose migration chain is deliberately incomplete.
@@ -148,7 +170,9 @@ impl RecoverySchema<Key, V3> for SchemaV3MissingStep {
 
     key_schema!();
 
-    fn encode_current(&self, value: &V3) -> io::Result<Value> { encode(value) }
+    fn encode_current(&self, value: &V3) -> io::Result<Value> {
+        encode(value)
+    }
 
     fn migrate_one(&self, from: u32, value: Value) -> io::Result<Value> {
         match from {
@@ -157,7 +181,9 @@ impl RecoverySchema<Key, V3> for SchemaV3MissingStep {
         }
     }
 
-    fn decode_current(&self, value: Value) -> io::Result<V3> { decode(value) }
+    fn decode_current(&self, value: Value) -> io::Result<V3> {
+        decode(value)
+    }
 }
 
 type JournalV1 = BPlusTreeRecoveryJournal<Key, V1, SchemaV1>;
@@ -181,7 +207,9 @@ impl Harness {
         Ok(Self { _root: root, paths })
     }
 
-    fn paths(&self) -> RecoveryPaths { self.paths.clone() }
+    fn paths(&self) -> RecoveryPaths {
+        self.paths.clone()
+    }
 
     fn open_v3(&self) -> io::Result<JournalV3> {
         JournalV3::open(self.paths(), SchemaV3, RecoveryPolicy::default()).map(|(journal, _)| journal)
@@ -199,7 +227,9 @@ impl Harness {
         best.ok_or_else(|| invalid("no recovery generation exists"))
     }
 
-    fn journal_file(&self) -> io::Result<PathBuf> { Ok(self.newest_generation()?.join("journal.bin")) }
+    fn journal_file(&self) -> io::Result<PathBuf> {
+        Ok(self.newest_generation()?.join("journal.bin"))
+    }
 
     fn generation_count(&self) -> io::Result<usize> {
         let mut count = 0;
@@ -211,7 +241,9 @@ impl Harness {
         Ok(count)
     }
 
-    fn recovery_bytes(&self) -> io::Result<u64> { directory_size(&self.paths.directory) }
+    fn recovery_bytes(&self) -> io::Result<u64> {
+        directory_size(&self.paths.directory)
+    }
 }
 
 fn directory_size(path: &Path) -> io::Result<u64> {
@@ -766,7 +798,9 @@ fn compaction_removes_dead_history() -> io::Result<()> {
     Ok(())
 }
 
-fn expected_keys() -> Vec<String> { (0..5).map(|index| format!("live-{index}")).collect() }
+fn expected_keys() -> Vec<String> {
+    (0..5).map(|index| format!("live-{index}")).collect()
+}
 
 #[test]
 fn compaction_triggers_on_transaction_count() -> io::Result<()> {

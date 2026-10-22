@@ -44,7 +44,11 @@ impl RecordingCapacityPort for ProviderCapacityAdapter {
         Box::pin(std::future::ready(()))
     }
 
-    fn capacity_changed(&self) -> Arc<Notify> { self.connection_manager.capacity_notified() }
+    fn capacity_changed(&self) -> Arc<Notify> {
+        self.connection_manager.capacity_notified()
+    }
 
-    fn is_input_in_maintenance(&self, input_name: &str) -> bool { self.maintenance.is_in_maintenance(input_name) }
+    fn is_input_in_maintenance(&self, input_name: &str) -> bool {
+        self.maintenance.is_in_maintenance(input_name)
+    }
 }

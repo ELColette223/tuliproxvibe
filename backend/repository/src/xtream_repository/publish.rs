@@ -57,14 +57,18 @@ fn publish_staged_file_platform(mut staging_path: tempfile::TempPath, published:
 }
 
 #[cfg(unix)]
-pub(super) fn sync_published_file_parent(path: &Path) -> io::Result<()> { File::open(parent_or_dot(path))?.sync_all() }
+pub(super) fn sync_published_file_parent(path: &Path) -> io::Result<()> {
+    File::open(parent_or_dot(path))?.sync_all()
+}
 
 /// Every Windows transaction move uses `MOVEFILE_WRITE_THROUGH`; reaching
 /// this barrier therefore means all preceding backup or publication moves
 /// have completed durably without a second raw rename.
 #[cfg(windows)]
 #[allow(clippy::unnecessary_wraps)] // keeps the signature identical across platforms
-pub(super) fn sync_published_file_parent(_path: &Path) -> io::Result<()> { Ok(()) }
+pub(super) fn sync_published_file_parent(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
 
 /// There is no supported directory durability barrier for other targets.
 /// Callers report this only after the atomic rename has completed.
@@ -89,7 +93,9 @@ impl LockedCategoryFile {
         Ok(Self { file, path: path.to_path_buf() })
     }
 
-    pub(super) fn sync_all(&self) -> io::Result<()> { self.file.sync_all() }
+    pub(super) fn sync_all(&self) -> io::Result<()> {
+        self.file.sync_all()
+    }
 }
 
 impl Drop for LockedCategoryFile {

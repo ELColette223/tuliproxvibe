@@ -12,7 +12,9 @@ pub(crate) const PROGRESSIVE_SLOT_FIXED_BYTES: usize = 512;
 /// Allocator bookkeeping charged on top of every replay chunk.
 const PROGRESSIVE_CHUNK_OVERHEAD_BYTES: usize = std::mem::size_of::<BudgetedChunk>() + 64;
 
-fn exceeds(bytes: usize, limit: ConfigBytes) -> bool { !u64::try_from(bytes).is_ok_and(|bytes| bytes <= limit.get()) }
+fn exceeds(bytes: usize, limit: ConfigBytes) -> bool {
+    !u64::try_from(bytes).is_ok_and(|bytes| bytes <= limit.get())
+}
 
 #[derive(Debug)]
 struct Usage {
@@ -171,7 +173,9 @@ struct BudgetedChunk {
     manager: Arc<ProgressiveBudgetManager>,
 }
 impl AsRef<[u8]> for BudgetedChunk {
-    fn as_ref(&self) -> &[u8] { &self.data }
+    fn as_ref(&self) -> &[u8] {
+        &self.data
+    }
 }
 impl Drop for BudgetedChunk {
     fn drop(&mut self) {

@@ -145,7 +145,9 @@ impl HlsTsDemuxContext {
 impl DemuxContext for HlsTsDemuxContext {
     type F = HlsTsPacketFilter;
 
-    fn filter_changeset(&mut self) -> &mut FilterChangeset<Self::F> { &mut self.changeset }
+    fn filter_changeset(&mut self) -> &mut FilterChangeset<Self::F> {
+        &mut self.changeset
+    }
 
     fn construct(&mut self, request: FilterRequest<'_, '_>) -> Self::F {
         match request {

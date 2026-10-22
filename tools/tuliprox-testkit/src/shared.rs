@@ -35,7 +35,9 @@ impl SharedStreamModel {
     }
 
     #[must_use]
-    pub fn subscriber_count(&self, marker: u32) -> usize { self.subscribers.get(&marker).map_or(0, HashSet::len) }
+    pub fn subscriber_count(&self, marker: u32) -> usize {
+        self.subscribers.get(&marker).map_or(0, HashSet::len)
+    }
 }
 
 #[cfg(test)]

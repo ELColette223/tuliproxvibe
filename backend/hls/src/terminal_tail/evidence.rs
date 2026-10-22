@@ -40,29 +40,43 @@ pub struct HlsTerminalBaseSegmentAvailability {
 }
 
 impl HlsTerminalBaseEvidence {
-    pub fn availability(&self) -> Arc<[HlsTerminalBaseSegmentAvailability]> { Arc::clone(&self.availability) }
+    pub fn availability(&self) -> Arc<[HlsTerminalBaseSegmentAvailability]> {
+        Arc::clone(&self.availability)
+    }
 
     pub fn track_signature(&self) -> Option<HlsTsTrackSignature> {
         self.track_resolution.as_ref().and_then(HlsTrackEvidenceResolution::signature).cloned()
     }
 
-    pub fn track_resolution(&self) -> Option<&HlsTrackEvidenceResolution> { self.track_resolution.as_ref() }
+    pub fn track_resolution(&self) -> Option<&HlsTrackEvidenceResolution> {
+        self.track_resolution.as_ref()
+    }
 
-    pub fn splice_evidence(&self) -> Option<&HlsTsSpliceEvidence> { self.splice_evidence.as_ref() }
+    pub fn splice_evidence(&self) -> Option<&HlsTsSpliceEvidence> {
+        self.splice_evidence.as_ref()
+    }
 
     pub fn track_evidence_reason_code(&self) -> &'static str {
         self.track_resolution.as_ref().map_or("base-not-ready", HlsTrackEvidenceResolution::reason_code)
     }
 
-    pub fn track_base(&self) -> Option<&HlsTerminalBaseTrackIdentity> { self.track_base.as_ref() }
+    pub fn track_base(&self) -> Option<&HlsTerminalBaseTrackIdentity> {
+        self.track_base.as_ref()
+    }
 
-    pub fn timing(&self) -> Option<&HlsTerminalBaseTimingEvidence> { self.timing.as_ref() }
+    pub fn timing(&self) -> Option<&HlsTerminalBaseTimingEvidence> {
+        self.timing.as_ref()
+    }
 
-    pub fn key_bindings(&self) -> Arc<[HlsTerminalKeyBinding]> { Arc::clone(&self.key_bindings) }
+    pub fn key_bindings(&self) -> Arc<[HlsTerminalKeyBinding]> {
+        Arc::clone(&self.key_bindings)
+    }
 
     /// Makes the intended guard lifetime explicit at the endpoint commit boundary.
     #[cfg(any(test, feature = "test-support"))]
-    pub fn release(self) { drop(self.read_protection) }
+    pub fn release(self) {
+        drop(self.read_protection)
+    }
 
     /// Transfers the READY-object reader pins to an autonomous terminal commit.
     ///
@@ -76,7 +90,9 @@ impl HlsTerminalBaseEvidence {
 
 #[cfg(any(test, feature = "test-support"))]
 impl HlsTerminalCommitMediaGuard {
-    pub fn empty_for_test() -> Self { Self { read_protection: HlsTerminalBaseReadProtection { accesses: Vec::new() } } }
+    pub fn empty_for_test() -> Self {
+        Self { read_protection: HlsTerminalBaseReadProtection { accesses: Vec::new() } }
+    }
 }
 
 impl std::fmt::Debug for HlsTerminalCommitMediaGuard {
@@ -361,7 +377,9 @@ pub(super) enum HlsTerminalBaseKeyEvidence {
 }
 
 impl HlsTerminalBaseKeyEvidence {
-    pub(super) fn unavailable(resolution: HlsTrackEvidenceResolution) -> Self { Self::Unavailable { resolution } }
+    pub(super) fn unavailable(resolution: HlsTrackEvidenceResolution) -> Self {
+        Self::Unavailable { resolution }
+    }
 }
 
 fn terminal_base_key_evidence(

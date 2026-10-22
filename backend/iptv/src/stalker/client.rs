@@ -143,7 +143,9 @@ impl<Tr: StalkerTransport, C: Clock> StalkerApiClient<Tr, C> {
 
     /// The current snapshot, for persisting back to a store.
     #[must_use]
-    pub fn capabilities(&self) -> ProviderCapabilities { self.capabilities.lock().clone() }
+    pub fn capabilities(&self) -> ProviderCapabilities {
+        self.capabilities.lock().clone()
+    }
 
     /// Whether `action` is known not to work on this portal, according to a snapshot
     /// still worth believing.
@@ -190,18 +192,26 @@ impl<Tr: StalkerTransport, C: Clock> StalkerApiClient<Tr, C> {
     /// Unix-epoch seconds according to this client's clock. Everything that expires -
     /// sessions, cookies - is measured against this.
     #[must_use]
-    pub fn now_epoch_secs(&self) -> u64 { crate::clock::epoch_secs(&self.clock) }
+    pub fn now_epoch_secs(&self) -> u64 {
+        crate::clock::epoch_secs(&self.clock)
+    }
 
     /// Returns the URL candidates this client will iterate through on errors.
-    pub fn load_url_candidates(&self) -> &[StalkerLoadUrl] { &self.load_urls }
+    pub fn load_url_candidates(&self) -> &[StalkerLoadUrl] {
+        &self.load_urls
+    }
 
     /// Returns the active handshake, if any. Reverse-proxy code calls this to fetch the
     /// bearer token without re-handshaking.
-    pub fn active_handshake(&self) -> Option<StalkerHandshake> { self.handshake.lock().clone() }
+    pub fn active_handshake(&self) -> Option<StalkerHandshake> {
+        self.handshake.lock().clone()
+    }
 
     /// Returns a reference to the active cookie jar. Used by tests and by callers that
     /// need to seed the jar with previously-captured cookies.
-    pub fn cookies(&self) -> &StalkerCookieJar { &self.cookies }
+    pub fn cookies(&self) -> &StalkerCookieJar {
+        &self.cookies
+    }
 
     /// Force-clear the active session and cookies. Useful when the upstream returns a
     /// "token rejected" status.
@@ -382,13 +392,21 @@ impl<Tr: StalkerTransport, C: Clock> StalkerApiClient<Tr, C> {
     // -------------------------------------------------------------------------------------
 
     /// Start a request against `url`. Stalker portals answer `GET` for every action.
-    pub fn get(&self, url: &str) -> RequestBuilder { self.transport.get(url) }
+    pub fn get(&self, url: &str) -> RequestBuilder {
+        self.transport.get(url)
+    }
 
-    pub fn portal_url(&self) -> &str { &self.portal_url }
+    pub fn portal_url(&self) -> &str {
+        &self.portal_url
+    }
 
-    pub fn config(&self) -> &StalkerInputConfig { &self.config }
+    pub fn config(&self) -> &StalkerInputConfig {
+        &self.config
+    }
 
-    pub fn body_caps(&self) -> &StalkerBodyCaps { &self.body_caps }
+    pub fn body_caps(&self) -> &StalkerBodyCaps {
+        &self.body_caps
+    }
 
     pub fn catalog_max_pages(&self) -> u32 {
         self.config.catalog_max_pages.filter(|value| *value > 0).unwrap_or(DEFAULT_STALKER_CATALOG_MAX_PAGES)
@@ -606,7 +624,9 @@ impl<Tr: StalkerTransport, C: Clock> StalkerApiClient<Tr, C> {
 
     /// The body cap for `action`, from this client's configured [`StalkerBodyCaps`].
     #[must_use]
-    pub fn cap_for_action(&self, action: StalkerAction) -> u64 { action.cap_bytes(&self.body_caps) }
+    pub fn cap_for_action(&self, action: StalkerAction) -> u64 {
+        action.cap_bytes(&self.body_caps)
+    }
 }
 
 /// Inspect the body for a Stalker/Ministra portal-internal `code` field. The
@@ -817,7 +837,9 @@ fn rotate_stalker_debug_dumps(dump_dir: &Path) {
 }
 
 #[inline]
-fn sanitize_dump_component(value: &str) -> String { crate::redaction::sanitize_path_component(value, true) }
+fn sanitize_dump_component(value: &str) -> String {
+    crate::redaction::sanitize_path_component(value, true)
+}
 
 #[cfg(test)]
 mod transport_tests {

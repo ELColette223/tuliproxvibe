@@ -38,7 +38,9 @@ impl TraktFetchFailure {
         Self { kind, error }
     }
 
-    pub(super) fn message(&self) -> &str { self.error.message() }
+    pub(super) fn message(&self) -> &str {
+        self.error.message()
+    }
 }
 
 pub(super) struct TraktClient {

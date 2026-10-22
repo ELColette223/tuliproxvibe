@@ -48,10 +48,14 @@ fn test_filter_string_ops_round_trip() {
 }
 
 #[test]
-fn test_filter_numeric_round_trip() { assert_filter_round_trip(r"Chno >= 100 AND Chno < 200 OR NOT Chno = 7"); }
+fn test_filter_numeric_round_trip() {
+    assert_filter_round_trip(r"Chno >= 100 AND Chno < 200 OR NOT Chno = 7");
+}
 
 #[test]
-fn test_filter_set_round_trip() { assert_filter_round_trip(r#"Group IN ["Sports", "News"] AND NOT (Name IN ["A"])"#); }
+fn test_filter_set_round_trip() {
+    assert_filter_round_trip(r#"Group IN ["Sports", "News"] AND NOT (Name IN ["A"])"#);
+}
 
 #[test]
 fn test_filter_presence_round_trip_and_aliases() {

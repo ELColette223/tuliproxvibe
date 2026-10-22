@@ -2,7 +2,9 @@
 
 use shared::model::{InputMaintenance, MaintenanceEntries, MaintenanceStateDto, MAINTENANCE_REASON_MAX_CHARS};
 
-pub fn is_alert(state: &MaintenanceStateDto) -> bool { !state.entries.is_empty() }
+pub fn is_alert(state: &MaintenanceStateDto) -> bool {
+    !state.entries.is_empty()
+}
 
 /// The first `max` input names, with an ellipsis when there are more.
 pub fn preview_names(state: &MaintenanceStateDto, max: usize) -> String {
@@ -24,7 +26,9 @@ pub fn merge_loaded(current: &MaintenanceStateDto, loaded: MaintenanceStateDto, 
 }
 
 /// The server rejects longer remarks; the dialog says so before sending.
-pub fn reason_too_long(reason: &str) -> bool { reason.trim().chars().count() > MAINTENANCE_REASON_MAX_CHARS }
+pub fn reason_too_long(reason: &str) -> bool {
+    reason.trim().chars().count() > MAINTENANCE_REASON_MAX_CHARS
+}
 
 fn normalized(reason: &str) -> Option<String> {
     let reason = reason.trim();
@@ -60,7 +64,9 @@ pub struct PendingChanges {
 }
 
 impl PendingChanges {
-    pub fn is_empty(&self) -> bool { self.puts.is_empty() && self.deletes.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.puts.is_empty() && self.deletes.is_empty()
+    }
 }
 
 pub fn pending_changes(saved: &MaintenanceEntries, draft: &MaintenanceEntries) -> PendingChanges {

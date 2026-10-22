@@ -87,7 +87,9 @@ where
         Ok(())
     }
 
-    pub fn flush_now(&self) -> io::Result<()> { self.commit() }
+    pub fn flush_now(&self) -> io::Result<()> {
+        self.commit()
+    }
 
     pub fn commit(&self) -> io::Result<()> {
         self.updater.lock().commit()?;

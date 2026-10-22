@@ -55,7 +55,9 @@ impl PersistedRecordingQueue {
 }
 
 impl RecordingQueue {
-    pub fn new() -> Self { Self::new_with_repository(None) }
+    pub fn new() -> Self {
+        Self::new_with_repository(None)
+    }
 
     /// Opens the recoverable store and builds a queue backed by it.
     ///

@@ -188,9 +188,13 @@ impl StoredApiUserV4 {
         }
     }
 
-    pub(crate) fn from_v2(v2: &StoredApiUserV2) -> Self { Self::from_v3(&StoredApiUserV3::from_v2(v2)) }
+    pub(crate) fn from_v2(v2: &StoredApiUserV2) -> Self {
+        Self::from_v3(&StoredApiUserV3::from_v2(v2))
+    }
 
-    pub(crate) fn from_v1(v1: &StoredApiUserV1) -> Self { Self::from_v3(&StoredApiUserV3::from_v1(v1)) }
+    pub(crate) fn from_v1(v1: &StoredApiUserV1) -> Self {
+        Self::from_v3(&StoredApiUserV3::from_v1(v1))
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -240,11 +244,17 @@ impl StoredApiUserV5 {
         }
     }
 
-    pub(crate) fn from_v3(v3: &StoredApiUserV3) -> Self { Self::from_v4(&StoredApiUserV4::from_v3(v3)) }
+    pub(crate) fn from_v3(v3: &StoredApiUserV3) -> Self {
+        Self::from_v4(&StoredApiUserV4::from_v3(v3))
+    }
 
-    pub(crate) fn from_v2(v2: &StoredApiUserV2) -> Self { Self::from_v4(&StoredApiUserV4::from_v2(v2)) }
+    pub(crate) fn from_v2(v2: &StoredApiUserV2) -> Self {
+        Self::from_v4(&StoredApiUserV4::from_v2(v2))
+    }
 
-    pub(crate) fn from_v1(v1: &StoredApiUserV1) -> Self { Self::from_v4(&StoredApiUserV4::from_v1(v1)) }
+    pub(crate) fn from_v1(v1: &StoredApiUserV1) -> Self {
+        Self::from_v4(&StoredApiUserV4::from_v1(v1))
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -296,13 +306,21 @@ impl StoredApiUserV6 {
         }
     }
 
-    pub(crate) fn from_v4(v4: &StoredApiUserV4) -> Self { Self::from_v5(&StoredApiUserV5::from_v4(v4)) }
+    pub(crate) fn from_v4(v4: &StoredApiUserV4) -> Self {
+        Self::from_v5(&StoredApiUserV5::from_v4(v4))
+    }
 
-    pub(crate) fn from_v3(v3: &StoredApiUserV3) -> Self { Self::from_v5(&StoredApiUserV5::from_v3(v3)) }
+    pub(crate) fn from_v3(v3: &StoredApiUserV3) -> Self {
+        Self::from_v5(&StoredApiUserV5::from_v3(v3))
+    }
 
-    pub(crate) fn from_v2(v2: &StoredApiUserV2) -> Self { Self::from_v5(&StoredApiUserV5::from_v2(v2)) }
+    pub(crate) fn from_v2(v2: &StoredApiUserV2) -> Self {
+        Self::from_v5(&StoredApiUserV5::from_v2(v2))
+    }
 
-    pub(crate) fn from_v1(v1: &StoredApiUserV1) -> Self { Self::from_v5(&StoredApiUserV5::from_v1(v1)) }
+    pub(crate) fn from_v1(v1: &StoredApiUserV1) -> Self {
+        Self::from_v5(&StoredApiUserV5::from_v1(v1))
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -358,15 +376,25 @@ impl StoredApiUserV7 {
         }
     }
 
-    pub(crate) fn from_v5(v5: &StoredApiUserV5) -> Self { Self::from_v6(&StoredApiUserV6::from_v5(v5)) }
+    pub(crate) fn from_v5(v5: &StoredApiUserV5) -> Self {
+        Self::from_v6(&StoredApiUserV6::from_v5(v5))
+    }
 
-    pub(crate) fn from_v4(v4: &StoredApiUserV4) -> Self { Self::from_v6(&StoredApiUserV6::from_v4(v4)) }
+    pub(crate) fn from_v4(v4: &StoredApiUserV4) -> Self {
+        Self::from_v6(&StoredApiUserV6::from_v4(v4))
+    }
 
-    pub(crate) fn from_v3(v3: &StoredApiUserV3) -> Self { Self::from_v6(&StoredApiUserV6::from_v3(v3)) }
+    pub(crate) fn from_v3(v3: &StoredApiUserV3) -> Self {
+        Self::from_v6(&StoredApiUserV6::from_v3(v3))
+    }
 
-    pub(crate) fn from_v2(v2: &StoredApiUserV2) -> Self { Self::from_v6(&StoredApiUserV6::from_v2(v2)) }
+    pub(crate) fn from_v2(v2: &StoredApiUserV2) -> Self {
+        Self::from_v6(&StoredApiUserV6::from_v2(v2))
+    }
 
-    pub(crate) fn from_v1(v1: &StoredApiUserV1) -> Self { Self::from_v6(&StoredApiUserV6::from_v1(v1)) }
+    pub(crate) fn from_v1(v1: &StoredApiUserV1) -> Self {
+        Self::from_v6(&StoredApiUserV6::from_v1(v1))
+    }
 }
 
 /// The normalized, field-named recovery record.
@@ -502,7 +530,9 @@ impl RecoverySchema<String, StoredProxyUserCredentials> for ApiUserRecoverySchem
     const NAME: &'static str = "api_user";
     const CURRENT_VERSION: u32 = 1;
 
-    fn encode_key(&self, key: &String) -> io::Result<Value> { Ok(Value::String(key.clone())) }
+    fn encode_key(&self, key: &String) -> io::Result<Value> {
+        Ok(Value::String(key.clone()))
+    }
 
     fn migrate_key_one(&self, from: u32, _key: Value) -> io::Result<Value> {
         Err(invalid(format!("no api user key migration from version {from}")))
@@ -526,7 +556,9 @@ impl RecoverySchema<String, StoredProxyUserCredentials> for ApiUserRecoverySchem
     }
 }
 
-fn invalid(message: impl Into<String>) -> io::Error { io::Error::new(io::ErrorKind::InvalidData, message.into()) }
+fn invalid(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
 
 type Journal = BPlusTreeRecoveryJournal<String, StoredProxyUserCredentials, ApiUserRecoverySchema>;
 
@@ -547,7 +579,9 @@ impl ApiUserRepository {
         Ok((Self { journal }, report))
     }
 
-    pub(crate) fn load(&mut self) -> io::Result<Vec<(String, StoredProxyUserCredentials)>> { self.journal.entries() }
+    pub(crate) fn load(&mut self) -> io::Result<Vec<(String, StoredProxyUserCredentials)>> {
+        self.journal.entries()
+    }
 
     /// Replace the stored set in one batch.
     ///
@@ -745,7 +779,9 @@ mod matrix {
     const FIXTURE_PLAN: &str = "fixture-plan";
     const FIXTURE_FILTER: &str = "fixture-filter";
 
-    fn fixture_clusters() -> ClusterFlags { ClusterFlags::Live | ClusterFlags::Series }
+    fn fixture_clusters() -> ClusterFlags {
+        ClusterFlags::Live | ClusterFlags::Series
+    }
 
     fn fixture_network_access() -> shared::model::NetworkAccessDto {
         shared::model::NetworkAccessDto { allowed_countries: Some(vec!["DE".to_string()]), allowed_networks: None }
@@ -1138,7 +1174,9 @@ mod future_chain {
     const USERNAME: &str = "fixture-user";
     const PASSWORD: &str = "not-a-real-password";
 
-    fn invalid(message: impl Into<String>) -> io::Error { io::Error::new(io::ErrorKind::InvalidData, message.into()) }
+    fn invalid(message: impl Into<String>) -> io::Error {
+        io::Error::new(io::ErrorKind::InvalidData, message.into())
+    }
 
     /// What the record is expected to look like once it reaches version 3.
     #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1187,9 +1225,13 @@ mod future_chain {
         const NAME: &'static str = "api_user";
         const CURRENT_VERSION: u32 = 2;
 
-        fn encode_key(&self, key: &String) -> io::Result<Value> { Ok(Value::String(key.clone())) }
+        fn encode_key(&self, key: &String) -> io::Result<Value> {
+            Ok(Value::String(key.clone()))
+        }
 
-        fn migrate_key_one(&self, _from: u32, key: Value) -> io::Result<Value> { Ok(key) }
+        fn migrate_key_one(&self, _from: u32, key: Value) -> io::Result<Value> {
+            Ok(key)
+        }
 
         fn decode_current_key(&self, key: Value) -> io::Result<String> {
             key.as_str().map(str::to_owned).ok_or_else(|| invalid("key is not a string"))
@@ -1217,9 +1259,13 @@ mod future_chain {
         const NAME: &'static str = "api_user";
         const CURRENT_VERSION: u32 = 3;
 
-        fn encode_key(&self, key: &String) -> io::Result<Value> { Ok(Value::String(key.clone())) }
+        fn encode_key(&self, key: &String) -> io::Result<Value> {
+            Ok(Value::String(key.clone()))
+        }
 
-        fn migrate_key_one(&self, _from: u32, key: Value) -> io::Result<Value> { Ok(key) }
+        fn migrate_key_one(&self, _from: u32, key: Value) -> io::Result<Value> {
+            Ok(key)
+        }
 
         fn decode_current_key(&self, key: Value) -> io::Result<String> {
             key.as_str().map(str::to_owned).ok_or_else(|| invalid("key is not a string"))
@@ -1354,7 +1400,9 @@ mod staged_adoption {
     use tempfile::tempdir;
     use tuliprox_btree::RecoveryFaultPoint;
 
-    fn db_path(root: &Path) -> std::path::PathBuf { root.join("api_user.db") }
+    fn db_path(root: &Path) -> std::path::PathBuf {
+        root.join("api_user.db")
+    }
 
     fn user(username: &str) -> (String, StoredProxyUserCredentials) {
         let mut stored = super::matrix::current_credentials();

@@ -62,10 +62,14 @@ fn publish_first_ready_head(session: &mut crate::HlsSession, now_ms: u64) {
 }
 
 #[tokio::test]
-async fn short_startup_one_segment_waits_for_complete_burst() { startup_with_short_window(1).await; }
+async fn short_startup_one_segment_waits_for_complete_burst() {
+    startup_with_short_window(1).await;
+}
 
 #[tokio::test]
-async fn short_startup_two_segments_waits_for_complete_burst() { startup_with_short_window(2).await; }
+async fn short_startup_two_segments_waits_for_complete_burst() {
+    startup_with_short_window(2).await;
+}
 
 async fn startup_with_short_window(count: usize) {
     let server = spawn_test_origin(Arc::new(move |_| (200, Vec::new(), playlist(100, count)))).await;
@@ -305,7 +309,9 @@ async fn short_qualification_rejects_stale_epoch_binding_and_acceptance_generati
 struct QualificationLogger(std::sync::Mutex<Vec<String>>);
 
 impl log::Log for QualificationLogger {
-    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool { metadata.level() == log::Level::Warn }
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() == log::Level::Warn
+    }
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
             let message = record.args().to_string();

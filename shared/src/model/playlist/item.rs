@@ -383,12 +383,18 @@ impl PlaylistItem {
 
 impl PlaylistEntry for PlaylistItem {
     #[inline]
-    fn get_virtual_id(&self) -> VirtualId { self.header.virtual_id }
+    fn get_virtual_id(&self) -> VirtualId {
+        self.header.virtual_id
+    }
 
     #[inline]
-    fn get_input_stream_id(&self) -> Option<Arc<str>> { self.header.get_input_stream_id() }
+    fn get_input_stream_id(&self) -> Option<Arc<str>> {
+        self.header.get_input_stream_id()
+    }
 
-    fn get_upstream_user_agent(&self) -> Option<&str> { self.header.upstream_user_agent.as_deref() }
+    fn get_upstream_user_agent(&self) -> Option<&str> {
+        self.header.upstream_user_agent.as_deref()
+    }
 
     fn get_provider_id(&self) -> Option<u32> {
         let header = &self.header;
@@ -396,10 +402,14 @@ impl PlaylistEntry for PlaylistItem {
     }
 
     #[inline]
-    fn get_category_id(&self) -> Option<u32> { Some(self.header.category_id) }
+    fn get_category_id(&self) -> Option<u32> {
+        Some(self.header.category_id)
+    }
 
     #[inline]
-    fn get_provider_url(&self) -> Arc<str> { Arc::clone(&self.header.url) }
+    fn get_provider_url(&self) -> Arc<str> {
+        Arc::clone(&self.header.url)
+    }
 
     #[inline]
     fn get_uuid(&self) -> UUIDType {
@@ -408,13 +418,19 @@ impl PlaylistEntry for PlaylistItem {
     }
 
     #[inline]
-    fn get_item_type(&self) -> PlaylistItemType { self.header.item_type }
+    fn get_item_type(&self) -> PlaylistItemType {
+        self.header.item_type
+    }
 
     #[inline]
-    fn get_group(&self) -> Arc<str> { Arc::clone(&self.header.group) }
+    fn get_group(&self) -> Arc<str> {
+        Arc::clone(&self.header.group)
+    }
 
     #[inline]
-    fn get_name(&self) -> Arc<str> { self.header.get_name() }
+    fn get_name(&self) -> Arc<str> {
+        self.header.get_name()
+    }
 
     fn get_resolved_info_document(&self, options: &XtreamMappingOptions) -> Option<XtreamInfoDocument> {
         if self.has_details() {
@@ -431,7 +447,9 @@ impl PlaylistEntry for PlaylistItem {
         }
     }
 
-    fn get_additional_properties(&self) -> Option<&StreamProperties> { self.header.additional_properties.as_ref() }
+    fn get_additional_properties(&self) -> Option<&StreamProperties> {
+        self.header.additional_properties.as_ref()
+    }
     #[inline]
     fn get_additional_properties_mut(&mut self) -> Option<&mut StreamProperties> {
         self.header.additional_properties.as_mut()

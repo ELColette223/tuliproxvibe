@@ -50,9 +50,13 @@ pub enum QueueMutationError {
 impl QueueMutationError {
     /// Escape-hatch constructor for messages that cannot be expressed
     /// as a typed variant. Prefer the typed `Self::X` constructors.
-    pub fn new(message: impl Into<String>) -> Self { Self::Other(message.into()) }
+    pub fn new(message: impl Into<String>) -> Self {
+        Self::Other(message.into())
+    }
 
-    pub fn from_io(err: std::io::Error) -> Self { Self::Io(err) }
+    pub fn from_io(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
 
     /// Stable display message for logging and HTTP error rendering.
     pub fn message(&self) -> &'static str {

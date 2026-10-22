@@ -82,11 +82,15 @@ impl PageMeta {
     }
 }
 
-fn as_usize(value: u32) -> usize { usize::try_from(value).unwrap_or(usize::MAX) }
+fn as_usize(value: u32) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
 
 /// Unwrap the `js` envelope Stalker portals wrap every response in, falling back to the
 /// document itself for the portals that do not.
-pub fn catalog_js(value: &Value) -> &Value { value.as_object().and_then(|map| map.get("js")).unwrap_or(value) }
+pub fn catalog_js(value: &Value) -> &Value {
+    value.as_object().and_then(|map| map.get("js")).unwrap_or(value)
+}
 
 /// Where a catalog fetch delivers its rows.
 ///
@@ -118,10 +122,14 @@ pub struct CollectSink<T> {
 
 impl<T> CollectSink<T> {
     #[must_use]
-    pub fn new() -> Self { Self { rows: Vec::new() } }
+    pub fn new() -> Self {
+        Self { rows: Vec::new() }
+    }
 
     #[must_use]
-    pub fn into_rows(self) -> Vec<T> { self.rows }
+    pub fn into_rows(self) -> Vec<T> {
+        self.rows
+    }
 }
 
 impl<T: Send> CatalogSink<T> for CollectSink<T> {
@@ -130,9 +138,13 @@ impl<T: Send> CatalogSink<T> for CollectSink<T> {
         async { Ok(()) }
     }
 
-    fn can_restart(&self) -> bool { true }
+    fn can_restart(&self) -> bool {
+        true
+    }
 
-    fn restart(&mut self) { self.rows.clear(); }
+    fn restart(&mut self) {
+        self.rows.clear();
+    }
 }
 
 /// Forwards each page to a caller-supplied callback as it arrives, so a large catalog
@@ -148,12 +160,16 @@ pub struct BatchSink<F> {
 }
 
 impl<F> BatchSink<F> {
-    pub fn new(on_batch: F) -> Self { Self { on_batch, emitted_any: false } }
+    pub fn new(on_batch: F) -> Self {
+        Self { on_batch, emitted_any: false }
+    }
 
     /// Whether any page reached the callback. Useful to a caller deciding whether an empty
     /// catalog was genuinely empty.
     #[must_use]
-    pub fn emitted_any(&self) -> bool { self.emitted_any }
+    pub fn emitted_any(&self) -> bool {
+        self.emitted_any
+    }
 }
 
 impl<T, F, Fut> CatalogSink<T> for BatchSink<F>
@@ -167,7 +183,9 @@ where
         (self.on_batch)(batch)
     }
 
-    fn can_restart(&self) -> bool { !self.emitted_any }
+    fn can_restart(&self) -> bool {
+        !self.emitted_any
+    }
 
     fn restart(&mut self) {}
 }

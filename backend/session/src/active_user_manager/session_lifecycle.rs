@@ -32,16 +32,24 @@ pub(super) fn get_adaptive_session_ttl_secs(config: &Config) -> u64 {
         .map_or_else(default_hls_session_ttl_secs, |s| s.hls_session_ttl_secs)
 }
 
-pub(super) fn stream_history_session_id(ts: u64, uid: u32) -> u64 { (ts << 32) | u64::from(uid) }
+pub(super) fn stream_history_session_id(ts: u64, uid: u32) -> u64 {
+    (ts << 32) | u64::from(uid)
+}
 
-pub fn next_session_incarnation() -> u64 { NEXT_SESSION_INCARNATION.fetch_add(1, Ordering::Relaxed) }
+pub fn next_session_incarnation() -> u64 {
+    NEXT_SESSION_INCARNATION.fetch_add(1, Ordering::Relaxed)
+}
 
 impl Default for SessionChangeSignal {
-    fn default() -> Self { Self { notify: Arc::new(Notify::new()), deferred: None, owner: true } }
+    fn default() -> Self {
+        Self { notify: Arc::new(Notify::new()), deferred: None, owner: true }
+    }
 }
 
 impl Clone for SessionChangeSignal {
-    fn clone(&self) -> Self { Self { notify: Arc::clone(&self.notify), deferred: self.deferred.clone(), owner: false } }
+    fn clone(&self) -> Self {
+        Self { notify: Arc::clone(&self.notify), deferred: self.deferred.clone(), owner: false }
+    }
 }
 
 impl Drop for SessionChangeSignal {

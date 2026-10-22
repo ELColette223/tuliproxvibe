@@ -39,7 +39,9 @@ pub trait RecoverySchema<K, V> {
     fn decode_current(&self, value: Value) -> io::Result<V>;
 }
 
-fn migration_error(message: String) -> io::Error { io::Error::new(io::ErrorKind::InvalidData, message) }
+fn migration_error(message: String) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message)
+}
 
 /// Steps `key` from `from` up to `S::CURRENT_VERSION` and decodes it.
 ///

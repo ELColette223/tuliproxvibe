@@ -69,7 +69,9 @@ pub(super) fn stream_admission_rejected_response(
 }
 
 /// Produces a quiet termination response when a recently evicted stream retries.
-pub fn reentry_suppressed_response() -> axum::response::Response { StatusCode::NO_CONTENT.into_response() }
+pub fn reentry_suppressed_response() -> axum::response::Response {
+    StatusCode::NO_CONTENT.into_response()
+}
 
 pub fn separate_number_and_remainder(input: &str) -> (&str, Option<&str>) {
     input.rfind('.').map_or_else(

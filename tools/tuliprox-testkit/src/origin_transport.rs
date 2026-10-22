@@ -87,11 +87,17 @@ impl OriginTracker {
         }
     }
 
-    fn next_seq(&self) -> u64 { self.seq_counter.fetch_add(1, Ordering::Relaxed).saturating_add(1) }
+    fn next_seq(&self) -> u64 {
+        self.seq_counter.fetch_add(1, Ordering::Relaxed).saturating_add(1)
+    }
 
-    pub async fn set_policy(&self, policy: OriginPolicy) { *self.policy.lock().await = policy; }
+    pub async fn set_policy(&self, policy: OriginPolicy) {
+        *self.policy.lock().await = policy;
+    }
 
-    pub async fn policy(&self) -> OriginPolicy { self.policy.lock().await.clone() }
+    pub async fn policy(&self) -> OriginPolicy {
+        self.policy.lock().await.clone()
+    }
 
     pub async fn on_tcp_accepted(&self, remote_addr: SocketAddr) -> u64 {
         let conn_id = self.conn_counter.fetch_add(1, Ordering::Relaxed).saturating_add(1);
@@ -292,9 +298,13 @@ impl OriginTracker {
         ));
     }
 
-    pub async fn stats(&self) -> OriginStats { self.stats.lock().await.clone() }
+    pub async fn stats(&self) -> OriginStats {
+        self.stats.lock().await.clone()
+    }
 
-    pub async fn events(&self) -> Vec<OriginEvent> { self.events.lock().await.clone() }
+    pub async fn events(&self) -> Vec<OriginEvent> {
+        self.events.lock().await.clone()
+    }
 
     pub async fn reset(&self) {
         *self.stats.lock().await = OriginStats::default();

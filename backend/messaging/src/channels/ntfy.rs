@@ -19,7 +19,9 @@ pub struct NtfyChannel {
 }
 
 impl NtfyChannel {
-    pub fn new(config: NtfyMessagingConfig, client: reqwest::Client) -> Self { Self { config, client } }
+    pub fn new(config: NtfyMessagingConfig, client: reqwest::Client) -> Self {
+        Self { config, client }
+    }
 
     /// ntfy's 1-5 priority scale.
     fn priority(severity: Severity) -> &'static str {
@@ -45,13 +47,21 @@ impl NtfyChannel {
 }
 
 impl NotificationChannel for NtfyChannel {
-    fn id(&self) -> &'static str { "ntfy" }
+    fn id(&self) -> &'static str {
+        "ntfy"
+    }
 
-    fn template_for(&self, event: EventId) -> Option<&str> { self.config.templates.get(&event).map(String::as_str) }
+    fn template_for(&self, event: EventId) -> Option<&str> {
+        self.config.templates.get(&event).map(String::as_str)
+    }
 
-    fn routing(&self) -> &ChannelRouting { &self.config.routing }
+    fn routing(&self) -> &ChannelRouting {
+        &self.config.routing
+    }
 
-    fn wants(&self, event: EventId, severity: Severity) -> bool { self.config.routing.accepts(event, severity) }
+    fn wants(&self, event: EventId, severity: Severity) -> bool {
+        self.config.routing.accepts(event, severity)
+    }
 
     async fn send(&self, msg: &RenderedMessage<'_>) -> Delivery {
         {

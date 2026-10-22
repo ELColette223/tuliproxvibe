@@ -31,7 +31,9 @@ fn no_web_auth_token() -> impl axum::response::IntoResponse + Send {
     axum::Json(TokenResponse { token: TOKEN_NO_AUTH.to_string(), username: "admin".to_string() }).into_response()
 }
 
-fn api_user_can_access_web_ui(ui_enabled: bool) -> bool { ui_enabled }
+fn api_user_can_access_web_ui(ui_enabled: bool) -> bool {
+    ui_enabled
+}
 
 /// Publish one authentication decision.
 ///

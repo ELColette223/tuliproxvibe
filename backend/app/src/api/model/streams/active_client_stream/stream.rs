@@ -388,5 +388,7 @@ impl Stream for ActiveClientStream {
 }
 
 impl Drop for ActiveClientStream {
-    fn drop(&mut self) { self.state.release_stream_and_provider_handle_once(); }
+    fn drop(&mut self) {
+        self.state.release_stream_and_provider_handle_once();
+    }
 }

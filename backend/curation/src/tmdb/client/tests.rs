@@ -14,7 +14,9 @@ thread_local! {
     static CONSUMED_BYTES: Cell<usize> = const { Cell::new(0) };
 }
 
-pub(super) fn record_consumed_bytes(bytes: usize) { CONSUMED_BYTES.with(|count| count.set(count.get() + bytes)); }
+pub(super) fn record_consumed_bytes(bytes: usize) {
+    CONSUMED_BYTES.with(|count| count.set(count.get() + bytes));
+}
 
 async fn wait_for_consumed_bytes(expected: usize) {
     while CONSUMED_BYTES.with(Cell::get) < expected {
@@ -58,7 +60,9 @@ fn page(p: u64, total_pages: u64, ids: &[u32]) -> String {
     json!({"page":p,"total_pages":total_pages,"total_results":ids.len(),"results":ids.iter().map(|id| json!({"id":id})).collect::<Vec<_>>()}).to_string()
 }
 
-fn gzip_response(body: &str) -> Vec<u8> { encoded_response(&compress_string(body).unwrap()) }
+fn gzip_response(body: &str) -> Vec<u8> {
+    encoded_response(&compress_string(body).unwrap())
+}
 
 fn encoded_response(bytes: &[u8]) -> Vec<u8> {
     let mut response = format!(
@@ -70,7 +74,9 @@ fn encoded_response(bytes: &[u8]) -> Vec<u8> {
     response
 }
 
-fn padded(body: &str, length: usize) -> String { format!("{body}{}", " ".repeat(length - body.len())) }
+fn padded(body: &str, length: usize) -> String {
+    format!("{body}{}", " ".repeat(length - body.len()))
+}
 
 #[tokio::test]
 async fn tmdb_url_configuration_failures_are_classified_without_requests_or_sensitive_details() {
@@ -517,10 +523,14 @@ async fn accumulated_deadline(batch_bound: bool) {
 }
 
 #[tokio::test(start_paused = true)]
-async fn tmdb_selector_deadline_accumulates_pages() { accumulated_deadline(false).await; }
+async fn tmdb_selector_deadline_accumulates_pages() {
+    accumulated_deadline(false).await;
+}
 
 #[tokio::test(start_paused = true)]
-async fn tmdb_batch_deadline_accumulates_pages_and_refuses_pending_selectors() { accumulated_deadline(true).await; }
+async fn tmdb_batch_deadline_accumulates_pages_and_refuses_pending_selectors() {
+    accumulated_deadline(true).await;
+}
 
 #[tokio::test(start_paused = true)]
 async fn tmdb_slow_chunks_do_not_reset_deadline_or_accept_a_useful_json_prefix() {

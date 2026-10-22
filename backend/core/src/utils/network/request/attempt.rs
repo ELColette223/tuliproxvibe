@@ -120,7 +120,9 @@ impl AttemptTarget {
     }
 }
 
-fn is_ip_literal(host: &str) -> bool { host.parse::<IpAddr>().is_ok() }
+fn is_ip_literal(host: &str) -> bool {
+    host.parse::<IpAddr>().is_ok()
+}
 
 fn format_host_header_with_port(host: &str, port: Option<u16>) -> String {
     match port {

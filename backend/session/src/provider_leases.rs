@@ -50,7 +50,9 @@ pub const STARTING_LEASE_TTL_SECS: u64 = 5;
 pub struct ProviderAffinityTtl(pub u64);
 
 impl Default for ProviderAffinityTtl {
-    fn default() -> Self { Self(shared::defaults::default_provider_affinity_ttl_secs()) }
+    fn default() -> Self {
+        Self(shared::defaults::default_provider_affinity_ttl_secs())
+    }
 }
 
 /// Provider preference of one playback owner that outlives its capacity lease.
@@ -86,7 +88,9 @@ struct ProviderAffinities {
 }
 
 impl ProviderAffinities {
-    fn with_ttl(ttl: ProviderAffinityTtl) -> Self { Self { ttl, ..Self::default() } }
+    fn with_ttl(ttl: ProviderAffinityTtl) -> Self {
+        Self { ttl, ..Self::default() }
+    }
 
     /// Records that real media of `lease.owner` flowed from `lease.provider_name`.
     ///
@@ -141,7 +145,9 @@ impl ProviderAffinities {
         affinity.orphaned_request_tokens = lease.request_tokens.live_tokens_at(ended_at);
     }
 
-    fn forget(&mut self, owner: &str) { self.entries.remove(owner); }
+    fn forget(&mut self, owner: &str) {
+        self.entries.remove(owner);
+    }
 
     /// Ends the preference only while it points at `provider_name`: a failure on a
     /// fallback provider says nothing about the preferred one.
@@ -206,14 +212,20 @@ pub enum ProviderLeaseState {
 
 impl ProviderLeaseState {
     #[inline]
-    pub fn is_active(&self) -> bool { matches!(self, Self::Active { .. }) }
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Active { .. })
+    }
 
     #[inline]
-    pub fn is_idle(&self) -> bool { matches!(self, Self::Idle { .. }) }
+    pub fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle { .. })
+    }
 
     /// True once real media activity was recorded.
     #[inline]
-    pub fn is_confirmed(&self) -> bool { matches!(self, Self::Active { .. } | Self::Idle { .. }) }
+    pub fn is_confirmed(&self) -> bool {
+        matches!(self, Self::Active { .. } | Self::Idle { .. })
+    }
 
     fn expires_at(&self) -> TokioInstant {
         match self {
@@ -242,7 +254,9 @@ struct TokenClaim {
 
 impl TokenClaim {
     #[inline]
-    fn is_live_at(&self, at: TokioInstant) -> bool { self.active_requests > 0 || self.expires_at > at }
+    fn is_live_at(&self, at: TokioInstant) -> bool {
+        self.active_requests > 0 || self.expires_at > at
+    }
 }
 
 /// Public session tokens that acquired a binding incarnation, keyed by the requests
@@ -287,7 +301,9 @@ impl RequestTokenClaims {
         }
     }
 
-    fn prune(&mut self, now: TokioInstant) { self.claims.retain(|_, claim| claim.is_live_at(now)); }
+    fn prune(&mut self, now: TokioInstant) {
+        self.claims.retain(|_, claim| claim.is_live_at(now));
+    }
 
     fn holds(&self, token: &str, now: TokioInstant) -> bool {
         self.claims.get(token).is_some_and(|claim| claim.is_live_at(now))
@@ -331,7 +347,9 @@ pub struct ProviderSlotLease {
 impl ProviderSlotLease {
     /// True when this lease holds a slot back for its playback against others.
     #[inline]
-    fn reserves_capacity(&self) -> bool { self.state.is_confirmed() && self.idle_ttl_secs > 0 }
+    fn reserves_capacity(&self) -> bool {
+        self.state.is_confirmed() && self.idle_ttl_secs > 0
+    }
 
     pub fn idle_ttl_remaining_ms(&self, now: TokioInstant) -> u64 {
         self.state
@@ -344,7 +362,9 @@ impl ProviderSlotLease {
     }
 
     #[inline]
-    pub fn contains_request(&self, request_id: PlaybackRequestId) -> bool { self.request_ids.contains(&request_id) }
+    pub fn contains_request(&self, request_id: PlaybackRequestId) -> bool {
+        self.request_ids.contains(&request_id)
+    }
 
     /// True once the lease's deadline has passed.
     ///
@@ -368,7 +388,9 @@ pub struct ProviderLeaseUsage {
 impl ProviderLeaseUsage {
     /// Logical slots held by this provider's leases.
     #[inline]
-    pub fn total(&self) -> usize { self.starting + self.active + self.idle }
+    pub fn total(&self) -> usize {
+        self.starting + self.active + self.idle
+    }
 }
 
 type ByOwner = HashMap<Arc<str>, PlaybackLeaseId>;
@@ -394,25 +416,37 @@ pub struct ProviderLeaseTable {
 
 impl ProviderLeaseTable {
     /// Providers whose leases ended since the last call.
-    pub fn take_released_providers(&mut self) -> Vec<Arc<str>> { std::mem::take(&mut self.released_providers) }
+    pub fn take_released_providers(&mut self) -> Vec<Arc<str>> {
+        std::mem::take(&mut self.released_providers)
+    }
 
     #[inline]
-    pub fn is_empty(&self) -> bool { self.leases.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.leases.is_empty()
+    }
 
     #[inline]
-    pub fn len(&self) -> usize { self.leases.len() }
+    pub fn len(&self) -> usize {
+        self.leases.len()
+    }
 
     /// Removes every lease during terminal server shutdown.
-    pub fn clear(&mut self) { *self = Self::with_affinity_ttl(self.affinity.ttl); }
+    pub fn clear(&mut self) {
+        *self = Self::with_affinity_ttl(self.affinity.ttl);
+    }
 
     pub fn with_affinity_ttl(affinity_ttl: ProviderAffinityTtl) -> Self {
         Self { affinity: ProviderAffinities::with_ttl(affinity_ttl), ..Self::default() }
     }
 
     /// Applies a reloaded affinity window to affinities recorded from now on.
-    pub fn set_affinity_ttl(&mut self, affinity_ttl: ProviderAffinityTtl) { self.affinity.ttl = affinity_ttl; }
+    pub fn set_affinity_ttl(&mut self, affinity_ttl: ProviderAffinityTtl) {
+        self.affinity.ttl = affinity_ttl;
+    }
 
-    pub fn lease(&self, id: PlaybackLeaseId) -> Option<&ProviderSlotLease> { self.leases.get(&id) }
+    pub fn lease(&self, id: PlaybackLeaseId) -> Option<&ProviderSlotLease> {
+        self.leases.get(&id)
+    }
 
     pub fn lease_of_owner(&self, owner: &str) -> Option<&ProviderSlotLease> {
         self.by_owner.get(owner).and_then(|id| self.leases.get(id))
@@ -458,7 +492,9 @@ impl ProviderLeaseTable {
     }
 
     /// Ends the provider preference of an owner whose playback was ended administratively.
-    pub fn forget_affinity(&mut self, owner: &str) { self.affinity.forget(owner); }
+    pub fn forget_affinity(&mut self, owner: &str) {
+        self.affinity.forget(owner);
+    }
 
     /// Ends the preference only if it still belongs to the exact provider binding.
     pub fn forget_identified_affinity(
@@ -770,7 +806,9 @@ impl ProviderLeaseTable {
         self.remove_lease(id)
     }
 
-    pub fn release(&mut self, id: PlaybackLeaseId) -> Option<ProviderSlotLease> { self.remove_lease(id) }
+    pub fn release(&mut self, id: PlaybackLeaseId) -> Option<ProviderSlotLease> {
+        self.remove_lease(id)
+    }
 
     pub fn release_owner(&mut self, owner: &str) -> Option<ProviderSlotLease> {
         let id = self.by_owner.get(owner).copied()?;
@@ -947,7 +985,9 @@ impl ProviderLeaseTable {
     }
 
     /// Earliest instant at which any lease may expire and release reserved capacity.
-    pub fn next_expiry(&self) -> Option<TokioInstant> { self.expirations.first().map(|(deadline, _)| *deadline) }
+    pub fn next_expiry(&self) -> Option<TokioInstant> {
+        self.expirations.first().map(|(deadline, _)| *deadline)
+    }
 
     pub fn has_foreign_reserved_lease(&self, provider_name: &Arc<str>, session_owner: Option<&str>) -> bool {
         let Some(ids) = self.by_provider.get(provider_name) else {
@@ -999,14 +1039,18 @@ impl ProviderLeaseTable {
         removed
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &ProviderSlotLease> { self.leases.values() }
+    pub fn iter(&self) -> impl Iterator<Item = &ProviderSlotLease> {
+        self.leases.values()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn provider(name: &str) -> Arc<str> { Arc::from(name) }
+    fn provider(name: &str) -> Arc<str> {
+        Arc::from(name)
+    }
 
     #[tokio::test(start_paused = true)]
     async fn repeated_begin_keeps_one_starting_lease() {

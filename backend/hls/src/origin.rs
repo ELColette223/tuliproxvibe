@@ -239,9 +239,13 @@ impl HlsOriginAccountIoLeaseGuard {
         Self { binding, lease, disarmed: false }
     }
 
-    pub fn binding(&self) -> &HlsOriginAccountBinding { &self.binding }
+    pub fn binding(&self) -> &HlsOriginAccountBinding {
+        &self.binding
+    }
 
-    pub fn disarm(&mut self) { self.disarmed = true; }
+    pub fn disarm(&mut self) {
+        self.disarmed = true;
+    }
 }
 
 impl Drop for HlsOriginAccountIoLeaseGuard {
@@ -289,9 +293,13 @@ pub struct PendingAcquireGuard {
 }
 
 impl PendingAcquireGuard {
-    fn new(lease: Arc<HlsOriginAccountIoLease>) -> Self { Self { lease, disarmed: false } }
+    fn new(lease: Arc<HlsOriginAccountIoLease>) -> Self {
+        Self { lease, disarmed: false }
+    }
 
-    fn disarm(&mut self) { self.disarmed = true; }
+    fn disarm(&mut self) {
+        self.disarmed = true;
+    }
 }
 
 impl Drop for PendingAcquireGuard {
@@ -449,7 +457,9 @@ impl HlsOriginAccountBinding {
         binding
     }
 
-    pub fn promote_to_active(&mut self) { self.binding_mode = HlsOriginAccountBindingMode::Active; }
+    pub fn promote_to_active(&mut self) {
+        self.binding_mode = HlsOriginAccountBindingMode::Active;
+    }
 
     pub fn detach(&mut self, reason: HlsOriginAccountDetachedReason, now_ms: u64) {
         self.binding_mode = HlsOriginAccountBindingMode::Detached { reason, detached_at_ms: now_ms };
@@ -538,7 +548,9 @@ pub enum HlsBoundAccountAcquireErrorKind {
 }
 
 impl HlsBoundAccountAcquireErrorKind {
-    pub fn allows_rebind(self) -> bool { matches!(self, Self::Missing | Self::Expired | Self::Blocked) }
+    pub fn allows_rebind(self) -> bool {
+        matches!(self, Self::Missing | Self::Expired | Self::Blocked)
+    }
 
     pub fn is_retryable_resource_failure(self) -> bool {
         // A competing session or an in-flight binding handoff can temporarily
@@ -583,7 +595,9 @@ impl HlsEffectiveOriginAcquirePolicy {
         Self { connection_kind, priority, updated_at_ms }
     }
 
-    pub const fn fallback() -> Self { Self::new(ConnectionKind::Normal, 0, 0) }
+    pub const fn fallback() -> Self {
+        Self::new(ConnectionKind::Normal, 0, 0)
+    }
 
     pub const fn with_updated_at(self, updated_at_ms: u64) -> Self {
         Self::new(self.connection_kind, self.priority, updated_at_ms)
@@ -630,9 +644,13 @@ impl HlsOriginWorkClass {
         }
     }
 
-    pub const fn allows_grace(self) -> bool { matches!(self, Self::ManifestInteractive | Self::Demand) }
+    pub const fn allows_grace(self) -> bool {
+        matches!(self, Self::ManifestInteractive | Self::Demand)
+    }
 
-    pub const fn allows_speculative_overlap(self) -> bool { matches!(self, Self::ManifestInteractive | Self::Demand) }
+    pub const fn allows_speculative_overlap(self) -> bool {
+        matches!(self, Self::ManifestInteractive | Self::Demand)
+    }
 }
 
 #[derive(Clone)]

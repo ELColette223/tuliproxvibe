@@ -44,7 +44,9 @@ pub(in crate::api) struct UpdateChanges {
 }
 
 impl UpdateChanges {
-    pub(in crate::api) fn modified(&self) -> bool { !self.flags.is_empty() }
+    pub(in crate::api) fn modified(&self) -> bool {
+        !self.flags.is_empty()
+    }
 
     fn set_flag_if(&mut self, condition: bool, flag: UpdateChangesFlags) {
         if condition {
@@ -202,7 +204,9 @@ pub(super) fn hdhomerun_changed(a: &HdHomeRunConfig, b: &HdHomeRunConfig) -> boo
     a.flags != b.flags || !small_vecs_equal_unordered(a.devices.as_ref(), b.devices.as_ref())
 }
 
-pub(super) fn string_changed(a: &str, b: &str) -> bool { a != b }
+pub(super) fn string_changed(a: &str, b: &str) -> bool {
+    a != b
+}
 
 pub(super) fn providers_changed(a: &[Arc<ConfigProvider>], b: &[Arc<ConfigProvider>]) -> bool {
     if a.len() != b.len() {

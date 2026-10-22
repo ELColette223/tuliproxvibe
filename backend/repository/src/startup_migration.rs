@@ -55,7 +55,9 @@ struct BPlusTreeStartupMigrator {
 }
 
 impl BPlusTreeStartupMigrator {
-    pub fn new(roots: Vec<PathBuf>) -> Self { Self { roots, migration_marker_path: None } }
+    pub fn new(roots: Vec<PathBuf>) -> Self {
+        Self { roots, migration_marker_path: None }
+    }
 
     pub fn new_with_marker(roots: Vec<PathBuf>, migration_marker_path: PathBuf) -> Self {
         Self { roots, migration_marker_path: Some(migration_marker_path) }
@@ -808,7 +810,9 @@ pub fn migrate_bplustree_databases(roots: &[PathBuf]) -> io::Result<BPlusTreeMig
     BPlusTreeStartupMigrator::new(roots.to_vec()).run()
 }
 
-pub fn bplustree_migration_marker_path(marker_dir: &Path) -> PathBuf { marker_dir.join(marker_file_name()) }
+pub fn bplustree_migration_marker_path(marker_dir: &Path) -> PathBuf {
+    marker_dir.join(marker_file_name())
+}
 
 pub fn migrate_bplustree_databases_with_marker(
     roots: &[PathBuf],
@@ -818,7 +822,9 @@ pub fn migrate_bplustree_databases_with_marker(
     BPlusTreeStartupMigrator::new_with_marker(roots.to_vec(), marker_path).run()
 }
 
-fn marker_file_name() -> String { format!("{MARKER_FILE_GUARD_PREFIX}{STORAGE_VERSION}") }
+fn marker_file_name() -> String {
+    format!("{MARKER_FILE_GUARD_PREFIX}{STORAGE_VERSION}")
+}
 
 //
 // The user database has gone through seven serialization schemas (MessagePack,
@@ -844,7 +850,9 @@ fn create_user_db_merge_guard(merge_guard_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-pub fn user_db_merge_guard_path(config_dir: &Path) -> PathBuf { config_dir.join(MARKER_FILE_API_USER_GUARD) }
+pub fn user_db_merge_guard_path(config_dir: &Path) -> PathBuf {
+    config_dir.join(MARKER_FILE_API_USER_GUARD)
+}
 
 fn migrate_legacy_user_schema<SourceV, Map>(db_path: &Path, merge_guard_path: &Path, map: Map) -> io::Result<bool>
 where

@@ -11,7 +11,9 @@ use std::{
     net::IpAddr,
 };
 
-fn prepare_dto(dto: &mut ConfigInputDto) -> Result<u16, TuliproxError> { dto.prepare(0, false, &HashSet::new(), None) }
+fn prepare_dto(dto: &mut ConfigInputDto) -> Result<u16, TuliproxError> {
+    dto.prepare(0, false, &HashSet::new(), None)
+}
 
 fn media_server_config_with_library() -> MediaServerInputConfigDto {
     MediaServerInputConfigDto {

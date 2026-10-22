@@ -48,7 +48,9 @@ impl DatabaseImage {
         Ok((image, header))
     }
 
-    pub(super) fn as_slice(&self) -> &[u8] { self.mmap.as_deref().unwrap_or(&self.fallback) }
+    pub(super) fn as_slice(&self) -> &[u8] {
+        self.mmap.as_deref().unwrap_or(&self.fallback)
+    }
 }
 
 pub(super) struct WriteTransaction {

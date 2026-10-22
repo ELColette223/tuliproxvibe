@@ -30,10 +30,14 @@ pub enum ProxyUserStatus {
 
 impl ProxyUserStatus {
     /// Accounts in these states can serve streams.
-    pub const fn is_usable(self) -> bool { matches!(self, Self::Active | Self::Trial) }
+    pub const fn is_usable(self) -> bool {
+        matches!(self, Self::Active | Self::Trial)
+    }
 
     /// Confirmed states that justify a persisted exclusion; `Pending` stays runtime-only.
-    pub const fn is_terminal(self) -> bool { matches!(self, Self::Banned | Self::Disabled | Self::Expired) }
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Banned | Self::Disabled | Self::Expired)
+    }
 }
 
 /// Stable fingerprint of a provider account (URL and credentials) without keeping secrets around.
@@ -52,5 +56,7 @@ impl ProviderAccountIdentity {
 }
 
 impl std::fmt::Display for ProviderAccountIdentity {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0.to_hex()) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0.to_hex())
+    }
 }

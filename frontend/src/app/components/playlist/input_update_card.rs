@@ -82,7 +82,9 @@ impl InputUpdateCardInteractionState {
         }
     }
 
-    const fn is_submitting(&self) -> bool { self.submitting_for.is_some() }
+    const fn is_submitting(&self) -> bool {
+        self.submitting_for.is_some()
+    }
 
     fn is_submitting_for(&self, connection_context: WebSocketConnectionContext) -> bool {
         self.submitting_for == Some(connection_context)
@@ -224,7 +226,9 @@ const fn start_button_label_key(policy: InputRefreshPolicy) -> &'static str {
     }
 }
 
-const fn requires_confirmation(policy: InputRefreshPolicy) -> bool { policy.bypasses_quality() }
+const fn requires_confirmation(policy: InputRefreshPolicy) -> bool {
+    policy.bypasses_quality()
+}
 
 fn confirmation_allows_submission(policy: InputRefreshPolicy, result: Option<DialogResult>) -> bool {
     !requires_confirmation(policy) || result == Some(DialogResult::Ok)
@@ -387,7 +391,9 @@ fn cluster_summary_status(cluster: &InputClusterRunView) -> ClusterSummaryStatus
     }
 }
 
-const fn cluster_label_key(cluster: XtreamCluster) -> &'static str { content_cluster_presentation(cluster).label_key }
+const fn cluster_label_key(cluster: XtreamCluster) -> &'static str {
+    content_cluster_presentation(cluster).label_key
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum QualityPresentation {

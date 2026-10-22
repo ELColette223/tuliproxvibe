@@ -22,7 +22,9 @@ pub struct FixtureInputPlan<'a> {
 }
 
 impl FixtureInputPlan<'_> {
-    const fn is_stalker(&self) -> bool { matches!(self.input_type, FixtureInputType::Stalker) }
+    const fn is_stalker(&self) -> bool {
+        matches!(self.input_type, FixtureInputType::Stalker)
+    }
 }
 
 /// Files owned by one isolated run. They are written below a unique temporary
@@ -80,7 +82,9 @@ impl FixturePaths {
 }
 
 #[must_use]
-pub const fn fixture_password() -> &'static str { FIXTURE_PASSWORD }
+pub const fn fixture_password() -> &'static str {
+    FIXTURE_PASSWORD
+}
 
 fn render_config(
     tuliprox_address: SocketAddr,
@@ -245,9 +249,13 @@ fn render_api_proxy(tuliprox_address: SocketAddr, policy: Option<&PolicyContract
     output
 }
 
-fn yaml_scalar(path: &Path) -> String { yaml_string(&path.to_string_lossy()) }
+fn yaml_scalar(path: &Path) -> String {
+    yaml_string(&path.to_string_lossy())
+}
 
-fn yaml_string(value: &str) -> String { format!("'{}'", value.replace('\'', "''")) }
+fn yaml_string(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
 
 /// Owns only the SUT process launched for this run and waits for its explicit readiness endpoint.
 pub struct IsolatedSut {

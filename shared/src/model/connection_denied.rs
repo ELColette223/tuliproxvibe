@@ -34,5 +34,7 @@ impl ConnectionDenied {
     /// Per user: a client that has hit its limit retries, and each retry is
     /// refused the same way.
     #[must_use]
-    pub fn dedup_key(&self) -> String { format!("connection-denied:{}", self.username) }
+    pub fn dedup_key(&self) -> String {
+        format!("connection-denied:{}", self.username)
+    }
 }

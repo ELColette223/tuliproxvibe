@@ -140,9 +140,13 @@ impl ConnectionAdmission {
         Self { permission: UserConnectionPermission::Exhausted, kind, rejection_reason: Some(reason) }
     }
 
-    pub fn kind(&self) -> Option<ConnectionKind> { self.kind }
+    pub fn kind(&self) -> Option<ConnectionKind> {
+        self.kind
+    }
 
-    pub fn rejection_reason(&self) -> Option<AdmissionRejectionReason> { self.rejection_reason }
+    pub fn rejection_reason(&self) -> Option<AdmissionRejectionReason> {
+        self.rejection_reason
+    }
 
     pub fn is_reentry_suppressed(&self) -> bool {
         self.rejection_reason == Some(AdmissionRejectionReason::RecentEvictionReentry)
@@ -157,7 +161,9 @@ pub(super) struct PromotionAction {
 }
 
 impl StreamRequestDetach {
-    pub fn request_was_detached(&self) -> bool { !matches!(self, Self::NotFound) }
+    pub fn request_was_detached(&self) -> bool {
+        !matches!(self, Self::NotFound)
+    }
 
     pub fn stream_info(&self) -> Option<&StreamInfo> {
         match self {
@@ -350,7 +356,9 @@ pub(super) struct SocketRegistration {
 }
 
 impl SocketRegistration {
-    pub(super) fn anonymous() -> Self { Self { usernames: HashSet::new(), ts: current_time_secs() } }
+    pub(super) fn anonymous() -> Self {
+        Self { usernames: HashSet::new(), ts: current_time_secs() }
+    }
 
     pub(super) fn add_user(&mut self, username: &str, ts: u64) {
         if !username.is_empty() && !self.usernames.contains(username) {
@@ -364,13 +372,21 @@ impl SocketRegistration {
         self.usernames.is_empty()
     }
 
-    pub(super) fn is_empty(&self) -> bool { self.usernames.is_empty() }
+    pub(super) fn is_empty(&self) -> bool {
+        self.usernames.is_empty()
+    }
 
-    pub(super) fn primary_username(&self) -> Option<&str> { self.usernames.iter().map(String::as_str).min() }
+    pub(super) fn primary_username(&self) -> Option<&str> {
+        self.usernames.iter().map(String::as_str).min()
+    }
 
-    pub(super) fn all_usernames(&self) -> Vec<String> { self.usernames.iter().cloned().collect() }
+    pub(super) fn all_usernames(&self) -> Vec<String> {
+        self.usernames.iter().cloned().collect()
+    }
 
-    pub(super) fn into_usernames(self) -> HashSet<String> { self.usernames }
+    pub(super) fn into_usernames(self) -> HashSet<String> {
+        self.usernames
+    }
 }
 
 /// Write access to `UserConnections` that delivers session change signals after release.
@@ -385,7 +401,9 @@ pub(super) struct UserConnectionsWriteGuard<'a> {
 pub(super) struct WakeDeferred<'a>(pub(super) &'a DeferredWakes);
 
 impl Drop for WakeDeferred<'_> {
-    fn drop(&mut self) { self.0.wake(); }
+    fn drop(&mut self) {
+        self.0.wake();
+    }
 }
 
 impl<'a> UserConnectionsWriteGuard<'a> {
@@ -396,11 +414,15 @@ impl<'a> UserConnectionsWriteGuard<'a> {
 
 impl std::ops::Deref for UserConnectionsWriteGuard<'_> {
     type Target = UserConnections;
-    fn deref(&self) -> &Self::Target { &self.guard }
+    fn deref(&self) -> &Self::Target {
+        &self.guard
+    }
 }
 
 impl std::ops::DerefMut for UserConnectionsWriteGuard<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.guard }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.guard
+    }
 }
 
 impl ActiveUserManager {
@@ -408,7 +430,9 @@ impl ActiveUserManager {
         UserConnectionsWriteGuard::new(self.connections.write().await, &self.deferred_wakes)
     }
 
-    pub fn shutdown(&self) { self.adaptive_expiry_cancel.cancel(); }
+    pub fn shutdown(&self) {
+        self.adaptive_expiry_cancel.cancel();
+    }
 
     pub(super) fn lookup_country(&self, client_ip: &str) -> Option<String> {
         let geoip = self.geo_ip.load();
@@ -468,7 +492,9 @@ impl ActiveUserManager {
             && super::session_lifecycle::is_stable_session_stream(existing_stream)
     }
 
-    pub fn set_cleanup_sender(&self, tx: mpsc::Sender<CleanupEvent>) { let _ = self.cleanup_tx.set(tx); }
+    pub fn set_cleanup_sender(&self, tx: mpsc::Sender<CleanupEvent>) {
+        let _ = self.cleanup_tx.set(tx);
+    }
 
     pub fn set_provider_manager(&self, provider_manager: Arc<ActiveProviderManager>) {
         let _ = self.provider_manager.set(provider_manager);

@@ -444,7 +444,9 @@ async fn start_worker_with(stub: &Arc<StubCapacity>, queue: &Arc<RecordingQueue>
     .expect("worker started");
 }
 
-async fn queued_live_capture(dir: &TempDir) -> Arc<RecordingQueue> { queued_live_capture_with(dir, false).await }
+async fn queued_live_capture(dir: &TempDir) -> Arc<RecordingQueue> {
+    queued_live_capture_with(dir, false).await
+}
 
 async fn queued_live_capture_with(dir: &TempDir, provider_started: bool) -> Arc<RecordingQueue> {
     let queue = Arc::new(RecordingQueue::new_persistent(dir.path(), dir.path()).expect("open repository"));

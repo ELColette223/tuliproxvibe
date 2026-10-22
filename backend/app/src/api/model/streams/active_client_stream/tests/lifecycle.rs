@@ -78,7 +78,9 @@ impl futures::Stream for DropTrackedProviderStream {
 }
 
 impl Drop for DropTrackedProviderStream {
-    fn drop(&mut self) { self.tracker.0.store(true, Ordering::Release); }
+    fn drop(&mut self) {
+        self.tracker.0.store(true, Ordering::Release);
+    }
 }
 
 pub(in crate::api::model::streams::active_client_stream::tests) fn track_provider_stream(

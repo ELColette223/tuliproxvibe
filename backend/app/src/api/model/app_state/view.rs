@@ -39,7 +39,9 @@ impl AppState {
     ///
     /// Prefer the named accessors below at call sites; this is what they call,
     /// and what generic code can use.
-    pub fn view<V: AppStateView>(&self) -> V { V::from_app_state(self) }
+    pub fn view<V: AppStateView>(&self) -> V {
+        V::from_app_state(self)
+    }
 }
 
 /// Declare a view: the accessor name, the context type, and the `AppState`
@@ -128,5 +130,7 @@ impl AppStateView for crate::api::model::hls_cache::HlsCtx {
 impl AppState {
     /// The HLS runtime and its authoritative session-accounting owner.
     #[must_use]
-    pub fn hls_ctx(&self) -> crate::api::model::hls_cache::HlsCtx { self.view() }
+    pub fn hls_ctx(&self) -> crate::api::model::hls_cache::HlsCtx {
+        self.view()
+    }
 }

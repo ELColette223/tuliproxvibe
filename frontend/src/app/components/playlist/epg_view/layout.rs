@@ -19,11 +19,15 @@ impl TimelineZoom {
         Self(pixels_per_min.clamp(MIN_PIXELS_PER_MIN, MAX_PIXELS_PER_MIN))
     }
 
-    pub(super) fn value(self) -> f64 { self.0 }
+    pub(super) fn value(self) -> f64 {
+        self.0
+    }
 }
 
 impl PartialEq for TimelineZoom {
-    fn eq(&self, other: &Self) -> bool { (self.0 - other.0).abs() < ZOOM_EQUALITY_TOLERANCE }
+    fn eq(&self, other: &Self) -> bool {
+        (self.0 - other.0).abs() < ZOOM_EQUALITY_TOLERANCE
+    }
 }
 
 /// Zoom factor for one wheel event, or `None` when the event is a horizontal scroll (or
@@ -72,7 +76,9 @@ pub(super) fn compute_panned_scroll(start_scroll: i32, start_pointer: i32, curre
     start_scroll - (current_pointer - start_pointer)
 }
 
-pub(super) fn min_to_px(min: i64, pixels_per_min: f64) -> i64 { (min as f64 * pixels_per_min).round() as i64 }
+pub(super) fn min_to_px(min: i64, pixels_per_min: f64) -> i64 {
+    (min as f64 * pixels_per_min).round() as i64
+}
 
 pub(super) const ROW_OVERSCAN: usize = 3;
 /// Horizontal overscan per side, as a fraction of the visible programme width.
@@ -91,7 +97,9 @@ pub(super) struct Viewport {
 }
 
 impl Default for Viewport {
-    fn default() -> Self { Self { row_start: 0, row_end: 20, from_min: 0, to_min: 240 } }
+    fn default() -> Self {
+        Self { row_start: 0, row_end: 20, from_min: 0, to_min: 240 }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

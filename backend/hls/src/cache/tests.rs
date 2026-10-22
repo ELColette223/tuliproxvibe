@@ -23,7 +23,9 @@ use tokio::{
     sync::{oneshot, Semaphore},
 };
 
-fn cache_key() -> SegmentCacheKey { SegmentCacheKey::new(ProxySessionId("proxy_session".to_string()), 123, "ts") }
+fn cache_key() -> SegmentCacheKey {
+    SegmentCacheKey::new(ProxySessionId("proxy_session".to_string()), 123, "ts")
+}
 
 async fn cache_with_projected_session_pressure(
 ) -> (tempfile::TempDir, Arc<HlsSegmentCache>, SegmentCacheKey, SegmentCacheKey) {

@@ -16,7 +16,9 @@ pub const TARGET_BOUQUET_MUTATION_LOCK: &str = "target_bouquet:mutation";
 const MAX_PREFIX_BYTES: usize = 64;
 
 /// Returns the bouquet storage directory derived from `config_path`.
-pub fn target_bouquet_dir(config_path: &Path) -> PathBuf { config_path.join("bouquets") }
+pub fn target_bouquet_dir(config_path: &Path) -> PathBuf {
+    config_path.join("bouquets")
+}
 
 /// Sanitizes a target name into a safe filesystem prefix (max 64 UTF-8 bytes).
 pub fn sanitize_target_prefix(target_name: &str) -> String {
@@ -659,7 +661,9 @@ mod tests {
         }
     }
 
-    fn whitelist(groups: PlaylistClusterBouquetDto) -> TargetBouquetDto { TargetBouquetDto::whitelist(groups) }
+    fn whitelist(groups: PlaylistClusterBouquetDto) -> TargetBouquetDto {
+        TargetBouquetDto::whitelist(groups)
+    }
 
     #[test]
     fn path_derivation_sanitizes_and_hashes() {

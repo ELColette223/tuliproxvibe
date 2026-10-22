@@ -86,7 +86,9 @@ const CHANNELS_ONLY: WatchContextSet = WatchContextSet(1 << WatchContext::Channe
 impl ConfigWatchDto {
     /// The short form: watch the channels of matching groups.
     #[must_use]
-    pub fn channels(pattern: impl Into<String>) -> Self { Self { pattern: pattern.into(), on: CHANNELS_ONLY } }
+    pub fn channels(pattern: impl Into<String>) -> Self {
+        Self { pattern: pattern.into(), on: CHANNELS_ONLY }
+    }
 
     #[must_use]
     pub fn new(pattern: impl Into<String>, on: impl IntoIterator<Item = WatchContext>) -> Self {
@@ -98,7 +100,9 @@ impl ConfigWatchDto {
     }
 
     #[must_use]
-    pub fn has(&self, context: WatchContext) -> bool { self.on.contains(context) }
+    pub fn has(&self, context: WatchContext) -> bool {
+        self.on.contains(context)
+    }
 }
 
 /// One entry is usable when it reports at least one context and its pattern
@@ -203,7 +207,9 @@ mod tests {
     use super::{ConfigWatchDto, WatchContext, WatchContextSet};
     use crate::model::Prepare;
 
-    fn yaml(src: &str) -> Vec<ConfigWatchDto> { serde_saphyr::from_str(src).expect("valid watch yaml") }
+    fn yaml(src: &str) -> Vec<ConfigWatchDto> {
+        serde_saphyr::from_str(src).expect("valid watch yaml")
+    }
 
     fn set(contexts: &[WatchContext]) -> WatchContextSet {
         let mut set = WatchContextSet::new();

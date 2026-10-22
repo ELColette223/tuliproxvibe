@@ -75,7 +75,9 @@ impl XtreamRefreshLease {
         Ok(Self(Arc::new(XtreamRefreshLeaseInner { paths, database_artifacts, _generation_guard: generation_guard })))
     }
 
-    pub(super) fn paths(&self) -> &XtreamRefreshPaths { &self.0.paths }
+    pub(super) fn paths(&self) -> &XtreamRefreshPaths {
+        &self.0.paths
+    }
 
     pub(super) fn cleanup_staging_artifacts(&self) -> io::Result<()> {
         let database_result = self.0.database_artifacts.remove_owned_staging_artifacts();
@@ -117,7 +119,9 @@ pub(super) struct XtreamClusterStageOperations {
 }
 
 impl Default for XtreamClusterStageOperations {
-    fn default() -> Self { Self { preserve_details: preserve_details_input_xtream_playlist_cluster_to_disk } }
+    fn default() -> Self {
+        Self { preserve_details: preserve_details_input_xtream_playlist_cluster_to_disk }
+    }
 }
 
 struct StagedXtreamClusterRefresh {

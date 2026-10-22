@@ -370,8 +370,12 @@ mod tests {
         utils::Internable,
     };
 
-    fn user() -> UserId { UserId::from("web:alice") }
-    fn source() -> RuleSource { RuleSource::new("tgt", "virt", "input") }
+    fn user() -> UserId {
+        UserId::from("web:alice")
+    }
+    fn source() -> RuleSource {
+        RuleSource::new("tgt", "virt", "input")
+    }
     fn new_episode_rule() -> RecordingRule {
         RecordingRule {
             id: "r1".into(),

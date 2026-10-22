@@ -77,9 +77,13 @@ impl HlsGarbageCollector {
         changed
     }
 
-    pub fn policy(&self) -> Arc<GarbageCollectionPolicy> { self.policy.load_full() }
+    pub fn policy(&self) -> Arc<GarbageCollectionPolicy> {
+        self.policy.load_full()
+    }
 
-    pub fn rewrite_secret_fingerprint(&self) -> String { self.rewrite_secret_fingerprint.load().to_string() }
+    pub fn rewrite_secret_fingerprint(&self) -> String {
+        self.rewrite_secret_fingerprint.load().to_string()
+    }
 
     pub async fn run_once(&self, now_ms: u64) -> io::Result<GarbageCollectionReport> {
         let _run_once = self.run_once_gate.lock().await;

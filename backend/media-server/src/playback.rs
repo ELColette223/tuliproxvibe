@@ -179,7 +179,9 @@ fn unescape_internal_url_component(value: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-fn decode_hex_byte(high: u8, low: u8) -> Option<u8> { Some(hex_digit(high)? << 4 | hex_digit(low)?) }
+fn decode_hex_byte(high: u8, low: u8) -> Option<u8> {
+    Some(hex_digit(high)? << 4 | hex_digit(low)?)
+}
 
 #[cfg(test)]
 mod tests {

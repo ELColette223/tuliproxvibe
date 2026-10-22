@@ -58,7 +58,9 @@ impl HlsProxyManager {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn cache_deletion_queue_usage(&self) -> (usize, usize) { self.gc.cache_deletion_queue_usage() }
+    pub fn cache_deletion_queue_usage(&self) -> (usize, usize) {
+        self.gc.cache_deletion_queue_usage()
+    }
 
     pub(super) async fn cleanup_proxy_session_state(
         &self,

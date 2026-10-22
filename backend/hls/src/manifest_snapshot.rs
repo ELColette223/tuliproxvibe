@@ -74,12 +74,18 @@ pub struct HlsTransientManifestTemplate {
 }
 
 impl HlsTransientManifestTemplate {
-    pub(crate) const fn estimated_metadata_bytes(&self) -> usize { self.estimated_metadata_bytes }
+    pub(crate) const fn estimated_metadata_bytes(&self) -> usize {
+        self.estimated_metadata_bytes
+    }
 
-    pub(crate) const fn playlist_duration_ms(&self) -> u64 { self.playlist_duration_ms }
+    pub(crate) const fn playlist_duration_ms(&self) -> u64 {
+        self.playlist_duration_ms
+    }
 
     #[cfg(test)]
-    pub(crate) fn segments(&self) -> &Arc<[HlsLeaseManifestSegment]> { &self.segments }
+    pub(crate) fn segments(&self) -> &Arc<[HlsLeaseManifestSegment]> {
+        &self.segments
+    }
 }
 
 enum ParsedEncryptionDirective {

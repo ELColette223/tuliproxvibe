@@ -215,7 +215,9 @@ pub struct BootstrapConfig {
     pub readiness_timeout_millis: u64,
 }
 
-fn default_readiness_timeout_millis() -> u64 { 30_000 }
+fn default_readiness_timeout_millis() -> u64 {
+    30_000
+}
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -248,7 +250,9 @@ pub struct FixtureStreamOptions {
 }
 
 impl Default for FixtureStreamOptions {
-    fn default() -> Self { Self { share_live_hls: true, share_live_mpeg_ts: true, hls_startup_mode: None } }
+    fn default() -> Self {
+        Self { share_live_hls: true, share_live_mpeg_ts: true, hls_startup_mode: None }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -334,7 +338,9 @@ pub enum ExpectedPlayback {
 
 impl ExpectedPlayback {
     #[must_use]
-    pub fn is_streaming(&self) -> bool { matches!(self, Self::Streaming) }
+    pub fn is_streaming(&self) -> bool {
+        matches!(self, Self::Streaming)
+    }
 
     #[must_use]
     pub fn is_rejected(&self) -> bool {
@@ -769,7 +775,9 @@ fn expand_steps(steps: &[Step], prefix: &str, expanded: &mut Vec<Step>) -> Resul
 }
 
 #[must_use]
-pub fn lease_duration(millis: u64) -> Duration { Duration::from_millis(millis.max(1)) }
+pub fn lease_duration(millis: u64) -> Duration {
+    Duration::from_millis(millis.max(1))
+}
 
 #[cfg(test)]
 mod tests {

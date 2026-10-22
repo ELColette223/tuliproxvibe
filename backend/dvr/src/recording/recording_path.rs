@@ -63,11 +63,17 @@ pub struct RecordingGrouping {
 }
 
 impl RecordingGrouping {
-    pub fn live(channel: impl Into<String>) -> Self { Self { channel: Some(channel.into()), ..Self::default() } }
+    pub fn live(channel: impl Into<String>) -> Self {
+        Self { channel: Some(channel.into()), ..Self::default() }
+    }
 
-    pub fn vod(title: impl Into<String>) -> Self { Self { title: Some(title.into()), ..Self::default() } }
+    pub fn vod(title: impl Into<String>) -> Self {
+        Self { title: Some(title.into()), ..Self::default() }
+    }
 
-    pub fn series(series: impl Into<String>) -> Self { Self { series: Some(series.into()), ..Self::default() } }
+    pub fn series(series: impl Into<String>) -> Self {
+        Self { series: Some(series.into()), ..Self::default() }
+    }
 
     #[must_use]
     pub fn in_group(mut self, group: Option<String>) -> Self {
@@ -77,7 +83,9 @@ impl RecordingGrouping {
 }
 
 /// `Some(value)` when it holds more than whitespace.
-fn non_blank(value: Option<&String>) -> Option<&str> { value.map(String::as_str).filter(|v| !v.trim().is_empty()) }
+fn non_blank(value: Option<&String>) -> Option<&str> {
+    value.map(String::as_str).filter(|v| !v.trim().is_empty())
+}
 
 /// Reduces `raw` to one safe path component. Letters of every script survive;
 /// separators, control characters, emoji and other symbols are dropped (the

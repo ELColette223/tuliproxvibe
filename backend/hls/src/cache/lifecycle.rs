@@ -22,7 +22,9 @@ use tokio::{
 };
 
 impl HlsSegmentCache {
-    pub fn new() -> Self { Self::with_cache_path(DEFAULT_HLS_CACHE_PATH) }
+    pub fn new() -> Self {
+        Self::with_cache_path(DEFAULT_HLS_CACHE_PATH)
+    }
 
     pub fn with_cache_path(cache_path: impl Into<PathBuf>) -> Self {
         Self {
@@ -89,7 +91,9 @@ impl HlsSegmentCache {
         self.capacity_changed.notify_waiters();
     }
 
-    pub fn cache_path(&self) -> PathBuf { self.cache_path_snapshot().path }
+    pub fn cache_path(&self) -> PathBuf {
+        self.cache_path_snapshot().path
+    }
 
     pub async fn update_cache_path(&self, cache_path: impl Into<PathBuf>) -> bool {
         let cache_path = cache_path.into();
@@ -169,9 +173,13 @@ impl HlsSegmentCache {
         .await
     }
 
-    pub fn object_path<K: HlsCacheObjectKey>(&self, key: &K) -> PathBuf { self.path_for_key(key) }
+    pub fn object_path<K: HlsCacheObjectKey>(&self, key: &K) -> PathBuf {
+        self.path_for_key(key)
+    }
 
-    pub fn contains_current_cache_path(&self, path: &Path) -> bool { path.starts_with(self.cache_path_snapshot().path) }
+    pub fn contains_current_cache_path(&self, path: &Path) -> bool {
+        path.starts_with(self.cache_path_snapshot().path)
+    }
 
     pub fn has_active_mutation(&self, path: &Path) -> bool {
         self.capacity.lock().unwrap_or_else(std::sync::PoisonError::into_inner).active_mutations.contains(path)

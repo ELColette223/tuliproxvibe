@@ -12,7 +12,9 @@ pub(super) enum Segment {
 }
 
 impl fmt::Display for EventPattern {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.raw) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.raw)
+    }
 }
 
 impl EventPattern {
@@ -41,11 +43,15 @@ impl EventPattern {
 
     /// The pattern as written, for round-tripping back into config.
     #[must_use]
-    pub fn as_str(&self) -> &str { &self.raw }
+    pub fn as_str(&self) -> &str {
+        &self.raw
+    }
 
     /// Does this pattern cover `id`? Ignores negation - the caller combines.
     #[must_use]
-    pub fn matches(&self, id: EventId) -> bool { Self::match_segments(&self.segments, id.as_str()) }
+    pub fn matches(&self, id: EventId) -> bool {
+        Self::match_segments(&self.segments, id.as_str())
+    }
 
     pub(super) fn match_segments(pattern: &[Segment], id: &str) -> bool {
         let mut parts = id.split('.');
@@ -83,11 +89,15 @@ impl EventSubscription {
 
     /// The parsed patterns, for round-tripping back into config.
     #[must_use]
-    pub fn patterns(&self) -> &[EventPattern] { &self.patterns }
+    pub fn patterns(&self) -> &[EventPattern] {
+        &self.patterns
+    }
 
     /// `true` when nothing is subscribed - the caller can skip all work.
     #[must_use]
-    pub fn is_empty(&self) -> bool { self.patterns.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.patterns.is_empty()
+    }
 
     /// At least one positive pattern matches and no negative pattern does.
     #[must_use]

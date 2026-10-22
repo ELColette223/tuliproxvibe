@@ -58,9 +58,13 @@ impl ProviderAllocation {
         }
     }
 
-    pub fn new_available(config: Arc<ProviderConfig>) -> Self { ProviderAllocation::Available(config) }
+    pub fn new_available(config: Arc<ProviderConfig>) -> Self {
+        ProviderAllocation::Available(config)
+    }
 
-    pub fn new_grace_period(config: Arc<ProviderConfig>) -> Self { ProviderAllocation::GracePeriod(config) }
+    pub fn new_grace_period(config: Arc<ProviderConfig>) -> Self {
+        ProviderAllocation::GracePeriod(config)
+    }
 
     pub fn get_provider_name(&self) -> Option<Arc<str>> {
         match self {
@@ -251,6 +255,12 @@ pub struct ProviderConfig {
     bypass_local_cap: bool,
     /// Provider base URLs this account may rotate through. Empty means "use `url` only".
     lateral_urls: Vec<Arc<str>>,
+    /// The account's own label, kept alongside the qualified `name`.
+    ///
+    /// `name` is the pool key (`<input>/<username>`), but persisted state — HLS bindings,
+    /// account observations — was written with the label alone. Keeping both lets those
+    /// lookups resolve without forcing a state migration.
+    label: Arc<str>,
     connection: Arc<RwLock<ProviderConfigConnection>>,
     on_connection_change: ProviderConnectionChangeCallback,
 }
@@ -265,16 +275,20 @@ impl ProviderConfig {
         if self.lateral_urls.is_empty() {
             return None;
         }
-        let account_name = if self.name.contains('/') {
-            self.name.clone()
-        } else {
-            format!("{input_name}/{}", self.name).intern()
-        };
+        let account_name =
+            if self.name.contains('/') { self.name.clone() } else { format!("{input_name}/{}", self.name).intern() };
         Some(Arc::new(ConfigProvider::synthetic(account_name, self.lateral_urls.clone())))
     }
 
     /// Laterals of this account, for URL rewriting decisions.
-    pub fn lateral_urls(&self) -> &[Arc<str>] { &self.lateral_urls }
+    pub fn lateral_urls(&self) -> &[Arc<str>] {
+        &self.lateral_urls
+    }
+
+    /// The account label without the input qualification.
+    pub fn label(&self) -> &Arc<str> {
+        &self.label
+    }
 }
 
 impl fmt::Display for ProviderConfig {
@@ -297,7 +311,9 @@ impl fmt::Display for ProviderConfig {
 }
 
 impl fmt::Debug for ProviderConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{self}") }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self}")
+    }
 }
 
 impl PartialEq for ProviderConfig {
@@ -332,9 +348,13 @@ macro_rules! modify_connections {
 }
 
 impl ProviderConfig {
-    pub fn account_identity(&self) -> ProviderAccountIdentity { self.account_identity }
+    pub fn account_identity(&self) -> ProviderAccountIdentity {
+        self.account_identity
+    }
 
-    pub fn is_account_blocked(&self) -> bool { self.is_account_blocked_with_connection(&self.read_connection()) }
+    pub fn is_account_blocked(&self) -> bool {
+        self.is_account_blocked_with_connection(&self.read_connection())
+    }
 
     fn is_account_blocked_with_connection(&self, connection: &ProviderConfigConnection) -> bool {
         self.account_disabled
@@ -401,6 +421,7 @@ impl ProviderConfig {
             account_identity: cfg.account_identity(),
             bypass_local_cap: cfg.bypass_local_connection_cap(),
             lateral_urls: cfg.url_aliases.clone(),
+            label: cfg.name.clone(),
             connection,
             on_connection_change,
         }
@@ -424,10 +445,7 @@ impl ProviderConfig {
         };
         Self {
             id: alias.id,
-            // The qualified name arrives with the session identity step, which updates every
-            // consumer of the key in the same change. Until then the account keeps the label
-            // the pool already uses, so no reader sees a half-migrated namespace.
-            name: alias.name.clone(),
+            name: alias.account_name(cfg.name.as_ref()),
             url: alias.url.clone(),
             username: alias.username.clone(),
             password: alias.password.clone(),
@@ -439,19 +457,26 @@ impl ProviderConfig {
             account_identity: alias.account_identity(),
             bypass_local_cap: cfg.bypass_local_connection_cap(),
             lateral_urls: alias.effective_laterals(),
+            label: alias.name.clone(),
             connection,
             on_connection_change,
         }
     }
 
     #[inline]
-    pub fn max_connections(&self) -> usize { self.max_connections }
+    pub fn max_connections(&self) -> usize {
+        self.max_connections
+    }
 
     #[inline]
-    pub fn is_unlimited(&self) -> bool { self.max_connections == 0 }
+    pub fn is_unlimited(&self) -> bool {
+        self.max_connections == 0
+    }
 
     #[inline]
-    pub fn exp_date(&self) -> Option<i64> { self.exp_date }
+    pub fn exp_date(&self) -> Option<i64> {
+        self.exp_date
+    }
 
     pub fn get_user_info(&self) -> Option<InputUserInfo> {
         InputUserInfo::new(self.input_type, self.username.as_deref(), self.password.as_deref(), &self.url)
@@ -592,10 +617,14 @@ impl ProviderConfig {
     }
 
     #[inline]
-    pub fn get_current_connections(&self) -> usize { self.read_connection().current_connections }
+    pub fn get_current_connections(&self) -> usize {
+        self.read_connection().current_connections
+    }
 
     #[inline]
-    pub fn get_priority(&self) -> i16 { self.priority }
+    pub fn get_priority(&self) -> i16 {
+        self.priority
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -604,13 +633,19 @@ pub struct ProviderConfigWrapper {
 }
 
 impl fmt::Display for ProviderConfigWrapper {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.inner) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.inner)
+    }
 }
 
 impl ProviderConfigWrapper {
-    pub fn new(cfg: ProviderConfig) -> Self { Self { inner: Arc::new(cfg) } }
+    pub fn new(cfg: ProviderConfig) -> Self {
+        Self { inner: Arc::new(cfg) }
+    }
 
-    pub fn config(&self) -> Arc<ProviderConfig> { Arc::clone(&self.inner) }
+    pub fn config(&self) -> Arc<ProviderConfig> {
+        Arc::clone(&self.inner)
+    }
 
     pub fn try_allocate(&self, grace: bool, grace_period_timeout_secs: u64) -> ProviderAllocation {
         match self.inner.try_allocate(grace, grace_period_timeout_secs) {
@@ -630,7 +665,9 @@ impl ProviderConfigWrapper {
 impl Deref for ProviderConfigWrapper {
     type Target = ProviderConfig;
 
-    fn deref(&self) -> &Self::Target { &self.inner }
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
 }
 
 impl PartialEq for ProviderAllocation {

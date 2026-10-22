@@ -7,9 +7,13 @@ pub fn get_server_time() -> String {
 }
 
 /// Anchors the uptime clock; call once at process startup.
-pub fn init_uptime_clock() { let _ = *PROCESS_START; }
+pub fn init_uptime_clock() {
+    let _ = *PROCESS_START;
+}
 
-pub fn get_uptime_secs() -> u64 { PROCESS_START.elapsed().as_secs() }
+pub fn get_uptime_secs() -> u64 {
+    PROCESS_START.elapsed().as_secs()
+}
 
 pub fn get_build_time() -> Option<String> {
     BUILD_TIMESTAMP

@@ -150,7 +150,9 @@ impl TerminalState {
     /// `true` when the recording is in a terminal state that is
     /// eligible for retention delete. Only the completed, failed
     /// and cancelled states qualify.
-    pub fn is_eligible_for_retention(&self) -> bool { matches!(self, Self::Completed | Self::Failed | Self::Cancelled) }
+    pub fn is_eligible_for_retention(&self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+    }
 }
 
 impl<'a> RecordingSubject<'a> {
@@ -169,7 +171,9 @@ pub enum RecordingDecision {
 }
 
 impl RecordingDecision {
-    pub fn is_allow(&self) -> bool { matches!(self, Self::Allow) }
+    pub fn is_allow(&self) -> bool {
+        matches!(self, Self::Allow)
+    }
 }
 
 /// The `username` of the synthetic `Claims` the retention worker
@@ -223,13 +227,21 @@ fn check_create(claims: &Claims, action: RecordingAction) -> RecordingDecision {
     }
 }
 
-fn owner_of(meta: &RecordingMetadata) -> &UserId { meta.owner_id() }
+fn owner_of(meta: &RecordingMetadata) -> &UserId {
+    meta.owner_id()
+}
 
-fn is_visibility(meta: &RecordingMetadata, want: RecordingVisibility) -> bool { meta.visibility == want }
+fn is_visibility(meta: &RecordingMetadata, want: RecordingVisibility) -> bool {
+    meta.visibility == want
+}
 
-fn has_recording_read(claims: &Claims) -> bool { claims.permissions.contains(Permission::RecordingRead) }
+fn has_recording_read(claims: &Claims) -> bool {
+    claims.permissions.contains(Permission::RecordingRead)
+}
 
-fn has(claims: &Claims, permission: Permission) -> bool { claims.permissions.contains(permission) }
+fn has(claims: &Claims, permission: Permission) -> bool {
+    claims.permissions.contains(permission)
+}
 
 /// The principal decision. Pure function — does not touch the
 /// filesystem, the network, or the queue.
@@ -456,9 +468,13 @@ mod tests {
         make_meta(RecordingOwner::User(UserId::from(uid)), visibility)
     }
 
-    fn subject(uid: &str) -> UserId { UserId::from(uid) }
+    fn subject(uid: &str) -> UserId {
+        UserId::from(uid)
+    }
 
-    fn read_perms() -> shared::model::permission::PermissionSet { Permission::RecordingRead.into() }
+    fn read_perms() -> shared::model::permission::PermissionSet {
+        Permission::RecordingRead.into()
+    }
     /// Every recording mutation permission, for tests that only care that the
     /// caller is allowed to mutate at all.
     fn write_perms() -> shared::model::permission::PermissionSet {
@@ -469,7 +485,9 @@ mod tests {
         perms.set(Permission::RecordingRead);
         perms
     }
-    fn config_read_perms() -> shared::model::permission::PermissionSet { Permission::ConfigRead.into() }
+    fn config_read_perms() -> shared::model::permission::PermissionSet {
+        Permission::ConfigRead.into()
+    }
 
     // --- read / playback / download ---
 

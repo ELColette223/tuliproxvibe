@@ -37,9 +37,13 @@ impl TVGuide {
     }
 
     #[inline]
-    pub fn get_epg_sources(&self) -> &Vec<PersistedEpgSource> { &self.epg_sources }
+    pub fn get_epg_sources(&self) -> &Vec<PersistedEpgSource> {
+        &self.epg_sources
+    }
 
-    pub fn get_file_locks(&self) -> Option<&FileLockManager> { self.file_locks.as_deref() }
+    pub fn get_file_locks(&self) -> Option<&FileLockManager> {
+        self.file_locks.as_deref()
+    }
 }
 
 #[derive(Debug)]

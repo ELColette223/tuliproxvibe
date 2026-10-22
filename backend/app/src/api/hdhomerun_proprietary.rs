@@ -77,7 +77,9 @@ impl TlvValue for &str {
 
 impl TlvValue for &String {
     #[inline]
-    fn write_tlv_payload(self, buf: &mut BytesMut) { self.as_str().write_tlv_payload(buf); }
+    fn write_tlv_payload(self, buf: &mut BytesMut) {
+        self.as_str().write_tlv_payload(buf);
+    }
 }
 
 fn write_tlv<T: TlvValue>(buf: &mut BytesMut, tag: u8, value: T) {

@@ -85,7 +85,9 @@ pub struct OperationRunAccepted {
 
 impl OperationRunAccepted {
     #[must_use]
-    pub fn playlist_update(run_id: PlaylistUpdateRunId) -> Self { Self { run_id: Some(run_id) } }
+    pub fn playlist_update(run_id: PlaylistUpdateRunId) -> Self {
+        Self { run_id: Some(run_id) }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

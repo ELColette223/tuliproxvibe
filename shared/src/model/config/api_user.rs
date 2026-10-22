@@ -58,7 +58,9 @@ pub struct ProxyUserCredentialsDto {
 }
 
 impl ProxyUserCredentialsDto {
-    pub fn prepare(&mut self) -> Result<(), TuliproxError> { self.prepare_with_templates(None) }
+    pub fn prepare(&mut self) -> Result<(), TuliproxError> {
+        self.prepare_with_templates(None)
+    }
 
     pub fn prepare_with_templates(
         &mut self,

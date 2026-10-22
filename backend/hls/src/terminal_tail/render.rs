@@ -60,7 +60,9 @@ pub(super) fn valid_quoted_attribute(value: &str) -> bool {
     !value.is_empty() && value.chars().all(|character| character != '"' && !character.is_control())
 }
 
-pub(super) fn valid_iv(value: &str) -> bool { super::super::hls_aes128_cbc_iv(Some(value), 0).is_ok() }
+pub(super) fn valid_iv(value: &str) -> bool {
+    super::super::hls_aes128_cbc_iv(Some(value), 0).is_ok()
+}
 
 pub(super) fn valid_key_format_versions(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit() || byte == b'/')

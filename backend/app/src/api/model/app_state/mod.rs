@@ -108,11 +108,17 @@ impl AppState {
         self.app_config.get_disabled_headers()
     }
 
-    pub fn get_grace_options(&self) -> GracePeriodOptions { self.app_config.get_grace_options() }
+    pub fn get_grace_options(&self) -> GracePeriodOptions {
+        self.app_config.get_grace_options()
+    }
 
-    pub fn should_use_manual_redirects(&self) -> bool { crate::model::should_use_manual_redirects(&self.app_config) }
+    pub fn should_use_manual_redirects(&self) -> bool {
+        crate::model::should_use_manual_redirects(&self.app_config)
+    }
 
-    pub fn get_encrypt_secret(&self) -> [u8; 16] { self.app_config.get_encrypt_secret() }
+    pub fn get_encrypt_secret(&self) -> [u8; 16] {
+        self.app_config.get_encrypt_secret()
+    }
 }
 
 #[derive(Clone)]

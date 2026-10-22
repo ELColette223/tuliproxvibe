@@ -4,10 +4,14 @@ use std::fmt;
 impl EventId {
     /// Declare an event id. `const` so the registry is built at compile time.
     #[must_use]
-    pub const fn new(id: &'static str) -> Self { Self(id) }
+    pub const fn new(id: &'static str) -> Self {
+        Self(id)
+    }
 
     #[must_use]
-    pub const fn as_str(&self) -> &'static str { self.0 }
+    pub const fn as_str(&self) -> &'static str {
+        self.0
+    }
 
     /// The `domain` part - everything before the first dot.
     ///
@@ -27,11 +31,15 @@ impl EventId {
     /// the legacy template filename for that kind - so recording templates
     /// are discovered by the canonical id with no alias lookup needed.
     #[must_use]
-    pub fn file_stem(&self) -> String { self.0.replace('.', "_") }
+    pub fn file_stem(&self) -> String {
+        self.0.replace('.', "_")
+    }
 
     /// `{prefix}_{file_stem}.templ`, the on-disk template name.
     #[must_use]
-    pub fn template_filename(&self, prefix: &str) -> String { format!("{prefix}_{}.templ", self.file_stem()) }
+    pub fn template_filename(&self, prefix: &str) -> String {
+        format!("{prefix}_{}.templ", self.file_stem())
+    }
 
     /// Resolve a wire string to a known event id.
     ///
@@ -49,11 +57,15 @@ impl EventId {
 }
 
 impl fmt::Display for EventId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
 }
 
 impl serde::Serialize for EventId {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> { s.serialize_str(self.0) }
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.0)
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for EventId {
@@ -112,7 +124,9 @@ impl Severity {
     }
 
     #[must_use]
-    pub fn from_wire(s: &str) -> Option<Self> { s.parse().ok() }
+    pub fn from_wire(s: &str) -> Option<Self> {
+        s.parse().ok()
+    }
 }
 
 /// One entry in the event registry.

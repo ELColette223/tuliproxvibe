@@ -34,7 +34,9 @@ fn contexts_from_names(names: &[String]) -> WatchContextSet {
 }
 
 /// What a fresh input row starts with: the short form.
-fn default_contexts() -> WatchContextSet { ConfigWatchDto::channels("").on }
+fn default_contexts() -> WatchContextSet {
+    ConfigWatchDto::channels("").on
+}
 
 #[derive(Properties, Clone, PartialEq)]
 pub struct WatchEntriesEditorProps {
@@ -227,7 +229,9 @@ mod tests {
     use super::{candidate, context_names, contexts_from_names, watch_entry_label, CandidateDecision};
     use shared::model::{ConfigWatchDto, WatchContext, WatchContextSet};
 
-    fn set(contexts: &[WatchContext]) -> WatchContextSet { ConfigWatchDto::new("", contexts.iter().copied()).on }
+    fn set(contexts: &[WatchContext]) -> WatchContextSet {
+        ConfigWatchDto::new("", contexts.iter().copied()).on
+    }
 
     #[test]
     fn blank_pattern_is_rejected() {

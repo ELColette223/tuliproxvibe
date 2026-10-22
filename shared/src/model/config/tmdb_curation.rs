@@ -47,9 +47,15 @@ pub enum TmdbTrendingTimeWindow {
 pub const TMDB_TRENDING_DEFAULT_LIMIT: u32 = 100;
 pub const TMDB_TRENDING_MAX_LIMIT: u32 = 500;
 
-const fn default_trending_limit() -> u32 { TMDB_TRENDING_DEFAULT_LIMIT }
-const fn is_default_trending_limit(limit: &u32) -> bool { *limit == TMDB_TRENDING_DEFAULT_LIMIT }
-pub const fn is_valid_tmdb_trending_limit(limit: u32) -> bool { limit >= 1 && limit <= TMDB_TRENDING_MAX_LIMIT }
+const fn default_trending_limit() -> u32 {
+    TMDB_TRENDING_DEFAULT_LIMIT
+}
+const fn is_default_trending_limit(limit: &u32) -> bool {
+    *limit == TMDB_TRENDING_DEFAULT_LIMIT
+}
+pub const fn is_valid_tmdb_trending_limit(limit: u32) -> bool {
+    limit >= 1 && limit <= TMDB_TRENDING_MAX_LIMIT
+}
 
 // deserialize_u32 permits quoted numbers in our YAML loader. Inspect the scalar type
 // instead so YAML and JSON have the same integer-only contract (including disabled drafts).
@@ -57,7 +63,9 @@ fn deserialize_trending_limit<'de, D: serde::Deserializer<'de>>(deserializer: D)
     struct Integer;
     impl serde::de::Visitor<'_> for Integer {
         type Value = u32;
-        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("an unsigned integer") }
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("an unsigned integer")
+        }
         fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<u32, E> {
             u32::try_from(value).map_err(|_| E::custom("TMDB trending limit exceeds u32"))
         }
@@ -98,7 +106,9 @@ pub struct TmdbCurationConfigDto {
 }
 
 impl Default for TmdbCurationConfigDto {
-    fn default() -> Self { Self { enabled: true, api: TmdbCurationApiConfigDto::default(), trending: Vec::new() } }
+    fn default() -> Self {
+        Self { enabled: true, api: TmdbCurationApiConfigDto::default(), trending: Vec::new() }
+    }
 }
 
 impl TmdbCurationConfigDto {

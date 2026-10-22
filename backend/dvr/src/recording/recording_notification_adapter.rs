@@ -102,7 +102,9 @@ mod tests {
         UserId,
     };
 
-    fn user(name: &str) -> UserId { UserId::from(name) }
+    fn user(name: &str) -> UserId {
+        UserId::from(name)
+    }
 
     #[inline]
     fn make_meta(visibility: RecordingVisibility, owner: RecordingOwner) -> RecordingMetadata {

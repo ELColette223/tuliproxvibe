@@ -67,13 +67,17 @@ pub struct EmbyPath<'a> {
 }
 
 impl<'a> EmbyPath<'a> {
-    pub const fn one(first: &'a str) -> Self { Self { segments: [first, "", ""], len: 1 } }
+    pub const fn one(first: &'a str) -> Self {
+        Self { segments: [first, "", ""], len: 1 }
+    }
 
     pub const fn three(first: &'a str, second: &'a str, third: &'a str) -> Self {
         Self { segments: [first, second, third], len: 3 }
     }
 
-    pub fn segments(&self) -> &[&'a str] { &self.segments[..self.len] }
+    pub fn segments(&self) -> &[&'a str] {
+        &self.segments[..self.len]
+    }
 }
 
 /// How an endpoint is scoped to the authenticated user.
@@ -271,7 +275,9 @@ mod tests {
     use super::*;
     use crate::MediaServerErrorKind;
 
-    fn identity() -> EmbyClientIdentity { EmbyClientIdentity::new("input", Some("alice")) }
+    fn identity() -> EmbyClientIdentity {
+        EmbyClientIdentity::new("input", Some("alice"))
+    }
 
     fn expected_identity() -> String {
         format!(

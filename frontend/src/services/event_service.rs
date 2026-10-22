@@ -16,7 +16,9 @@ pub struct EventService {
 }
 
 impl Default for EventService {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EventService {
@@ -29,7 +31,9 @@ impl EventService {
         }
     }
 
-    pub fn is_config_change_message_blocked(&self) -> bool { self.block_config_updated_message.get() }
+    pub fn is_config_change_message_blocked(&self) -> bool {
+        self.block_config_updated_message.get()
+    }
 
     pub fn set_config_change_message_blocked(&self, value: bool) {
         if value {

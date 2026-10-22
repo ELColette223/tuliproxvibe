@@ -77,7 +77,9 @@ impl Default for IcsEventMappingDto {
 }
 
 impl IcsEventMappingDto {
-    pub fn is_default(value: &Self) -> bool { value == &Self::default() }
+    pub fn is_default(value: &Self) -> bool {
+        value == &Self::default()
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -117,7 +119,9 @@ impl Default for IcsDummyConfigDto {
 }
 
 impl IcsDummyConfigDto {
-    pub fn is_default(value: &Self) -> bool { value == &Self::default() }
+    pub fn is_default(value: &Self) -> bool {
+        value == &Self::default()
+    }
 }
 
 pub(super) fn validate_ics_config(config: &IcsEpgSourceConfigDto) -> Result<(), TuliproxError> {

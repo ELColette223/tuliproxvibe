@@ -16,12 +16,18 @@ pub struct ConfigInputUpdateQualityDto {
 
 impl ConfigInputUpdateQualityDto {
     #[must_use]
-    pub const fn is_disabled(&self) -> bool { self.live == 0 && self.vod == 0 && self.series == 0 }
+    pub const fn is_disabled(&self) -> bool {
+        self.live == 0 && self.vod == 0 && self.series == 0
+    }
 
     #[must_use]
-    pub const fn is_empty(&self) -> bool { self.is_disabled() }
+    pub const fn is_empty(&self) -> bool {
+        self.is_disabled()
+    }
 
-    pub fn clean(&mut self) { *self = Self::default(); }
+    pub fn clean(&mut self) {
+        *self = Self::default();
+    }
 }
 
 impl Prepare for ConfigInputUpdateQualityDto {

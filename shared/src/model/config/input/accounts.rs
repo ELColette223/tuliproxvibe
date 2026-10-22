@@ -78,9 +78,7 @@ impl ConfigInputAccountDto {
         self.id = index + 1;
         self.username = self.username.trim().intern();
         if self.username.is_empty() {
-            return Err(TuliproxError::ConfigInput(format!(
-                "username for account is mandatory (input: {input_name})"
-            )));
+            return Err(TuliproxError::ConfigInput(format!("username for account is mandatory (input: {input_name})")));
         }
         self.password = crate::utils::get_trimmed_string(self.password.as_deref());
 
@@ -107,11 +105,7 @@ impl ConfigInputAccountDto {
                 // Stalker authenticates with a MAC, credentials, or both; the identity
                 // check that needs both sources lives in `prepare_stalker_config`.
             }
-            InputType::Library
-            | InputType::Emby
-            | InputType::Jellyfin
-            | InputType::Plex
-            | InputType::Staged => {
+            InputType::Library | InputType::Emby | InputType::Jellyfin | InputType::Plex | InputType::Staged => {
                 return Err(TuliproxError::ConfigInput(format!(
                     "input type {} does not support accounts (input: {input_name})",
                     input_type

@@ -76,7 +76,9 @@ struct Channel {
 }
 
 impl Inventory {
-    fn ids(&self) -> HashSet<String> { self.channels.iter().map(|channel| channel.id.clone()).collect() }
+    fn ids(&self) -> HashSet<String> {
+        self.channels.iter().map(|channel| channel.id.clone()).collect()
+    }
 }
 
 fn save_apply_feedback(applied: bool) -> (&'static str, bool) {
@@ -780,7 +782,9 @@ pub fn VisualTargetFilter(props: &VisualTargetFilterProps) -> Html {
 mod tests {
     use super::*;
 
-    fn key(name: &str) -> CategoryKey { CategoryKey { cluster: XtreamCluster::Live, name: name.into() } }
+    fn key(name: &str) -> CategoryKey {
+        CategoryKey { cluster: XtreamCluster::Live, name: name.into() }
+    }
 
     #[test]
     fn saved_selection_reports_apply_failure_as_warning_not_success() {

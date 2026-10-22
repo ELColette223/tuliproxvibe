@@ -13,7 +13,9 @@ use std::{net::SocketAddr, sync::Arc};
 use tuliprox_core::utils::debug_if_enabled;
 
 impl ConnectionManager {
-    pub async fn add_connection(&self, addr: &SocketAddr) { self.user_manager.add_connection(addr).await; }
+    pub async fn add_connection(&self, addr: &SocketAddr) {
+        self.user_manager.add_connection(addr).await;
+    }
 
     pub async fn touch_http_activity(&self, username: &str, token: &str, addr: &SocketAddr) {
         self.user_manager.touch_http_activity(username, token, addr).await;

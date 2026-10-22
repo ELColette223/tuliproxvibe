@@ -61,7 +61,9 @@ impl EpgSourceDto {
         validate_ics_url_scheme(&self.url)
     }
 
-    pub fn is_valid(&self) -> bool { !self.url.is_empty() }
+    pub fn is_valid(&self) -> bool {
+        !self.url.is_empty()
+    }
 
     pub fn source_identity(&self) -> String {
         match self.source_type {

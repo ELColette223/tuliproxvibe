@@ -34,7 +34,9 @@ pub struct InputPlaylistPersistOptions {
 }
 
 impl Default for InputPlaylistPersistOptions {
-    fn default() -> Self { Self { accepted_empty_clusters: ClusterFlags::empty() } }
+    fn default() -> Self {
+        Self { accepted_empty_clusters: ClusterFlags::empty() }
+    }
 }
 
 /// Empty Library contribution proven by successful input jobs, before target transforms.
@@ -54,7 +56,9 @@ pub enum LibraryEmptyPublication {
 
 impl LibraryEmptyPublication {
     #[must_use]
-    pub const fn replaces_empty_target(self) -> bool { matches!(self, Self::CompleteTarget) }
+    pub const fn replaces_empty_target(self) -> bool {
+        matches!(self, Self::CompleteTarget)
+    }
 
     /// Resolve the input-level authorization against the actual prepared target/output.
     /// A plain contribution never authorizes a fully empty result from a foreign input.

@@ -21,7 +21,9 @@ impl HlsRevisionDiskReservation {
     ///
     /// Those bytes bypass the staged commit accounting, so releasing the
     /// reservation must rescan the cache to pick them up.
-    pub fn mark_unaccounted_writes(&mut self) { self.unaccounted_writes = true; }
+    pub fn mark_unaccounted_writes(&mut self) {
+        self.unaccounted_writes = true;
+    }
 }
 
 impl Drop for HlsRevisionDiskReservation {
@@ -41,7 +43,9 @@ impl Drop for HlsRevisionDiskReservation {
 }
 
 impl fmt::Debug for HlsRevisionFilePin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("HlsRevisionFilePin") }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("HlsRevisionFilePin")
+    }
 }
 
 impl HlsSegmentCache {
@@ -276,7 +280,9 @@ impl HlsSegmentCache {
     }
 
     /// Current revision file bytes after completed accounting mutations.
-    pub fn revision_disk_bytes(&self) -> u64 { self.capacity.lock_unpoisoned().revision_bytes }
+    pub fn revision_disk_bytes(&self) -> u64 {
+        self.capacity.lock_unpoisoned().revision_bytes
+    }
 
     /// Walks the cache tree for the current revision file bytes.
     #[cfg(test)]

@@ -18,9 +18,13 @@ pub enum CurationCatalogSelection {
 }
 
 impl CurationCatalogSelection {
-    pub const fn is_full(&self) -> bool { matches!(self, Self::Full) }
+    pub const fn is_full(&self) -> bool {
+        matches!(self, Self::Full)
+    }
 
-    pub const fn is_curated(self) -> bool { matches!(self, Self::Curated) }
+    pub const fn is_curated(self) -> bool {
+        matches!(self, Self::Curated)
+    }
 }
 
 /// One target-wide catalog policy with concrete discovery sources.
@@ -137,7 +141,9 @@ fn trakt_projections(source: &TraktSourceConfigDto) -> impl Iterator<Item = (Tra
         )
 }
 
-fn normalize_category_name(name: &str) -> String { deunicode(name.trim()).to_lowercase() }
+fn normalize_category_name(name: &str) -> String {
+    deunicode(name.trim()).to_lowercase()
+}
 
 pub(super) fn prepare_selector_category(
     category_name: &mut Option<String>,
@@ -163,13 +169,21 @@ mod tests {
     };
     use serde_json::{json, Value};
 
-    fn xtream() -> Vec<TargetOutputDto> { vec![TargetOutputDto::Xtream(XtreamTargetOutputDto::default())] }
+    fn xtream() -> Vec<TargetOutputDto> {
+        vec![TargetOutputDto::Xtream(XtreamTargetOutputDto::default())]
+    }
 
-    fn m3u() -> Vec<TargetOutputDto> { vec![TargetOutputDto::M3u(M3uTargetOutputDto::default())] }
+    fn m3u() -> Vec<TargetOutputDto> {
+        vec![TargetOutputDto::M3u(M3uTargetOutputDto::default())]
+    }
 
-    fn config(value: Value) -> CurationConfigDto { serde_json::from_value(value).expect("curation config shape") }
+    fn config(value: Value) -> CurationConfigDto {
+        serde_json::from_value(value).expect("curation config shape")
+    }
 
-    fn tmdb_selector() -> Value { json!({"kind": "movie", "time_window": "week", "category_name": "Trending"}) }
+    fn tmdb_selector() -> Value {
+        json!({"kind": "movie", "time_window": "week", "category_name": "Trending"})
+    }
 
     fn mixed() -> Value {
         json!({

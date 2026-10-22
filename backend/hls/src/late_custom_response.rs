@@ -31,7 +31,9 @@ impl HlsLateCustomResponsePlan {
         self.proxy_session_id == *proxy_session_id && self.lease_id == *lease_id
     }
 
-    pub fn manifest_body(&self) -> &str { &self.standalone.manifest_body }
+    pub fn manifest_body(&self) -> &str {
+        &self.standalone.manifest_body
+    }
 
     pub(crate) fn segment_bytes(
         &self,

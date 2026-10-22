@@ -188,7 +188,9 @@ impl ConfigDto {
         self.reverse_proxy.as_ref().is_some_and(|r| r.geoip.as_ref().is_some_and(|g| g.enabled))
     }
 
-    pub fn is_library_enabled(&self) -> bool { self.library.as_ref().is_some_and(|l| l.enabled) }
+    pub fn is_library_enabled(&self) -> bool {
+        self.library.as_ref().is_some_and(|l| l.enabled)
+    }
 
     pub fn is_stream_history_enabled(&self) -> bool {
         self.reverse_proxy.as_ref().and_then(|r| r.stream_history.as_ref()).is_some_and(|sh| sh.stream_history_enabled)

@@ -34,7 +34,9 @@ impl MetadataStorage {
     }
 
     // Creates a new metadata storage instance
-    pub fn new(storage_dir: PathBuf) -> Self { Self { storage_dir, mutation_guard: Arc::new(Mutex::new(())) } }
+    pub fn new(storage_dir: PathBuf) -> Self {
+        Self { storage_dir, mutation_guard: Arc::new(Mutex::new(())) }
+    }
 
     // Initializes the storage directory
     pub async fn initialize(&self) -> std::io::Result<()> {

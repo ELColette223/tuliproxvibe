@@ -13,7 +13,9 @@ pub struct HlsSessionIncarnation(u64);
 
 #[cfg(any(test, feature = "test-support"))]
 impl HlsSessionIncarnation {
-    pub const fn for_test(generation: u64) -> Self { Self(generation) }
+    pub const fn for_test(generation: u64) -> Self {
+        Self(generation)
+    }
 }
 
 /// Result of a non-blocking session-incarnation transaction.
@@ -80,7 +82,9 @@ pub(crate) struct HlsCurrentProxySessionGuard<'a> {
 }
 
 impl HlsCurrentProxySessionGuard<'_> {
-    pub(crate) fn session(&self) -> &HlsSessionHandle { &self.session }
+    pub(crate) fn session(&self) -> &HlsSessionHandle {
+        &self.session
+    }
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -89,7 +93,9 @@ pub struct HlsSessionIndexWriteGuardForTest<'a> {
 }
 
 impl HlsSessionStore {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub async fn get_by_key(&self, key: &HlsSessionKey) -> Option<HlsSessionHandle> {
         self.indexes.read().await.by_key.get(key).map(Arc::clone)
@@ -278,16 +284,24 @@ impl HlsSessionStore {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn index_write_is_blocked_for_test(&self) -> bool { self.indexes.try_write().is_err() }
+    pub fn index_write_is_blocked_for_test(&self) -> bool {
+        self.indexes.try_write().is_err()
+    }
 
     #[cfg(any(test, feature = "test-support"))]
-    async fn proxy_session_index_len(&self) -> usize { self.indexes.read().await.by_proxy_session_id.len() }
+    async fn proxy_session_index_len(&self) -> usize {
+        self.indexes.read().await.by_proxy_session_id.len()
+    }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub async fn len(&self) -> usize { self.indexes.read().await.by_key.len() }
+    pub async fn len(&self) -> usize {
+        self.indexes.read().await.by_key.len()
+    }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub async fn is_empty(&self) -> bool { self.indexes.read().await.by_key.is_empty() }
+    pub async fn is_empty(&self) -> bool {
+        self.indexes.read().await.by_key.is_empty()
+    }
 
     fn register_session_incarnation(&self, session: &HlsSessionHandle) -> Option<HlsSessionIncarnation> {
         let mut incarnations = self.lock_incarnations();

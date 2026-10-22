@@ -61,7 +61,9 @@ impl CatchupProperties {
 
     /// Prefer `catchup-type` when both are set so a leftover `catchup="shift"`/`append`
     /// from a provider cannot steal Flussonic path-rewrite channels (v3.3.81 behavior).
-    pub fn is_flussonic(&self) -> bool { Self::is_flussonic_mode_str(self.effective_mode()) }
+    pub fn is_flussonic(&self) -> bool {
+        Self::is_flussonic_mode_str(self.effective_mode())
+    }
 
     pub fn native_flussonic_player_mode(&self) -> Option<&'static str> {
         if !self.is_flussonic() {

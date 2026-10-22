@@ -76,7 +76,9 @@ impl HlsTerminalCommitClock {
     }
 
     #[cfg(test)]
-    pub(super) fn set_fixed_now_ms(&self, now_ms: u64) { self.fixed_now_ms.store(now_ms, Ordering::Release); }
+    pub(super) fn set_fixed_now_ms(&self, now_ms: u64) {
+        self.fixed_now_ms.store(now_ms, Ordering::Release);
+    }
 
     #[cfg(test)]
     fn follows_tokio_clock(&self) -> bool {
@@ -218,7 +220,9 @@ impl HlsTerminalAssetRevisionGuard {
         }
     }
 
-    pub fn current_identity(&self) -> HlsRuntimeCustomTailRevision { (self.current)() }
+    pub fn current_identity(&self) -> HlsRuntimeCustomTailRevision {
+        (self.current)()
+    }
 
     pub fn validate_current(&self) -> HlsTerminalAssetRevisionValidation {
         let current = self.current_identity();
@@ -467,10 +471,14 @@ pub struct HlsTerminalCommitOwnerToken(u64);
 
 impl HlsTerminalCommitOwnerToken {
     #[cfg(any(test, feature = "test-support"))]
-    const fn for_test(token: u64) -> Self { Self(token) }
+    const fn for_test(token: u64) -> Self {
+        Self(token)
+    }
 
     #[cfg(any(test, feature = "test-support"))]
-    const fn as_u64(self) -> u64 { self.0 }
+    const fn as_u64(self) -> u64 {
+        self.0
+    }
 }
 
 /// Generation assigned to one uniquely active retry worker.
@@ -1056,7 +1064,9 @@ impl HlsTerminalCommitRetryCoordinator {
         self.notify.notify_one();
     }
 
-    pub async fn notified(&self) { self.notify.notified().await }
+    pub async fn notified(&self) {
+        self.notify.notified().await
+    }
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn owner_count(&self) -> usize {

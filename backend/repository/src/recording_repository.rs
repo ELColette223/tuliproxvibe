@@ -204,7 +204,9 @@ pub struct PersistedIdempotency {
 }
 
 impl PersistedIdempotency {
-    fn is_expired_at(&self, now: i64) -> bool { now.saturating_sub(self.accepted_at) >= IDEMPOTENCY_TTL_SECS }
+    fn is_expired_at(&self, now: i64) -> bool {
+        now.saturating_sub(self.accepted_at) >= IDEMPOTENCY_TTL_SECS
+    }
 }
 
 /// What a caller should do with a request carrying an idempotency key.
@@ -252,7 +254,9 @@ pub enum RecordingDbValue {
     Idempotency(Box<PersistedIdempotency>),
 }
 
-fn invalid(message: impl Into<String>) -> io::Error { io::Error::new(io::ErrorKind::InvalidData, message.into()) }
+fn invalid(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
 
 /// A key and value must describe the same kind of record. A metadata value
 /// filed under a task key would be silently skipped by every reader.
@@ -822,7 +826,9 @@ impl RecordingRepository {
         Ok(outcome)
     }
 
-    pub fn health(&self) -> RecoveryHealth { self.journal.health() }
+    pub fn health(&self) -> RecoveryHealth {
+        self.journal.health()
+    }
 }
 
 #[cfg(test)]

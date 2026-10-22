@@ -159,13 +159,17 @@ impl JsonArrayEventDecoder {
 pub struct TargetBouquetService;
 
 impl TargetBouquetService {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     fn collection_url_from_base(base_href: &str) -> String {
         concat_path_leading_slash(base_href.trim_end_matches('/'), "api/v1/target-bouquets")
     }
 
-    fn collection_url() -> String { Self::collection_url_from_base(&get_base_href()) }
+    fn collection_url() -> String {
+        Self::collection_url_from_base(&get_base_href())
+    }
 
     fn target_url(target_name: &str, endpoint: &str) -> String {
         let collection = Self::collection_url();

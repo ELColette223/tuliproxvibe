@@ -24,7 +24,9 @@ pub struct HlsStripConfigDto {
 }
 
 impl HlsStripConfigDto {
-    pub fn is_empty(&self) -> bool { self == &Self::default() }
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
 
     pub const fn clean(&mut self) {}
 }
@@ -37,7 +39,9 @@ pub struct HlsManifestRecoveryBurstConfigDto {
 }
 
 impl HlsManifestRecoveryBurstConfigDto {
-    pub fn is_empty(&self) -> bool { self == &Self::default() }
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
 
     pub const fn clean(&mut self) {}
 }
@@ -101,7 +105,9 @@ impl Default for HlsCacheConfigDto {
 }
 
 impl HlsCacheConfigDto {
-    pub fn is_empty(&self) -> bool { self == &Self::default() }
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
 
     pub fn clean(&mut self) {
         self.strip.clean();

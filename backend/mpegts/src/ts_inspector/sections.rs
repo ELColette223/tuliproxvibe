@@ -49,7 +49,9 @@ impl HlsPsiTableKind {
     }
 }
 
-fn psi_section_length(header: &[u8]) -> usize { (usize::from(header[1] & 0x0F) << 8) | usize::from(header[2]) }
+fn psi_section_length(header: &[u8]) -> usize {
+    (usize::from(header[1] & 0x0F) << 8) | usize::from(header[2])
+}
 
 impl<P> HlsPsiSectionConsumer<P>
 where
@@ -238,7 +240,9 @@ impl Default for HlsPatPacketFilter {
 impl PacketFilter for HlsPatPacketFilter {
     type Ctx = HlsTsDemuxContext;
 
-    fn consume(&mut self, ctx: &mut Self::Ctx, packet: &Packet<'_>) { self.consumer.consume(ctx, packet); }
+    fn consume(&mut self, ctx: &mut Self::Ctx, packet: &Packet<'_>) {
+        self.consumer.consume(ctx, packet);
+    }
 }
 
 impl HlsPmtPacketFilter {
@@ -257,7 +261,9 @@ impl HlsPmtPacketFilter {
 impl PacketFilter for HlsPmtPacketFilter {
     type Ctx = HlsTsDemuxContext;
 
-    fn consume(&mut self, ctx: &mut Self::Ctx, packet: &Packet<'_>) { self.consumer.consume(ctx, packet); }
+    fn consume(&mut self, ctx: &mut Self::Ctx, packet: &Packet<'_>) {
+        self.consumer.consume(ctx, packet);
+    }
 }
 
 pub(super) enum HlsTsPacketFilter {

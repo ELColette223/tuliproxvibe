@@ -40,7 +40,9 @@ pub(crate) fn clamp_panel_width(width: f64, shrink: f64, max: Option<f64>) -> f6
     max.map_or(width, |max| width.min(max.max(shrink)))
 }
 
-pub(crate) fn is_shrunk(width: f64, shrink: f64) -> bool { (width - shrink).abs() <= SHRUNK_TOLERANCE_PX }
+pub(crate) fn is_shrunk(width: f64, shrink: f64) -> bool {
+    (width - shrink).abs() <= SHRUNK_TOLERANCE_PX
+}
 
 /// Width after a toggle: shrink an expanded panel, restore the last expanded width of a shrunk one.
 pub(crate) fn toggle_panel_width(current: f64, last_expanded: f64, shrink: f64) -> f64 {
@@ -60,7 +62,9 @@ struct Bounds {
 }
 
 impl Bounds {
-    fn clamp(self, width: f64) -> f64 { clamp_panel_width(width, self.shrink, self.max) }
+    fn clamp(self, width: f64) -> f64 {
+        clamp_panel_width(width, self.shrink, self.max)
+    }
 }
 
 #[derive(Clone, Copy)]

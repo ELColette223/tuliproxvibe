@@ -4,17 +4,23 @@ use thiserror::Error;
 
 /// Render a portal URL safely. Kept as this module's name for its existing callers; the
 /// rule itself lives in [`crate::redaction`] alongside the rest.
-pub fn safe_stalker_url(value: &str) -> String { redaction::safe_url(value) }
+pub fn safe_stalker_url(value: &str) -> String {
+    redaction::safe_url(value)
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StalkerErrorUrl(String);
 
 impl From<&str> for StalkerErrorUrl {
-    fn from(value: &str) -> Self { Self(safe_stalker_url(value)) }
+    fn from(value: &str) -> Self {
+        Self(safe_stalker_url(value))
+    }
 }
 
 impl From<String> for StalkerErrorUrl {
-    fn from(value: String) -> Self { Self::from(value.as_str()) }
+    fn from(value: String) -> Self {
+        Self::from(value.as_str())
+    }
 }
 
 /// Failure modes surfaced by the Stalker portal client. The variants cover both transport
@@ -169,7 +175,9 @@ impl StalkerError {
     /// different call; it is reported here as not retryable so a caller does not loop on
     /// a rejected token. Use [`Self::is_token_rejected`] for that path.
     #[must_use]
-    pub fn is_retryable(&self) -> bool { matches!(self.kind(), StalkerErrorKind::Transient) }
+    pub fn is_retryable(&self) -> bool {
+        matches!(self.kind(), StalkerErrorKind::Transient)
+    }
 }
 
 pub type StalkerResult<T> = Result<T, StalkerError>;

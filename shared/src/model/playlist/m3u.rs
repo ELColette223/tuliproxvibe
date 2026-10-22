@@ -59,7 +59,9 @@ pub struct M3uPlaylistItem {
     pub upstream_user_agent: Option<Arc<str>>,
 }
 
-fn write_m3u_attr(line: &mut String, name: &str, value: &str) { let _ = write!(line, " {name}=\"{value}\""); }
+fn write_m3u_attr(line: &mut String, name: &str, value: &str) {
+    let _ = write!(line, " {name}=\"{value}\"");
+}
 
 fn append_catchup_attribute(line: &mut String, name: &str, value: Option<&Arc<str>>) {
     if let Some(value) = value.filter(|value| !value.is_empty()) {
@@ -235,30 +237,44 @@ impl M3uPlaylistItem {
 
 impl PlaylistEntry for M3uPlaylistItem {
     #[inline]
-    fn get_virtual_id(&self) -> VirtualId { self.virtual_id }
+    fn get_virtual_id(&self) -> VirtualId {
+        self.virtual_id
+    }
 
     fn get_input_stream_id(&self) -> Option<Arc<str>> {
         let input_stream_id = if self.input_stream_id.is_empty() { &self.provider_id } else { &self.input_stream_id };
         (!input_stream_id.is_empty()).then(|| Arc::clone(input_stream_id))
     }
 
-    fn get_upstream_user_agent(&self) -> Option<&str> { self.upstream_user_agent.as_deref() }
+    fn get_upstream_user_agent(&self) -> Option<&str> {
+        self.upstream_user_agent.as_deref()
+    }
 
-    fn get_provider_id(&self) -> Option<u32> { get_provider_id(&self.provider_id, &self.url) }
+    fn get_provider_id(&self) -> Option<u32> {
+        get_provider_id(&self.provider_id, &self.url)
+    }
     #[inline]
-    fn get_category_id(&self) -> Option<u32> { None }
+    fn get_category_id(&self) -> Option<u32> {
+        None
+    }
     #[inline]
-    fn get_provider_url(&self) -> Arc<str> { Arc::clone(&self.url) }
+    fn get_provider_url(&self) -> Arc<str> {
+        Arc::clone(&self.url)
+    }
 
     fn get_uuid(&self) -> UUIDType {
         generate_runtime_playlist_uuid(&self.input_name, &self.provider_id, self.item_type, &self.url)
     }
 
     #[inline]
-    fn get_item_type(&self) -> PlaylistItemType { self.item_type }
+    fn get_item_type(&self) -> PlaylistItemType {
+        self.item_type
+    }
 
     #[inline]
-    fn get_group(&self) -> Arc<str> { Arc::clone(&self.group) }
+    fn get_group(&self) -> Arc<str> {
+        Arc::clone(&self.group)
+    }
 
     #[inline]
     fn get_name(&self) -> Arc<str> {
@@ -270,11 +286,17 @@ impl PlaylistEntry for M3uPlaylistItem {
     }
 
     #[inline]
-    fn get_resolved_info_document(&self, _options: &XtreamMappingOptions) -> Option<XtreamInfoDocument> { None }
+    fn get_resolved_info_document(&self, _options: &XtreamMappingOptions) -> Option<XtreamInfoDocument> {
+        None
+    }
     #[inline]
-    fn get_additional_properties(&self) -> Option<&StreamProperties> { self.additional_properties.as_ref() }
+    fn get_additional_properties(&self) -> Option<&StreamProperties> {
+        self.additional_properties.as_ref()
+    }
     #[inline]
-    fn get_additional_properties_mut(&mut self) -> Option<&mut StreamProperties> { self.additional_properties.as_mut() }
+    fn get_additional_properties_mut(&mut self) -> Option<&mut StreamProperties> {
+        self.additional_properties.as_mut()
+    }
 }
 
 impl crate::model::FieldGet for M3uPlaylistItem {
@@ -321,5 +343,7 @@ impl crate::model::FieldGetAccessor for M3uPlaylistItem {
 }
 
 impl From<M3uPlaylistItem> for CommonPlaylistItem {
-    fn from(item: M3uPlaylistItem) -> Self { item.to_common() }
+    fn from(item: M3uPlaylistItem) -> Self {
+        item.to_common()
+    }
 }

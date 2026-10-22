@@ -225,7 +225,9 @@ pub(in crate::api::api_utils::tests) fn load_test_rss_kib() -> Option<u64> {
 }
 
 #[cfg(not(target_os = "linux"))]
-pub(in crate::api::api_utils::tests) fn load_test_rss_kib() -> Option<u64> { None }
+pub(in crate::api::api_utils::tests) fn load_test_rss_kib() -> Option<u64> {
+    None
+}
 
 pub(in crate::api::api_utils::tests) fn load_test_user(username: &str) -> ProxyUserCredentials {
     let mut user = ProxyUserCredentials::default();

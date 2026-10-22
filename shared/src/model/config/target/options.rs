@@ -32,7 +32,9 @@ where
 }
 
 impl ConfigTargetShareLiveStreams {
-    pub fn is_empty(&self) -> bool { !self.hls && !self.mpeg_ts }
+    pub fn is_empty(&self) -> bool {
+        !self.hls && !self.mpeg_ts
+    }
 }
 
 /// Controls optional canonicalization of EPG data emitted for a target.
@@ -138,19 +140,35 @@ impl ConfigTargetOptions {
             && !self.preserve_stream_ids
     }
 
-    pub const fn lowercase_epg_ids(&self) -> bool { self.epg_output.lowercase_ids }
+    pub const fn lowercase_epg_ids(&self) -> bool {
+        self.epg_output.lowercase_ids
+    }
 
-    pub const fn lowercase_xmltv_display_names(&self) -> bool { self.epg_output.lowercase_xmltv_display_names }
+    pub const fn lowercase_xmltv_display_names(&self) -> bool {
+        self.epg_output.lowercase_xmltv_display_names
+    }
 
-    pub const fn adopt_guide_epg_id_case(&self) -> bool { self.epg_output.adopt_guide_id_case }
+    pub const fn adopt_guide_epg_id_case(&self) -> bool {
+        self.epg_output.adopt_guide_id_case
+    }
 
-    pub const fn clear_invalid_epg_ids(&self) -> bool { self.epg_output.clear_invalid_ids }
+    pub const fn clear_invalid_epg_ids(&self) -> bool {
+        self.epg_output.clear_invalid_ids
+    }
 
-    pub fn share_live_hls_enabled(&self) -> bool { self.share_live_streams.hls }
+    pub fn share_live_hls_enabled(&self) -> bool {
+        self.share_live_streams.hls
+    }
 
-    pub fn share_live_mpeg_ts_enabled(&self) -> bool { self.share_live_streams.mpeg_ts }
+    pub fn share_live_mpeg_ts_enabled(&self) -> bool {
+        self.share_live_streams.mpeg_ts
+    }
 
-    pub const fn preserve_stream_ids(&self) -> bool { self.preserve_stream_ids }
+    pub const fn preserve_stream_ids(&self) -> bool {
+        self.preserve_stream_ids
+    }
 
-    pub fn share_live_any_enabled(&self) -> bool { self.share_live_hls_enabled() || self.share_live_mpeg_ts_enabled() }
+    pub fn share_live_any_enabled(&self) -> bool {
+        self.share_live_hls_enabled() || self.share_live_mpeg_ts_enabled()
+    }
 }

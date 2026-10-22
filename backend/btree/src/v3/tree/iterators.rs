@@ -185,11 +185,15 @@ where
 {
     type Item = io::Result<(K, V)>;
 
-    fn next(&mut self) -> Option<Self::Item> { cursor_next(self.query, &mut self.state) }
+    fn next(&mut self) -> Option<Self::Item> {
+        cursor_next(self.query, &mut self.state)
+    }
 }
 
 impl<K, V> BPlusTreeDiskIteratorOwned<K, V> {
-    pub(super) fn new(query: BPlusTreeQuery<K, V>) -> Self { Self { query, state: CursorState::new(Bound::Unbounded) } }
+    pub(super) fn new(query: BPlusTreeQuery<K, V>) -> Self {
+        Self { query, state: CursorState::new(Bound::Unbounded) }
+    }
 }
 
 impl<K, V> BPlusTreeDiskIteratorOwned<K, V>
@@ -216,7 +220,9 @@ where
 {
     type Item = io::Result<(K, V)>;
 
-    fn next(&mut self) -> Option<Self::Item> { cursor_next(&mut self.query, &mut self.state) }
+    fn next(&mut self) -> Option<Self::Item> {
+        cursor_next(&mut self.query, &mut self.state)
+    }
 }
 
 fn within_start<K: Ord>(key: &K, bound: &Bound<K>) -> bool {

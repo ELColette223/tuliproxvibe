@@ -13,14 +13,22 @@ use std::{
 use tokio::sync::{mpsc, Notify};
 use tuliprox_core::model::SharedSubscriberId;
 
-pub(super) fn notify_capacity(capacity_notify: &Notify) { capacity_notify.notify_waiters(); }
+pub(super) fn notify_capacity(capacity_notify: &Notify) {
+    capacity_notify.notify_waiters();
+}
 
 impl SharedCleanupCapability {
-    pub(crate) fn new(subscriber_id: SharedSubscriberId) -> Self { Self { subscriber_id } }
+    pub(crate) fn new(subscriber_id: SharedSubscriberId) -> Self {
+        Self { subscriber_id }
+    }
 
-    pub fn stream_uid(&self) -> u32 { self.subscriber_id.stream_uid() }
+    pub fn stream_uid(&self) -> u32 {
+        self.subscriber_id.stream_uid()
+    }
 
-    pub fn subscriber_id(&self) -> SharedSubscriberId { self.subscriber_id }
+    pub fn subscriber_id(&self) -> SharedSubscriberId {
+        self.subscriber_id
+    }
 }
 
 impl<T> BackpressureSender<T>
@@ -141,7 +149,9 @@ where
         state.draining = false;
     }
 
-    pub(super) fn dropped_count(&self) -> u64 { self.dropped_events.load(Ordering::Relaxed) }
+    pub(super) fn dropped_count(&self) -> u64 {
+        self.dropped_events.load(Ordering::Relaxed)
+    }
 }
 
 pub(super) fn lock_backpressure_state<T>(state: &Mutex<BackpressureState<T>>) -> MutexGuard<'_, BackpressureState<T>> {
@@ -171,7 +181,9 @@ impl SocketActivityTracker {
         pending.drain().collect()
     }
 
-    pub(super) async fn notified(&self) { self.notify.notified().await; }
+    pub(super) async fn notified(&self) {
+        self.notify.notified().await;
+    }
 }
 
 fn lock_socket_activity_pending(

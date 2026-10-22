@@ -18,7 +18,9 @@ pub(in crate::api) enum HlsRequestStage<'a> {
 }
 
 impl HlsRequestStage<'_> {
-    pub(in crate::api) const fn normalizes_url(self) -> bool { !matches!(self, Self::Variant { .. }) }
+    pub(in crate::api) const fn normalizes_url(self) -> bool {
+        !matches!(self, Self::Variant { .. })
+    }
 }
 
 /// Appends the provider session cookie stored on the user session to a manifest request.
@@ -142,7 +144,9 @@ pub(super) fn hls_session_hint_matches_requester(
     virtual_id: u32,
     hint: &str,
 ) -> bool {
-    fn without_client_ip(identity: &str) -> Option<&str> { identity.split_once('|').map(|(_, rest)| rest) }
+    fn without_client_ip(identity: &str) -> Option<&str> {
+        identity.split_once('|').map(|(_, rest)| rest)
+    }
 
     let current =
         create_playback_session_fingerprint(fingerprint, username, virtual_id, PlaylistItemType::LiveHls, None);

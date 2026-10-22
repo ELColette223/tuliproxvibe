@@ -68,7 +68,9 @@ pub struct StagedFilter {
 }
 
 impl From<Filter> for StagedFilter {
-    fn from(processing: Filter) -> Self { Self { processing: Some(processing), ..Self::default() } }
+    fn from(processing: Filter) -> Self {
+        Self { processing: Some(processing), ..Self::default() }
+    }
 }
 
 #[derive(Debug)]
@@ -114,7 +116,9 @@ impl ProcessTargets {
         !self.enabled || self.targets.is_empty() || self.targets.contains(&tid)
     }
 
-    pub fn has_input(&self, tid: u16) -> bool { !self.enabled || self.inputs.is_empty() || self.inputs.contains(&tid) }
+    pub fn has_input(&self, tid: u16) -> bool {
+        !self.enabled || self.inputs.is_empty() || self.inputs.contains(&tid)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -280,7 +284,9 @@ impl From<&TargetOutput> for TargetType {
 impl TargetOutput {
     /// Output format of this configured target output.
     #[must_use]
-    pub fn target_type(&self) -> TargetType { TargetType::from(self) }
+    pub fn target_type(&self) -> TargetType {
+        TargetType::from(self)
+    }
 
     /// The optional playlist filter configured for this output, co-located so
     /// the per-format filter access lives in one place rather than being
@@ -396,7 +402,9 @@ impl ConfigTarget {
         })
     }
 
-    pub fn has_output(&self, tt: TargetType) -> bool { self.output.iter().any(|o| TargetType::from(o) == tt) }
+    pub fn has_output(&self, tt: TargetType) -> bool {
+        self.output.iter().any(|o| TargetType::from(o) == tt)
+    }
 
     pub fn is_force_redirect(&self, item_type: PlaylistItemType) -> bool {
         if item_type.is_local() {

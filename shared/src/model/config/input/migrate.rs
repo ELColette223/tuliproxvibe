@@ -328,10 +328,7 @@ impl ConfigInputDto {
 
         let Some(accounts) = self.accounts.as_mut() else { return Ok(start_index) };
         if accounts.is_empty() {
-            return Err(TuliproxError::ConfigInput(format!(
-                "input '{}' declares an empty 'accounts' list",
-                self.name
-            )));
+            return Err(TuliproxError::ConfigInput(format!("input '{}' declares an empty 'accounts' list", self.name)));
         }
 
         let input_type = self.input_type;

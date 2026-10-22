@@ -133,14 +133,18 @@ pub fn route(owner: &RecordingOwner, visibility: RecordingVisibility, is_admin_r
 
 /// The kind to lifecycle-event mapping.
 #[cfg(test)]
-pub fn kind_for_event(event: LifecycleEvent) -> &'static str { event.wire_name() }
+pub fn kind_for_event(event: LifecycleEvent) -> &'static str {
+    event.wire_name()
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use shared::model::UserId;
 
-    fn user(name: &str) -> UserId { UserId::from(name) }
+    fn user(name: &str) -> UserId {
+        UserId::from(name)
+    }
 
     #[inline]
     fn make_meta(visibility: RecordingVisibility, owner: RecordingOwner) -> RecordingMetadata {

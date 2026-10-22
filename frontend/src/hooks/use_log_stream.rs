@@ -215,7 +215,9 @@ pub struct UseLogStreamOptions {
 }
 
 impl Default for UseLogStreamOptions {
-    fn default() -> Self { Self { active: true, max_lines: DEFAULT_MAX_LOG_LINES } }
+    fn default() -> Self {
+        Self { active: true, max_lines: DEFAULT_MAX_LOG_LINES }
+    }
 }
 
 #[derive(Clone)]
@@ -363,10 +365,14 @@ mod browser_tests {
     }
 
     impl Drop for SavedToken {
-        fn drop(&mut self) { set_token(self.0.as_deref()); }
+        fn drop(&mut self) {
+            set_token(self.0.as_deref());
+        }
     }
 
-    fn stream(events: Rc<EventService>) -> Rc<LogStream> { LogStream::new(Callback::noop(), Callback::noop(), events) }
+    fn stream(events: Rc<EventService>) -> Rc<LogStream> {
+        LogStream::new(Callback::noop(), Callback::noop(), events)
+    }
 
     fn socket(stream: &LogStream) -> Result<WebSocket, JsValue> {
         stream

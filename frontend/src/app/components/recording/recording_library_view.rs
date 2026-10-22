@@ -142,7 +142,9 @@ fn render_progress(task: &RecordingTaskDto) -> Html {
     }
 }
 
-fn format_start(task: &RecordingTaskDto) -> String { task.scheduled_start.and_then(unix_ts_to_str).unwrap_or_default() }
+fn format_start(task: &RecordingTaskDto) -> String {
+    task.scheduled_start.and_then(unix_ts_to_str).unwrap_or_default()
+}
 
 fn format_duration(task: &RecordingTaskDto) -> String {
     task.scheduled_duration_secs()
@@ -287,7 +289,9 @@ fn format_quota_pool(used_bytes: u64, limit_bytes: Option<u64>) -> String {
 /// Revisions advance for queue changes, while in-memory byte progress keeps
 /// the same revision. WebSocket frames arrive in order on one connection, so
 /// a repeated revision can carry newer progress. Older revisions are stale.
-fn should_apply_snapshot(seen: Option<u64>, incoming: u64) -> bool { seen.is_none_or(|last| incoming >= last) }
+fn should_apply_snapshot(seen: Option<u64>, incoming: u64) -> bool {
+    seen.is_none_or(|last| incoming >= last)
+}
 
 pub const fn should_request_recording_snapshot(active: bool, recording_enabled: bool, has_loaded: bool) -> bool {
     active && recording_enabled && !has_loaded

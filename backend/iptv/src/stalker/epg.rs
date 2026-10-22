@@ -282,7 +282,9 @@ struct EpgCancellationGuard {
 }
 
 impl EpgCancellationGuard {
-    fn disarm(&mut self) { self.armed = false; }
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
 }
 
 impl Drop for EpgCancellationGuard {
@@ -494,7 +496,9 @@ struct LeadingJsonReader<R> {
 }
 
 impl<R> LeadingJsonReader<R> {
-    fn new(inner: R) -> Self { Self { inner, started: false, saw_non_ws: false } }
+    fn new(inner: R) -> Self {
+        Self { inner, started: false, saw_non_ws: false }
+    }
 }
 
 impl<R: Read> Read for LeadingJsonReader<R> {

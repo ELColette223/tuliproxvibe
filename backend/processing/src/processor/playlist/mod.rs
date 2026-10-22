@@ -106,7 +106,9 @@ where
     F: Fn() -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send,
 {
-    fn run(&self) -> impl Future<Output = ()> + Send { self() }
+    fn run(&self) -> impl Future<Output = ()> + Send {
+        self()
+    }
 }
 
 /// The bootstrap type parameter of a run that has no bootstrap.

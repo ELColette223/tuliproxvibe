@@ -47,7 +47,9 @@ impl EventSink for NoopSink {
 }
 
 impl<T: EventSink + ?Sized> EventSink for Arc<T> {
-    fn emit(&self, event: EventMessage) { (**self).emit(event); }
+    fn emit(&self, event: EventMessage) {
+        (**self).emit(event);
+    }
     fn observe_provider_account(
         &self,
         name: Arc<str>,
@@ -60,7 +62,9 @@ impl<T: EventSink + ?Sized> EventSink for Arc<T> {
 }
 
 impl<T: EventSink> EventSink for &T {
-    fn emit(&self, event: EventMessage) { (**self).emit(event); }
+    fn emit(&self, event: EventMessage) {
+        (**self).emit(event);
+    }
     fn observe_provider_account(
         &self,
         name: Arc<str>,

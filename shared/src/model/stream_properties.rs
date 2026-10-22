@@ -195,9 +195,13 @@ impl StreamProperties {
         }
     }
 
-    pub fn get_season(&self) -> Option<u32> { self.episode_value(|episode| episode.season) }
+    pub fn get_season(&self) -> Option<u32> {
+        self.episode_value(|episode| episode.season)
+    }
 
-    pub fn get_episode(&self) -> Option<u32> { self.episode_value(|episode| episode.episode) }
+    pub fn get_episode(&self) -> Option<u32> {
+        self.episode_value(|episode| episode.episode)
+    }
 
     pub fn get_last_modified(&self) -> Option<u64> {
         match self {

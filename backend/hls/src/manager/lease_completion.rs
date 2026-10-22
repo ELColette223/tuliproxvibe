@@ -78,7 +78,9 @@ impl HlsLeaseCompletion {
     }
 
     #[cfg(test)]
-    pub(super) fn pending_count(&self) -> usize { self.jobs.lock_unpoisoned().len() }
+    pub(super) fn pending_count(&self) -> usize {
+        self.jobs.lock_unpoisoned().len()
+    }
 }
 
 impl HlsProxyManager {
@@ -88,7 +90,9 @@ impl HlsProxyManager {
     }
 
     #[cfg(test)]
-    pub(crate) fn pending_lease_completions_for_test(&self) -> usize { self.lease_completion.pending_count() }
+    pub(crate) fn pending_lease_completions_for_test(&self) -> usize {
+        self.lease_completion.pending_count()
+    }
 }
 
 impl super::HlsLeaseRuntime {

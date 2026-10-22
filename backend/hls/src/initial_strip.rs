@@ -146,9 +146,13 @@ mod tests {
     use tuliprox_core::model::StripConfig;
     use tuliprox_parser::hls::origin_manifest::HlsManifestWindowPolicy;
 
-    fn strip_segments(value: u64) -> StripConfig { StripConfig { mode: HlsStripMode::Segments, value } }
+    fn strip_segments(value: u64) -> StripConfig {
+        StripConfig { mode: HlsStripMode::Segments, value }
+    }
 
-    fn strip_seconds(value: u64) -> StripConfig { StripConfig { mode: HlsStripMode::Seconds, value } }
+    fn strip_seconds(value: u64) -> StripConfig {
+        StripConfig { mode: HlsStripMode::Seconds, value }
+    }
 
     fn manifest_with_segments(count: usize) -> String {
         let mut body = "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:100\n".to_string();

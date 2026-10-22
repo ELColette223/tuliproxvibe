@@ -46,7 +46,9 @@ pub struct ProtectedSet {
 
 impl ProtectedSet {
     #[cfg(test)]
-    pub fn from_session(session: &HlsSession) -> Self { Self::from_session_for_capacity(session, None) }
+    pub fn from_session(session: &HlsSession) -> Self {
+        Self::from_session_for_capacity(session, None)
+    }
 
     pub(super) fn from_session_for_capacity(session: &HlsSession, release_through: Option<u64>) -> Self {
         let mut protected = Self::default();

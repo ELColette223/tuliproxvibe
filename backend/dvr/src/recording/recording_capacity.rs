@@ -86,10 +86,14 @@ pub mod stub {
         }
 
         /// A provider with room.
-        pub fn with_room() -> Arc<Self> { Self::with_capacity(0, 4) }
+        pub fn with_room() -> Arc<Self> {
+            Self::with_capacity(0, 4)
+        }
 
         /// A provider that is full, so every request has to wait.
-        pub fn full() -> Arc<Self> { Self::with_capacity(4, 4) }
+        pub fn full() -> Arc<Self> {
+            Self::with_capacity(4, 4)
+        }
 
         /// Whether the reported capacities leave anything to hand out. Kept
         /// consistent with what `capacities_for_input` says, so the stub
@@ -98,9 +102,13 @@ pub mod stub {
             self.capacities.lock().expect("capacities").iter().any(|(_, in_use, limit)| *limit == 0 || in_use < limit)
         }
 
-        pub fn acquire_count(&self) -> usize { self.acquires.load(Ordering::SeqCst) }
+        pub fn acquire_count(&self) -> usize {
+            self.acquires.load(Ordering::SeqCst)
+        }
 
-        pub fn release_count(&self) -> usize { self.releases.load(Ordering::SeqCst) }
+        pub fn release_count(&self) -> usize {
+            self.releases.load(Ordering::SeqCst)
+        }
 
         /// Marks an input as in maintenance (or not) for the next acquire decision.
         pub fn set_maintenance(&self, input_name: &str, on: bool) {
@@ -130,7 +138,9 @@ pub mod stub {
             })
         }
 
-        fn capacity_changed(&self) -> Arc<Notify> { Arc::clone(&self.notify) }
+        fn capacity_changed(&self) -> Arc<Notify> {
+            Arc::clone(&self.notify)
+        }
 
         fn is_input_in_maintenance(&self, input_name: &str) -> bool {
             self.maintenance

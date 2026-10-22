@@ -90,7 +90,9 @@ impl AuthRejection {
 }
 
 impl std::fmt::Display for AuthRejection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(self.message()) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
 }
 
 impl IntoResponse for AuthRejection {

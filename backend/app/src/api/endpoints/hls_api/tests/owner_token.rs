@@ -25,11 +25,15 @@ struct RecordingOrigin {
 }
 
 impl Drop for RecordingOrigin {
-    fn drop(&mut self) { self.task.abort(); }
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 impl RecordingOrigin {
-    fn requests(&self) -> Vec<String> { self.requests.lock().expect("requests lock").clone() }
+    fn requests(&self) -> Vec<String> {
+        self.requests.lock().expect("requests lock").clone()
+    }
 
     fn manifest_requests(&self) -> usize {
         self.requests().iter().filter(|request| request_path(request).contains(".m3u8")).count()
@@ -218,7 +222,9 @@ impl OwnerTokenFixture {
     }
 }
 
-fn token_of(uri: &str) -> &str { uri.rsplit('/').next().expect("uri has a token") }
+fn token_of(uri: &str) -> &str {
+    uri.rsplit('/').next().expect("uri has a token")
+}
 
 async fn body_text(response: Response<Body>) -> String {
     String::from_utf8(response_body(response).await.to_vec()).expect("utf8 body")
@@ -593,7 +599,7 @@ async fn wrapper_seals_the_entry_url_not_the_account_resolved_url() {
         "entry is served by the alias account: {fetched:?}"
     );
     assert_eq!(decoded.url, fixture.entry_url, "sealed URL stays the canonical entry URL");
-    assert_eq!(decoded.origin_provider.as_deref(), Some("owner-token-alias"));
+    assert_eq!(decoded.origin_provider.as_deref(), Some("owner-token-input/alias-user"));
 }
 
 fn enable_user_limits(app_state: &Arc<AppState>, strategies: Vec<shared::model::AdmissionStrategy>) {
@@ -698,8 +704,8 @@ fn with_alias_account(input: &mut ConfigInput) {
         exp_date: None,
         enabled: true,
         stalker: None,
-            ..crate::model::ConfigInputAlias::default()
-        }]);
+        ..crate::model::ConfigInputAlias::default()
+    }]);
 }
 
 fn manifest_fetches_for(fixture: &OwnerTokenFixture, account_path: &str) -> usize {
@@ -721,7 +727,7 @@ async fn recreate_on_another_account_rewrites_every_refresh_to_that_account() {
         Some(&session_token),
         &format!("{}/cdn/alias/child.m3u8", fixture.origin.base_url),
         HlsResourceKind::Manifest(HlsManifestSource::Child),
-        Some("owner-token-alias"),
+        Some("owner-token-input/owner-token-alias"),
     );
 
     // Session and alias binding are lost, and another playback takes the alias's only slot.
@@ -809,7 +815,7 @@ async fn media_token_from_another_account_is_rejected_and_session_account_is_kep
     let device = client("10.0.0.1", 50_231);
     let (_, token, session_token) = wrapped_entry(&fixture, &device).await;
     let own_segment = first_segment_token(&fixture, &device, &token).await;
-    assert_eq!(fixture.decode(&own_segment).origin_provider.as_deref(), Some("owner-token-alias"));
+    assert_eq!(fixture.decode(&own_segment).origin_provider.as_deref(), Some("owner-token-input/alias-user"));
     assert_eq!(fixture.token_request(&device, &own_segment, HeaderMap::new()).await.status(), StatusCode::OK);
 
     let foreign_segment = fixture.seal(
@@ -855,7 +861,9 @@ async fn leaked_relative_path_resolves_the_same_for_kind_and_legacy_tokens() {
     assert_eq!(fetched[0], fetched[1], "four-field and legacy tokens resolve the same origin path");
 }
 
-fn attribute_uri(line: &str) -> Option<&str> { line.split_once("URI=\"")?.1.split_once('"').map(|(uri, _)| uri) }
+fn attribute_uri(line: &str) -> Option<&str> {
+    line.split_once("URI=\"")?.1.split_once('"').map(|(uri, _)| uri)
+}
 
 #[tokio::test]
 async fn catchup_fmp4_master_renditions_maps_and_segments_keep_tokens_and_ranges(
@@ -1009,10 +1017,10 @@ async fn catchup_init_cannot_switch_account_when_manifest_account_is_full() -> R
     assert_eq!(response.status(), StatusCode::OK);
     let (_, uri) = single_variant_master_playlist(response).await;
     let decoded = fixture.decode(token_of(&uri));
-    assert_eq!(decoded.origin_provider.as_deref(), Some("owner-token-alias"));
+    assert_eq!(decoded.origin_provider.as_deref(), Some("owner-token-input/alias-user"));
     let session_token = decoded.session_token.ok_or("session missing")?;
     fixture.app_state.active_provider.terminate_identified_playback_owner(&session_token);
-    let pinned_provider: Arc<str> = Arc::from("owner-token-alias");
+    let pinned_provider: Arc<str> = Arc::from("owner-token-input/alias-user");
     let handle = fixture
         .app_state
         .active_provider
@@ -1049,10 +1057,10 @@ async fn live_ts_range_segment_on_full_account_fails_without_fallback() -> Resul
     assert_eq!(response.status(), StatusCode::OK);
     let (_, uri) = single_variant_master_playlist(response).await;
     let decoded = fixture.decode(token_of(&uri));
-    assert_eq!(decoded.origin_provider.as_deref(), Some("owner-token-alias"));
+    assert_eq!(decoded.origin_provider.as_deref(), Some("owner-token-input/alias-user"));
     let session_token = decoded.session_token.ok_or("session missing")?;
     fixture.app_state.active_provider.terminate_identified_playback_owner(&session_token);
-    let pinned_provider: Arc<str> = Arc::from("owner-token-alias");
+    let pinned_provider: Arc<str> = Arc::from("owner-token-input/alias-user");
     let handle = fixture
         .app_state
         .active_provider

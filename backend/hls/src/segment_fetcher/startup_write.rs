@@ -27,7 +27,9 @@ impl StartupWrite {
         self.observed = Some(Arc::clone(fill));
     }
 
-    pub(super) fn finish(&mut self) { self.armed = false; }
+    pub(super) fn finish(&mut self) {
+        self.armed = false;
+    }
 
     pub(super) async fn abort(&mut self) {
         cleanup(&self.context, &self.snapshot, &self.budget, &self.revision, self.observed.as_ref()).await;

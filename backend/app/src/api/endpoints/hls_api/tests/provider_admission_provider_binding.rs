@@ -110,7 +110,7 @@ async fn hls_account_binding_soft_expiry_retains_session_and_reacquires_on_autho
     .expect("authorized origin work can reacquire a detached binding");
 
     let binding = session.read().await.origin_account_binding.clone().expect("new binding is published atomically");
-    assert_eq!(binding.account_name.as_ref(), "account-a");
+    assert_eq!(binding.account_name.as_ref(), "overlap-input/account-user");
     assert!(matches!(binding.binding_mode, HlsOriginAccountBindingMode::Active));
     assert_eq!(prepared_origin.fetch_url, "http://account.example.com/live/account-user/account-pass/12345.m3u8");
     app_state.connection_manager.release_managed_provider_handle(prepared_origin.preacquired_origin_account_handle);

@@ -9,7 +9,9 @@ use tuliprox_core::utils::{Clock, SystemClock};
 
 /// Unix-epoch seconds according to `clock`.
 #[inline]
-pub fn epoch_secs<C: Clock>(clock: &C) -> u64 { clock.now_ms().get() / 1_000 }
+pub fn epoch_secs<C: Clock>(clock: &C) -> u64 {
+    clock.now_ms().get() / 1_000
+}
 
 /// Unix-epoch seconds according to the system clock.
 ///
@@ -17,4 +19,6 @@ pub fn epoch_secs<C: Clock>(clock: &C) -> u64 { clock.now_ms().get() / 1_000 }
 /// — every expiry rule in this crate does — or holding a `C: Clock`.
 #[inline]
 #[must_use]
-pub fn system_epoch_secs() -> u64 { epoch_secs(&SystemClock) }
+pub fn system_epoch_secs() -> u64 {
+    epoch_secs(&SystemClock)
+}

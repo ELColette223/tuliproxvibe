@@ -73,7 +73,9 @@ impl ChannelMatcher {
         }
     }
 
-    pub(in crate::api) fn is_all(&self) -> bool { matches!(self, Self::All) }
+    pub(in crate::api) fn is_all(&self) -> bool {
+        matches!(self, Self::All)
+    }
 
     pub(in crate::api) fn matches(&self, name: &str) -> bool {
         match self {
@@ -509,9 +511,13 @@ mod tests {
             (status, body)
         }
 
-        fn grid_body(group: &str) -> String { format!(r#"{{"target_id":{TARGET_ID},"group":"{group}"}}"#) }
+        fn grid_body(group: &str) -> String {
+            format!(r#"{{"target_id":{TARGET_ID},"group":"{group}"}}"#)
+        }
 
-        fn groups_body() -> String { format!(r#"{{"target_id":{TARGET_ID}}}"#) }
+        fn groups_body() -> String {
+            format!(r#"{{"target_id":{TARGET_ID}}}"#)
+        }
 
         fn rows(body: &[u8]) -> Vec<(u32, Vec<String>)> {
             let rows: Vec<EpgGridRow> = serde_json::from_slice(body).expect("grid json");

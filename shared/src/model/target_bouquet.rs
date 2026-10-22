@@ -97,7 +97,9 @@ impl TargetBouquetDto {
         Self { mode, groups, selection: None }
     }
 
-    pub fn whitelist(groups: PlaylistClusterBouquetDto) -> Self { Self::new(TargetBouquetMode::Whitelist, groups) }
+    pub fn whitelist(groups: PlaylistClusterBouquetDto) -> Self {
+        Self::new(TargetBouquetMode::Whitelist, groups)
+    }
 
     pub fn with_selection(mut self, mut selection: TargetBouquetSelectionDto) -> Self {
         selection.canonicalize();
@@ -106,7 +108,9 @@ impl TargetBouquetDto {
     }
 
     #[inline]
-    pub fn is_unrestricted(&self) -> bool { self.selection.is_none() && self.groups.is_target_unrestricted() }
+    pub fn is_unrestricted(&self) -> bool {
+        self.selection.is_none() && self.groups.is_target_unrestricted()
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -128,7 +132,9 @@ impl TargetBouquetFileDto {
     }
 
     #[inline]
-    pub fn is_unrestricted(&self) -> bool { self.bouquet.is_unrestricted() }
+    pub fn is_unrestricted(&self) -> bool {
+        self.bouquet.is_unrestricted()
+    }
 
     pub fn canonicalize(&mut self) {
         self.bouquet.groups.canonicalize_for_target();

@@ -79,7 +79,9 @@ fn check_schema_version(claims: &Claims) -> Result<(), CatalogAccessError> {
 }
 
 /// True when the principal has `recording.read`.
-fn has_read_perm(claims: &Claims) -> bool { claims.permissions.contains(Permission::RecordingRead) }
+fn has_read_perm(claims: &Claims) -> bool {
+    claims.permissions.contains(Permission::RecordingRead)
+}
 
 /// Re-validate the relative path and file type at open time.
 /// The caller passes a path-resolver closure so the gate stays
@@ -198,7 +200,9 @@ pub async fn lookup_recording(
 
 /// Build a `CatalogKey` from a relative path. Re-exported so HTTP
 /// handlers can share the dedup-key logic.
-pub fn key_for(relative_path: &str) -> CatalogKey { CatalogKey::from_relative_path(relative_path) }
+pub fn key_for(relative_path: &str) -> CatalogKey {
+    CatalogKey::from_relative_path(relative_path)
+}
 
 #[cfg(test)]
 mod tests {

@@ -240,7 +240,7 @@ async fn forced_series_reopen_uses_free_pool_account_and_updates_session_pin() {
         .get_and_update_user_session(&user.username, &session.token)
         .await
         .expect("reopened session is persisted");
-    assert_eq!(updated.provider.as_ref(), "provider_2");
+    assert_eq!(updated.provider.as_ref(), "provider_1/user-b");
     assert!(updated.stream_url.contains("/series/user-b/pass-b/1.mkv"));
 
     assert!(tokio::time::timeout(std::time::Duration::from_millis(100), &mut task_a).await.is_err());

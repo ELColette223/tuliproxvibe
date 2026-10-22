@@ -32,7 +32,9 @@ pub struct SegmentRevisionKey {
 }
 
 impl HlsCacheObjectKey for SegmentRevisionKey {
-    fn proxy_session_id(&self) -> &ProxySessionId { &self.session }
+    fn proxy_session_id(&self) -> &ProxySessionId {
+        &self.session
+    }
     fn session_path_component(&self) -> String {
         SegmentCacheKey::new(self.session.clone(), self.proxy_seq, "ts").session_path_component()
     }
@@ -86,8 +88,12 @@ impl fmt::Debug for SegmentRevision {
 }
 
 impl SegmentRevision {
-    pub fn id(&self) -> SegmentRevisionId { self.key.id }
-    pub(crate) fn was_exposed(&self) -> bool { self.exposed.load(Ordering::Acquire) }
+    pub fn id(&self) -> SegmentRevisionId {
+        self.key.id
+    }
+    pub(crate) fn was_exposed(&self) -> bool {
+        self.exposed.load(Ordering::Acquire)
+    }
 
     pub(crate) fn bind_origin(&self, session: &crate::HlsSession) {
         if let Some(entry) = session.segments.get(&self.key.proxy_seq) {
@@ -114,13 +120,17 @@ impl SegmentRevision {
             })
     }
     #[cfg(test)]
-    pub(crate) fn pin_count(&self) -> usize { self.pins.load(Ordering::Acquire) }
+    pub(crate) fn pin_count(&self) -> usize {
+        self.pins.load(Ordering::Acquire)
+    }
 
     /// Finished or failed, and held by nothing but its session's startup map.
     pub(crate) fn is_idle_session_owned(&self) -> bool {
         self.pins.load(Ordering::Acquire) == 1 && !matches!(*self.state.borrow(), SegmentRevisionState::Pending)
     }
-    pub fn subscribe(&self) -> watch::Receiver<SegmentRevisionState> { self.state.subscribe() }
+    pub fn subscribe(&self) -> watch::Receiver<SegmentRevisionState> {
+        self.state.subscribe()
+    }
     pub fn complete(&self, metadata: CachedSegmentMetadata) -> bool {
         self.state.send_if_modified(|state| {
             if !matches!(state, SegmentRevisionState::Pending) {
@@ -130,7 +140,9 @@ impl SegmentRevision {
             true
         })
     }
-    pub(crate) fn prefix_changed(&self) { self.state.send_modify(|_| {}); }
+    pub(crate) fn prefix_changed(&self) {
+        self.state.send_modify(|_| {});
+    }
     fn is_exposable(&self, state: &SegmentRevisionState) -> bool {
         match state {
             SegmentRevisionState::Complete(_) => true,
@@ -142,7 +154,9 @@ impl SegmentRevision {
     }
 
     /// Side-effect-free precheck for [`Self::expose`].
-    pub(crate) fn can_expose(&self) -> bool { self.is_exposable(&self.state.borrow()) }
+    pub(crate) fn can_expose(&self) -> bool {
+        self.is_exposable(&self.state.borrow())
+    }
 
     pub(crate) fn expose(&self) -> bool {
         let mut exposed = false;
@@ -189,8 +203,12 @@ impl SegmentRevision {
         });
         self.replay.lock_unpoisoned().take();
     }
-    pub fn state(&self) -> SegmentRevisionState { self.state.borrow().clone() }
-    pub fn is_complete(&self) -> bool { matches!(*self.state.borrow(), SegmentRevisionState::Complete(_)) }
+    pub fn state(&self) -> SegmentRevisionState {
+        self.state.borrow().clone()
+    }
+    pub fn is_complete(&self) -> bool {
+        matches!(*self.state.borrow(), SegmentRevisionState::Complete(_))
+    }
 
     /// Whether this revision may open the startup window as its head.
     pub fn is_startup_head_ready(&self, mode: HlsStartupMode) -> bool {
@@ -242,7 +260,9 @@ pub struct SegmentRevisionGuard {
 }
 
 impl SegmentRevisionGuard {
-    pub fn revision(&self) -> &SegmentRevision { &self.revision }
+    pub fn revision(&self) -> &SegmentRevision {
+        &self.revision
+    }
 }
 impl Clone for SegmentRevisionGuard {
     fn clone(&self) -> Self {
@@ -260,7 +280,9 @@ impl Drop for SegmentRevisionGuard {
     }
 }
 impl PartialEq for SegmentRevisionGuard {
-    fn eq(&self, other: &Self) -> bool { self.revision.id() == other.revision.id() }
+    fn eq(&self, other: &Self) -> bool {
+        self.revision.id() == other.revision.id()
+    }
 }
 impl Eq for SegmentRevisionGuard {}
 
@@ -278,7 +300,9 @@ impl Default for SegmentRevisionStore {
 }
 
 impl SegmentRevisionStore {
-    pub(crate) fn has_created_revisions(&self) -> bool { self.next.load(Ordering::Acquire) > 0 }
+    pub(crate) fn has_created_revisions(&self) -> bool {
+        self.next.load(Ordering::Acquire) > 0
+    }
     pub fn create(
         &self,
         session: ProxySessionId,
@@ -319,7 +343,9 @@ impl SegmentRevisionStore {
         Ok(())
     }
 
-    pub fn retire_unpinned(&self) -> io::Result<Vec<Arc<SegmentRevision>>> { self.retire_unpinned_limit(128) }
+    pub fn retire_unpinned(&self) -> io::Result<Vec<Arc<SegmentRevision>>> {
+        self.retire_unpinned_limit(128)
+    }
 
     pub(crate) fn retire_unpinned_limit(&self, limit: usize) -> io::Result<Vec<Arc<SegmentRevision>>> {
         let mut entries = self.entries.lock().map_err(|_| io::Error::other("revision registry poisoned"))?;

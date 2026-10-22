@@ -108,7 +108,9 @@ pub enum HlsSwitchSegmentReadiness {
 }
 
 impl HlsSwitchSegmentReadiness {
-    pub(super) const fn can_be_staged(self) -> bool { matches!(self, Self::RequiresStaging) }
+    pub(super) const fn can_be_staged(self) -> bool {
+        matches!(self, Self::RequiresStaging)
+    }
 }
 
 /// Manifest-level eligibility for the Critical single-candidate path. Track
@@ -149,7 +151,9 @@ pub enum HlsResourceTimelineEvidence {
 }
 
 impl HlsResourceTimelineEvidence {
-    pub(super) const fn permits_acceptance(self) -> bool { matches!(self, Self::Eligible) }
+    pub(super) const fn permits_acceptance(self) -> bool {
+        matches!(self, Self::Eligible)
+    }
 }
 
 impl HlsEmergencyAcceptanceEvidence {
@@ -230,7 +234,9 @@ pub enum HlsReducedRetryLandscapeChange {
 }
 
 impl HlsReducedRetryLandscapeChange {
-    pub const fn requires_full_requalification(self) -> bool { !matches!(self, Self::Unchanged) }
+    pub const fn requires_full_requalification(self) -> bool {
+        !matches!(self, Self::Unchanged)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

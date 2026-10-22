@@ -56,7 +56,9 @@ crate::app::components::define_table_columns! {
 }
 
 impl UsersColumn {
-    const fn index(self) -> usize { self as usize }
+    const fn index(self) -> usize {
+        self as usize
+    }
 }
 
 fn get_cell_value(user: &TargetUser, col: usize) -> CellValue<'_> {

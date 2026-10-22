@@ -20,7 +20,9 @@ pub fn should_use_manual_redirects_for_proxy(proxy: Option<&ProxyConfig>) -> boo
     proxy.is_some_and(|proxy| should_use_manual_redirect_for_proxy(proxy.url.as_str())) || proxy_env_present()
 }
 
-pub fn proxy_env_present() -> bool { should_use_manual_redirects_for_env_vars(std::env::vars_os()) }
+pub fn proxy_env_present() -> bool {
+    should_use_manual_redirects_for_env_vars(std::env::vars_os())
+}
 
 pub fn parse_proxy_url_with_http_fallback(proxy_url: &str) -> Option<Url> {
     let trimmed = proxy_url.trim();

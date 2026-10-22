@@ -10,7 +10,9 @@ pub(super) enum HlsOriginEntryUrl {
 }
 
 impl HlsOriginEntryUrl {
-    pub(super) fn direct_http(url: impl Into<String>) -> Self { Self::DirectHttp { url: url.into() } }
+    pub(super) fn direct_http(url: impl Into<String>) -> Self {
+        Self::DirectHttp { url: url.into() }
+    }
 
     pub(super) fn provider_failover(url: impl Into<String>, provider: Arc<ConfigProvider>) -> Self {
         Self::ProviderFailover { url: url.into(), provider }
@@ -106,11 +108,17 @@ impl HlsEntryStreamIdentity {
         Some(identity)
     }
 
-    pub(in crate::api) const fn virtual_id(&self) -> u32 { self.virtual_id }
+    pub(in crate::api) const fn virtual_id(&self) -> u32 {
+        self.virtual_id
+    }
 
-    pub(super) fn stream_ref(&self) -> &str { self.input_stream_id.as_ref() }
+    pub(super) fn stream_ref(&self) -> &str {
+        self.input_stream_id.as_ref()
+    }
 
-    pub(super) fn upstream_user_agent(&self) -> Option<&str> { self.upstream_user_agent.as_deref() }
+    pub(super) fn upstream_user_agent(&self) -> Option<&str> {
+        self.upstream_user_agent.as_deref()
+    }
 }
 
 /// Immutable input identity plus bitrate metadata available at the virtual HLS entry.
@@ -136,13 +144,21 @@ impl HlsEntryStreamContext {
         Some(Self { identity, known_bitrate_bps })
     }
 
-    pub(in crate::api) const fn virtual_id(&self) -> u32 { self.identity.virtual_id() }
+    pub(in crate::api) const fn virtual_id(&self) -> u32 {
+        self.identity.virtual_id()
+    }
 
-    pub(in crate::api) fn stream_ref(&self) -> &str { self.identity.stream_ref() }
+    pub(in crate::api) fn stream_ref(&self) -> &str {
+        self.identity.stream_ref()
+    }
 
-    pub(in crate::api) const fn known_bitrate_bps(&self) -> Option<u32> { self.known_bitrate_bps }
+    pub(in crate::api) const fn known_bitrate_bps(&self) -> Option<u32> {
+        self.known_bitrate_bps
+    }
 
-    pub(in crate::api) fn identity(&self) -> &HlsEntryStreamIdentity { &self.identity }
+    pub(in crate::api) fn identity(&self) -> &HlsEntryStreamIdentity {
+        &self.identity
+    }
 }
 
 /// Resolves the configured input together with both identities of one target entry.
@@ -494,27 +510,47 @@ trait HlsOriginReservationCandidate {
 }
 
 impl HlsOriginReservationCandidate for HlsAccountOverlapCandidate {
-    fn account_name(&self) -> &Arc<str> { &self.account_name }
+    fn account_name(&self) -> &Arc<str> {
+        &self.account_name
+    }
 
-    fn session_owner(&self) -> &str { &self.session_owner }
+    fn session_owner(&self) -> &str {
+        &self.session_owner
+    }
 
-    fn reservation_ttl_secs(&self) -> u64 { self.reservation_ttl_secs }
+    fn reservation_ttl_secs(&self) -> u64 {
+        self.reservation_ttl_secs
+    }
 
-    fn proxy_session_id(&self) -> &ProxySessionId { &self.proxy_session_id }
+    fn proxy_session_id(&self) -> &ProxySessionId {
+        &self.proxy_session_id
+    }
 
-    fn cleared_binding_tag(&self) -> Option<ProviderBindingTag> { self.provider_binding_tag }
+    fn cleared_binding_tag(&self) -> Option<ProviderBindingTag> {
+        self.provider_binding_tag
+    }
 }
 
 impl HlsOriginReservationCandidate for HlsOriginPolicyPreemptCandidate {
-    fn account_name(&self) -> &Arc<str> { &self.account_name }
+    fn account_name(&self) -> &Arc<str> {
+        &self.account_name
+    }
 
-    fn session_owner(&self) -> &str { &self.session_owner }
+    fn session_owner(&self) -> &str {
+        &self.session_owner
+    }
 
-    fn reservation_ttl_secs(&self) -> u64 { self.reservation_ttl_secs }
+    fn reservation_ttl_secs(&self) -> u64 {
+        self.reservation_ttl_secs
+    }
 
-    fn proxy_session_id(&self) -> &ProxySessionId { &self.proxy_session_id }
+    fn proxy_session_id(&self) -> &ProxySessionId {
+        &self.proxy_session_id
+    }
 
-    fn cleared_binding_tag(&self) -> Option<ProviderBindingTag> { self.provider_binding_tag }
+    fn cleared_binding_tag(&self) -> Option<ProviderBindingTag> {
+        self.provider_binding_tag
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

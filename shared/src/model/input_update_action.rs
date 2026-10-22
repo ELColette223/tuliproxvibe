@@ -56,7 +56,9 @@ impl InputUpdateCapabilities {
     }
 
     #[must_use]
-    pub fn supports(self, policy: InputRefreshPolicy) -> bool { self.policies().contains(&policy) }
+    pub fn supports(self, policy: InputRefreshPolicy) -> bool {
+        self.policies().contains(&policy)
+    }
 
     #[must_use]
     pub fn supports_action(self, action: InputUpdateAction) -> bool {
@@ -67,7 +69,9 @@ impl InputUpdateCapabilities {
     }
 
     #[must_use]
-    pub const fn rebuilds_targets(self) -> bool { matches!(self, Self::Manual { .. } | Self::Rescan) }
+    pub const fn rebuilds_targets(self) -> bool {
+        matches!(self, Self::Manual { .. } | Self::Rescan)
+    }
 }
 
 #[cfg(test)]

@@ -47,10 +47,14 @@ pub struct CollectEpgSink {
 
 impl CollectEpgSink {
     #[must_use]
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     #[must_use]
-    pub fn into_records(self) -> Vec<EpgProgramRecord> { self.records }
+    pub fn into_records(self) -> Vec<EpgProgramRecord> {
+        self.records
+    }
 }
 
 impl EpgRecordSink for CollectEpgSink {
@@ -69,10 +73,14 @@ pub struct CountingEpgSink {
 
 impl CountingEpgSink {
     #[must_use]
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     #[must_use]
-    pub fn count(&self) -> u64 { self.count }
+    pub fn count(&self) -> u64 {
+        self.count
+    }
 }
 
 impl EpgRecordSink for CountingEpgSink {
@@ -129,7 +137,9 @@ pub struct EpgFetchRequest<'a> {
 
 impl<'a> EpgFetchRequest<'a> {
     #[must_use]
-    pub fn new(input: &'a ConfigInput) -> Self { Self { input, period_hours: 24, batch_size: 512 } }
+    pub fn new(input: &'a ConfigInput) -> Self {
+        Self { input, period_hours: 24, batch_size: 512 }
+    }
 
     #[must_use]
     pub fn period_hours(mut self, hours: u32) -> Self {
@@ -173,7 +183,9 @@ impl<'a, Tr: StalkerTransport, C: Clock> StalkerEpgProvider<'a, Tr, C> {
 impl<Tr: StalkerTransport, C: Clock> EpgProvider for StalkerEpgProvider<'_, Tr, C> {
     type Guide = ();
 
-    fn name(&self) -> &'static str { "stalker" }
+    fn name(&self) -> &'static str {
+        "stalker"
+    }
 
     async fn fetch(
         &self,

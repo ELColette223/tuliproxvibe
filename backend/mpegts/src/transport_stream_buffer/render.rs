@@ -162,10 +162,14 @@ impl TransportStreamBuffer {
         Some(kbps as usize)
     }
 
-    pub fn register_waker(&self, waker: &Waker) { self.waker.register(waker); }
+    pub fn register_waker(&self, waker: &Waker) {
+        self.waker.register(waker);
+    }
 
     /// Sets the timestamp offset used when rewriting PTS/DTS/PCR values.
-    pub fn set_timestamp_offset(&mut self, offset: u64) { self.timestamp_offset = offset; }
+    pub fn set_timestamp_offset(&mut self, offset: u64) {
+        self.timestamp_offset = offset;
+    }
 
     /// Generates a Discontinuity packet for the given packet/PID state, writing it directly into `out`.
     pub(super) fn generate_discontinuity_packet(

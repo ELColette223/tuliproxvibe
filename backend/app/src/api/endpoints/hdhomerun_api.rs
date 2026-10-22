@@ -577,13 +577,21 @@ trait LineupChannel {
 }
 
 impl LineupChannel for M3uPlaylistItem {
-    fn guide_number(&self) -> &str { self.epg_channel_id.as_deref().unwrap_or(&self.name) }
-    fn virtual_id(&self) -> u32 { self.virtual_id.get() }
+    fn guide_number(&self) -> &str {
+        self.epg_channel_id.as_deref().unwrap_or(&self.name)
+    }
+    fn virtual_id(&self) -> u32 {
+        self.virtual_id.get()
+    }
 }
 
 impl LineupChannel for XtreamPlaylistItem {
-    fn guide_number(&self) -> &str { self.epg_channel_id.as_deref().unwrap_or(&self.name) }
-    fn virtual_id(&self) -> u32 { self.virtual_id.get() }
+    fn guide_number(&self) -> &str {
+        self.epg_channel_id.as_deref().unwrap_or(&self.name)
+    }
+    fn virtual_id(&self) -> u32 {
+        self.virtual_id.get()
+    }
 }
 
 /// Best matching channel of a lineup iterator together with its rank.

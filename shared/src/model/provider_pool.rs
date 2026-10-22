@@ -25,12 +25,16 @@ pub struct ProviderPoolExhausted {
 
 impl ProviderPoolExhausted {
     #[must_use]
-    pub fn new(input: Arc<str>, providers: Vec<ProviderPoolEntry>) -> Self { Self { input, providers } }
+    pub fn new(input: Arc<str>, providers: Vec<ProviderPoolEntry>) -> Self {
+        Self { input, providers }
+    }
 
     /// Per input: when a provider goes down every request behind it is
     /// refused, and an operator wants to hear that once.
     #[must_use]
-    pub fn dedup_key(&self) -> String { format!("provider-pool-exhausted:{}", self.input) }
+    pub fn dedup_key(&self) -> String {
+        format!("provider-pool-exhausted:{}", self.input)
+    }
 }
 
 /// An input started being served from a different priority group.
@@ -73,5 +77,7 @@ impl ProviderPriorityFallback {
 
     /// Whether this is a move back towards the preferred group.
     #[must_use]
-    pub fn is_recovery(&self) -> bool { self.previous_group_index.is_some_and(|previous| self.group_index < previous) }
+    pub fn is_recovery(&self) -> bool {
+        self.previous_group_index.is_some_and(|previous| self.group_index < previous)
+    }
 }

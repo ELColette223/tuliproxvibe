@@ -51,7 +51,9 @@ pub struct ContinuousProgress {
 
 impl ContinuousProgress {
     #[must_use]
-    pub fn new(max_gap: Duration) -> Self { Self { max_gap, last_frame: None } }
+    pub fn new(max_gap: Duration) -> Self {
+        Self { max_gap, last_frame: None }
+    }
 
     pub fn frame(&mut self, now: tokio::time::Instant) -> Result<(), TestkitError> {
         if self.last_frame.is_some_and(|previous| now.duration_since(previous) > self.max_gap) {

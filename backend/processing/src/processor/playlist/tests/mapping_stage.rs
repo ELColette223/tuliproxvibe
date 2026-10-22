@@ -324,7 +324,9 @@ fn memory_source(channels: Vec<PlaylistItem>) -> PlaylistSource {
     .into_source()
 }
 
-fn channel_count(source: &mut PlaylistSource) -> usize { source.take_groups().iter().map(|g| g.channels.len()).sum() }
+fn channel_count(source: &mut PlaylistSource) -> usize {
+    source.take_groups().iter().map(|g| g.channels.len()).sum()
+}
 
 #[test]
 fn map_playlist_applies_only_the_requested_stage() {

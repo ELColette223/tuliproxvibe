@@ -147,7 +147,9 @@ mod tests {
         (status, response.into_body().collect().await.unwrap().to_bytes().to_vec())
     }
 
-    fn state_of(body: &[u8]) -> MaintenanceStateDto { serde_json::from_slice(body).unwrap() }
+    fn state_of(body: &[u8]) -> MaintenanceStateDto {
+        serde_json::from_slice(body).unwrap()
+    }
 
     #[tokio::test]
     async fn get_lists_known_inputs_and_empty_entries() {

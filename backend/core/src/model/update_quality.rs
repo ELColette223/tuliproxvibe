@@ -23,7 +23,9 @@ impl ConfigInputUpdateQuality {
 }
 
 impl From<&ConfigInputUpdateQualityDto> for ConfigInputUpdateQuality {
-    fn from(dto: &ConfigInputUpdateQualityDto) -> Self { Self { live: dto.live, vod: dto.vod, series: dto.series } }
+    fn from(dto: &ConfigInputUpdateQualityDto) -> Self {
+        Self { live: dto.live, vod: dto.vod, series: dto.series }
+    }
 }
 
 /// Typed outcome of evaluating one candidate cluster against its active baseline.

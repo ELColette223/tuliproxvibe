@@ -16,7 +16,9 @@ pub(super) fn hls_session_idle_protection_retry_at(due_at_ms: u64, now_ms: u64) 
 }
 
 impl HlsProxyManager {
-    pub fn lifecycle(&self) -> &Arc<HlsLifecycleManager> { &self.lifecycle }
+    pub fn lifecycle(&self) -> &Arc<HlsLifecycleManager> {
+        &self.lifecycle
+    }
 
     pub async fn active_live_playback_snapshots_for_session(
         &self,

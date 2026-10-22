@@ -58,16 +58,22 @@ impl ProviderErrorKind {
     /// which is a different call. Reporting it as retryable is how a client ends up
     /// hammering a portal with a token that portal has already refused.
     #[must_use]
-    pub const fn is_retryable(self) -> bool { matches!(self, Self::Transient) }
+    pub const fn is_retryable(self) -> bool {
+        matches!(self, Self::Transient)
+    }
 
     /// Whether this will still be true on the next scheduled refresh. Config problems
     /// need a human; the rest may not.
     #[must_use]
-    pub const fn needs_operator(self) -> bool { matches!(self, Self::Config) }
+    pub const fn needs_operator(self) -> bool {
+        matches!(self, Self::Config)
+    }
 
     /// Classify a workspace error — the form M3U and Xtream report in.
     #[must_use]
-    pub fn of_tuliprox(error: &TuliproxError) -> Self { Self::of_error_kind(error.kind()) }
+    pub fn of_tuliprox(error: &TuliproxError) -> Self {
+        Self::of_error_kind(error.kind())
+    }
 
     /// Classify a [`shared::error::ErrorKind`].
     #[must_use]
@@ -155,7 +161,9 @@ impl From<StalkerErrorKind> for ProviderErrorKind {
 }
 
 impl From<&StalkerError> for ProviderErrorKind {
-    fn from(error: &StalkerError) -> Self { error.kind().into() }
+    fn from(error: &StalkerError) -> Self {
+        error.kind().into()
+    }
 }
 
 /// Convert a Stalker failure into the workspace error type without losing its

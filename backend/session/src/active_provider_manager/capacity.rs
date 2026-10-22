@@ -23,13 +23,17 @@ struct StagingWriteGuard<'a, T: CapacityReleases> {
 }
 
 impl<T: CapacityReleases> Drop for StagingWriteGuard<'_, T> {
-    fn drop(&mut self) { self.notifier.stage(self.guard.take_released_providers()); }
+    fn drop(&mut self) {
+        self.notifier.stage(self.guard.take_released_providers());
+    }
 }
 
 struct FlushCapacityWaiters<'a>(&'a ProviderCapacityNotifier);
 
 impl Drop for FlushCapacityWaiters<'_> {
-    fn drop(&mut self) { self.0.flush(); }
+    fn drop(&mut self) {
+        self.0.flush();
+    }
 }
 
 impl<'a, T: CapacityReleases> CapacityWriteGuard<'a, T> {
@@ -40,11 +44,15 @@ impl<'a, T: CapacityReleases> CapacityWriteGuard<'a, T> {
 
 impl<T: CapacityReleases> std::ops::Deref for CapacityWriteGuard<'_, T> {
     type Target = T;
-    fn deref(&self) -> &Self::Target { &self.lock.guard }
+    fn deref(&self) -> &Self::Target {
+        &self.lock.guard
+    }
 }
 
 impl<T: CapacityReleases> std::ops::DerefMut for CapacityWriteGuard<'_, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.lock.guard }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.lock.guard
+    }
 }
 
 impl ActiveProviderManagerCore {
@@ -182,5 +190,7 @@ impl ActiveProviderManager {
         );
     }
 
-    pub fn is_over_limit(&self, provider_name: &Arc<str>) -> bool { self.providers.is_over_limit(provider_name) }
+    pub fn is_over_limit(&self, provider_name: &Arc<str>) -> bool {
+        self.providers.is_over_limit(provider_name)
+    }
 }

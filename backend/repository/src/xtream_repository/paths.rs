@@ -16,7 +16,9 @@ use tuliprox_core::model::Config;
 use uuid::Uuid;
 
 #[inline]
-pub fn get_collection_path(path: &Path, collection: &str) -> PathBuf { path.join(format!("{collection}.json")) }
+pub fn get_collection_path(path: &Path, collection: &str) -> PathBuf {
+    path.join(format!("{collection}.json"))
+}
 
 /// Returns the category-collection base name for an [`XtreamCluster`].
 ///
@@ -32,10 +34,14 @@ pub const fn xtream_cluster_category_collection(cluster: XtreamCluster) -> &'sta
 }
 
 #[inline]
-pub fn get_live_cat_collection_path(path: &Path) -> PathBuf { get_collection_path(path, storage_const::COL_CAT_LIVE) }
+pub fn get_live_cat_collection_path(path: &Path) -> PathBuf {
+    get_collection_path(path, storage_const::COL_CAT_LIVE)
+}
 
 #[inline]
-pub fn get_vod_cat_collection_path(path: &Path) -> PathBuf { get_collection_path(path, storage_const::COL_CAT_VOD) }
+pub fn get_vod_cat_collection_path(path: &Path) -> PathBuf {
+    get_collection_path(path, storage_const::COL_CAT_VOD)
+}
 
 #[inline]
 pub fn get_series_cat_collection_path(path: &Path) -> PathBuf {

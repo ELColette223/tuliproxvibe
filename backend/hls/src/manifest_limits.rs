@@ -66,7 +66,9 @@ pub struct HlsManifestLimitViolation {
 }
 
 impl HlsManifestLimitViolation {
-    pub const fn new(kind: HlsManifestLimitKind, actual: usize, limit: usize) -> Self { Self { kind, actual, limit } }
+    pub const fn new(kind: HlsManifestLimitKind, actual: usize, limit: usize) -> Self {
+        Self { kind, actual, limit }
+    }
 }
 
 impl fmt::Display for HlsManifestLimitViolation {

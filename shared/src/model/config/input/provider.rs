@@ -37,19 +37,29 @@ impl ConfigProviderDto {
     }
 }
 
-pub const fn default_provider_dns_refresh_secs() -> u64 { 300 }
+pub const fn default_provider_dns_refresh_secs() -> u64 {
+    300
+}
 
-pub const fn is_default_provider_dns_refresh_secs(v: &u64) -> bool { *v == default_provider_dns_refresh_secs() }
+pub const fn is_default_provider_dns_refresh_secs(v: &u64) -> bool {
+    *v == default_provider_dns_refresh_secs()
+}
 
 pub fn is_default_provider_url_selection_policy(v: &ProviderUrlSelectionPolicy) -> bool {
     *v == ProviderUrlSelectionPolicy::default()
 }
 
-pub fn is_default_dns_prefer(v: &DnsPrefer) -> bool { *v == DnsPrefer::default() }
+pub fn is_default_dns_prefer(v: &DnsPrefer) -> bool {
+    *v == DnsPrefer::default()
+}
 
-pub fn is_default_on_resolve_error(v: &OnResolveErrorPolicy) -> bool { *v == OnResolveErrorPolicy::default() }
+pub fn is_default_on_resolve_error(v: &OnResolveErrorPolicy) -> bool {
+    *v == OnResolveErrorPolicy::default()
+}
 
-pub fn is_default_on_connect_error(v: &OnConnectErrorPolicy) -> bool { *v == OnConnectErrorPolicy::default() }
+pub fn is_default_on_connect_error(v: &OnConnectErrorPolicy) -> bool {
+    *v == OnConnectErrorPolicy::default()
+}
 
 #[derive(
     Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default, EnumString, AsRefStr, Display,

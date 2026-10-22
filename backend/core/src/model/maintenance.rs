@@ -34,11 +34,15 @@ pub struct MaintenanceRegistry {
 
 impl MaintenanceRegistry {
     #[must_use]
-    pub fn new(path: PathBuf) -> Self { Self::with(Some(path), MaintenanceEntries::new(), None) }
+    pub fn new(path: PathBuf) -> Self {
+        Self::with(Some(path), MaintenanceEntries::new(), None)
+    }
 
     /// A registry that never touches the file system.
     #[must_use]
-    pub fn in_memory() -> Self { Self::with(None, MaintenanceEntries::new(), None) }
+    pub fn in_memory() -> Self {
+        Self::with(None, MaintenanceEntries::new(), None)
+    }
 
     fn with(path: Option<PathBuf>, entries: MaintenanceEntries, refuse_writes: Option<&'static str>) -> Self {
         Self {
@@ -105,7 +109,9 @@ impl MaintenanceRegistry {
     }
 
     /// The current state; an empty map when no input is in maintenance.
-    pub fn snapshot(&self) -> Arc<MaintenanceEntries> { self.entries.load_full().unwrap_or_default() }
+    pub fn snapshot(&self) -> Arc<MaintenanceEntries> {
+        self.entries.load_full().unwrap_or_default()
+    }
 
     pub async fn add(&self, name: &str, reason: Option<String>, now: i64) -> MaintenanceWrite {
         self.mutate(|entries| upsert(entries, name, reason, now)).await
@@ -187,7 +193,9 @@ impl MaintenanceRegistry {
 
 impl MaintenanceGate for MaintenanceRegistry {
     #[inline]
-    fn is_in_maintenance(&self, input_name: &str) -> bool { Self::is_in_maintenance(self, input_name) }
+    fn is_in_maintenance(&self, input_name: &str) -> bool {
+        Self::is_in_maintenance(self, input_name)
+    }
 }
 
 fn non_empty(entries: MaintenanceEntries) -> Option<Arc<MaintenanceEntries>> {
@@ -213,7 +221,9 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn registry_in(dir: &TempDir) -> MaintenanceRegistry { MaintenanceRegistry::new(dir.path().join(MAINTENANCE_FILE)) }
+    fn registry_in(dir: &TempDir) -> MaintenanceRegistry {
+        MaintenanceRegistry::new(dir.path().join(MAINTENANCE_FILE))
+    }
 
     #[tokio::test]
     async fn empty_registry_reports_nothing_in_maintenance() {

@@ -81,7 +81,9 @@ pub(super) fn insert_header_value(headers: &mut axum::http::HeaderMap, name: hea
 }
 
 impl PreparedBytesStream {
-    pub(super) fn new(bytes: Bytes) -> Self { Self { remaining: bytes } }
+    pub(super) fn new(bytes: Bytes) -> Self {
+        Self { remaining: bytes }
+    }
 }
 
 impl Stream for PreparedBytesStream {
@@ -222,7 +224,9 @@ impl CacheReadGuard {
 }
 
 impl Drop for CacheReadGuard {
-    fn drop(&mut self) { self.access.reader_finished(); }
+    fn drop(&mut self) {
+        self.access.reader_finished();
+    }
 }
 
 pub(super) fn log_body_reader_wait_if_slow(context: &CacheObjectLogContext, wait_for: &'static str, elapsed_ms: u128) {

@@ -700,7 +700,9 @@ impl AccountFieldSpans {
         })
     }
 
-    fn name_anchor(&self) -> Range<usize> { self.name.clone() }
+    fn name_anchor(&self) -> Range<usize> {
+        self.name.clone()
+    }
 }
 
 /// Values that changed between `before` and `expected` for one account.

@@ -485,7 +485,8 @@ pub(crate) async fn select_provider_stream_url(
     }
 
     if provider_cfg.input_type.is_m3u() {
-        match load_input_m3u_stream_url(app_config, &provider_cfg.name, stream_url).await {
+        // The M3U index is stored per account label, while the pool name is qualified.
+        match load_input_m3u_stream_url(app_config, provider_cfg.label(), stream_url).await {
             Ok(Some(provider_stream_url)) => {
                 debug_if_enabled!(
                     "M3U alias URL lookup: provider={} requested_url={} index_match=true resolved_url={}",
@@ -497,7 +498,7 @@ pub(crate) async fn select_provider_stream_url(
             }
             Ok(None) => {
                 if let Some(provider_stream_url) =
-                    resolve_m3u_alias_flussonic_archive_url(app_config, &provider_cfg.name, stream_url).await
+                    resolve_m3u_alias_flussonic_archive_url(app_config, provider_cfg.label(), stream_url).await
                 {
                     debug_if_enabled!(
                         "M3U alias URL lookup: provider={} requested_url={} index_match=archive_sibling resolved_url={}",
@@ -551,8 +552,14 @@ pub(super) fn resolve_xtream_vod_provider_url(
         return None;
     }
     let is_main = provider_cfg.name == input.name;
+    // The pool names an account `<input>/<username>`; accept that and the plain label, so the
+    // membership check holds whichever name the caller carries.
     if !is_main
-        && !input.aliases.as_ref().is_some_and(|aliases| aliases.iter().any(|alias| alias.name == provider_cfg.name))
+        && !input.aliases.as_ref().is_some_and(|aliases| {
+            aliases.iter().any(|alias| {
+                alias.name == provider_cfg.name || alias.account_name(input.name.as_ref()) == provider_cfg.name
+            })
+        })
     {
         return None;
     }

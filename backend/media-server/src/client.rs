@@ -54,9 +54,13 @@ pub struct MediaServerHttpClient {
 }
 
 impl MediaServerHttpClient {
-    pub fn new(client: reqwest::Client) -> Self { Self { client } }
+    pub fn new(client: reqwest::Client) -> Self {
+        Self { client }
+    }
 
-    pub fn inner(&self) -> &reqwest::Client { &self.client }
+    pub fn inner(&self) -> &reqwest::Client {
+        &self.client
+    }
 
     pub fn request(&self, method: Method, url: &str) -> MediaServerHttpRequestBuilder {
         MediaServerHttpRequestBuilder {
@@ -85,7 +89,9 @@ pub struct MediaServerHttpRequestBuilder {
 }
 
 impl MediaServerHttpRequestBuilder {
-    pub fn safe_url(&self) -> &str { &self.safe_url }
+    pub fn safe_url(&self) -> &str {
+        &self.safe_url
+    }
 
     pub fn header(mut self, key: HeaderName, value: HeaderValue) -> Self {
         self.builder = self.builder.header(key, value);

@@ -11,10 +11,14 @@ pub struct MaintenanceService {
     path: String,
 }
 impl Default for MaintenanceService {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 impl MaintenanceService {
-    pub fn new() -> Self { Self { path: concat_path_leading_slash(&get_base_href(), "api/v1/maintenance") } }
+    pub fn new() -> Self {
+        Self { path: concat_path_leading_slash(&get_base_href(), "api/v1/maintenance") }
+    }
     fn input_path(&self, input: &str) -> String {
         format!("{}/{}", self.path, String::from(js_sys::encode_uri_component(input)))
     }

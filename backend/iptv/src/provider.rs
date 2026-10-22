@@ -62,16 +62,22 @@ impl PlaylistFetch {
 
     /// A successful fetch of `groups`.
     #[must_use]
-    pub fn groups(groups: Vec<PlaylistGroup>) -> Self { Self { groups, ..Self::default() } }
+    pub fn groups(groups: Vec<PlaylistGroup>) -> Self {
+        Self { groups, ..Self::default() }
+    }
 
     /// A fetch that produced nothing and failed for one reason.
     #[must_use]
-    pub fn failed(error: TuliproxError) -> Self { Self { errors: vec![error], ..Self::default() } }
+    pub fn failed(error: TuliproxError) -> Self {
+        Self { errors: vec![error], ..Self::default() }
+    }
 
     /// A provider that has nothing to do for this input — a batch input whose members are
     /// fetched individually, say. Distinct from a failure.
     #[must_use]
-    pub fn nothing_to_do() -> Self { Self::default() }
+    pub fn nothing_to_do() -> Self {
+        Self::default()
+    }
 
     #[must_use]
     pub fn with_errors(mut self, errors: Vec<TuliproxError>) -> Self {
@@ -113,7 +119,9 @@ impl PlaylistFetch {
     /// and no errors counts as successful — an empty catalog is a legitimate answer. Quality
     /// rejections are completed, nonfatal decisions and therefore do not make this false.
     #[must_use]
-    pub fn is_ok(&self) -> bool { self.errors.is_empty() && !self.partial }
+    pub fn is_ok(&self) -> bool {
+        self.errors.is_empty() && !self.partial
+    }
 
     /// The failure that most deserves attention, or `None` when there was none.
     ///
@@ -121,16 +129,22 @@ impl PlaylistFetch {
     /// failure in two incompatible error types, so every error was counted, logged and
     /// treated identically whether it was a timeout or a malformed portal URL.
     #[must_use]
-    pub fn error_kind(&self) -> Option<ProviderErrorKind> { ProviderErrorKind::worst_of(&self.errors) }
+    pub fn error_kind(&self) -> Option<ProviderErrorKind> {
+        ProviderErrorKind::worst_of(&self.errors)
+    }
 
     /// Whether re-running this fetch unchanged could plausibly succeed. False when there
     /// was nothing to retry.
     #[must_use]
-    pub fn is_retryable(&self) -> bool { self.error_kind().is_some_and(ProviderErrorKind::is_retryable) }
+    pub fn is_retryable(&self) -> bool {
+        self.error_kind().is_some_and(ProviderErrorKind::is_retryable)
+    }
 
     /// Whether the fetch failed for a reason no amount of retrying will fix.
     #[must_use]
-    pub fn needs_operator(&self) -> bool { self.error_kind().is_some_and(ProviderErrorKind::needs_operator) }
+    pub fn needs_operator(&self) -> bool {
+        self.error_kind().is_some_and(ProviderErrorKind::needs_operator)
+    }
 }
 
 /// Everything every provider needs, and nothing that only one of them does.
@@ -163,7 +177,9 @@ pub trait PlaylistProvider {
 pub struct M3uProvider;
 
 impl PlaylistProvider for M3uProvider {
-    fn name(&self) -> &'static str { "m3u" }
+    fn name(&self) -> &'static str {
+        "m3u"
+    }
 
     async fn fetch(&self, request: &PlaylistFetchRequest<'_>) -> PlaylistFetch {
         let (groups, errors) = crate::m3u::download_m3u_playlist_for_update(
@@ -184,11 +200,15 @@ pub struct XtreamProvider<'e, E> {
 }
 
 impl<'e, E> XtreamProvider<'e, E> {
-    pub fn new(events: &'e E) -> Self { Self { events } }
+    pub fn new(events: &'e E) -> Self {
+        Self { events }
+    }
 }
 
 impl<E: shared::model::EventSink> PlaylistProvider for XtreamProvider<'_, E> {
-    fn name(&self) -> &'static str { "xtream" }
+    fn name(&self) -> &'static str {
+        "xtream"
+    }
 
     async fn fetch(&self, request: &PlaylistFetchRequest<'_>) -> PlaylistFetch {
         crate::xtream::download_xtream_playlist(
@@ -215,11 +235,15 @@ pub struct UnsupportedProvider {
 
 impl UnsupportedProvider {
     #[must_use]
-    pub fn new(name: &'static str, reason: impl Into<String>) -> Self { Self { name, reason: reason.into() } }
+    pub fn new(name: &'static str, reason: impl Into<String>) -> Self {
+        Self { name, reason: reason.into() }
+    }
 }
 
 impl PlaylistProvider for UnsupportedProvider {
-    fn name(&self) -> &'static str { self.name }
+    fn name(&self) -> &'static str {
+        self.name
+    }
 
     fn fetch(&self, _request: &PlaylistFetchRequest<'_>) -> impl Future<Output = PlaylistFetch> {
         std::future::ready(PlaylistFetch::failed(TuliproxError::Download(self.reason.clone())))
@@ -232,7 +256,9 @@ impl PlaylistProvider for UnsupportedProvider {
 pub struct BatchContainerProvider;
 
 impl PlaylistProvider for BatchContainerProvider {
-    fn name(&self) -> &'static str { "batch" }
+    fn name(&self) -> &'static str {
+        "batch"
+    }
 
     fn fetch(&self, _request: &PlaylistFetchRequest<'_>) -> impl Future<Output = PlaylistFetch> {
         std::future::ready(PlaylistFetch::nothing_to_do())

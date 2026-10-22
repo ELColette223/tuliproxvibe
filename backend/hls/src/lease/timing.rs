@@ -68,7 +68,9 @@ impl HlsAccessLease {
         }
     }
 
-    pub fn age_ms(&self, now_ms: u64) -> u64 { now_ms.saturating_sub(self.issued_at_ms) }
+    pub fn age_ms(&self, now_ms: u64) -> u64 {
+        now_ms.saturating_sub(self.issued_at_ms)
+    }
 
     pub fn pending_deadline_ms(&self) -> Option<u64> {
         self.pending_deadline.map(HlsAccessLeasePendingDeadline::deadline_ms)

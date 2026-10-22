@@ -78,7 +78,9 @@ impl TryFrom<u8> for StreamMode {
 
 /// Publishes a new mode to the lock-free flag with release ordering. All writers go
 /// through this so the `as u8` cast and the memory ordering live in one place.
-pub(super) fn store_stream_mode(flag: &AtomicU8, mode: StreamMode) { flag.store(mode as u8, Ordering::Release); }
+pub(super) fn store_stream_mode(flag: &AtomicU8, mode: StreamMode) {
+    flag.store(mode as u8, Ordering::Release);
+}
 
 /// Holds the optional custom video buffers for each error/placeholder scenario.
 /// Using named fields avoids the positional-indexing confusion of a 4-tuple.

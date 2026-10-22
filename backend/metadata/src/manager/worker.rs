@@ -51,7 +51,9 @@ impl MetadataUpdateManager {
     }
 
     /// Returns true once shutdown has been requested.
-    pub fn is_shutdown(&self) -> bool { self.is_shutdown_flag.load(Ordering::Acquire) }
+    pub fn is_shutdown(&self) -> bool {
+        self.is_shutdown_flag.load(Ordering::Acquire)
+    }
 
     /// Rotates the cancellation token for metadata workers.
     /// Existing workers are cancelled and removed so new tasks start with fresh runtime state.
@@ -94,7 +96,9 @@ impl MetadataUpdateManager {
     }
 
     /// Get the number of active workers (for monitoring/debugging)
-    pub fn active_worker_count(&self) -> usize { self.workers.len() }
+    pub fn active_worker_count(&self) -> usize {
+        self.workers.len()
+    }
 }
 
 pub(super) struct InputWorker {

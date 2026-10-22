@@ -17,10 +17,14 @@ pub struct UserSettingsService {
     path: String,
 }
 impl Default for UserSettingsService {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 impl UserSettingsService {
-    pub fn new() -> Self { Self { path: concat_path_leading_slash(&get_base_href(), "api/v1/me/settings") } }
+    pub fn new() -> Self {
+        Self { path: concat_path_leading_slash(&get_base_href(), "api/v1/me/settings") }
+    }
     pub async fn load(&self) -> Result<UserSettingsDto, Error> {
         request_get(&self.path, None, None).await?.ok_or(Error::DeserializeError)
     }

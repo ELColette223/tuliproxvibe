@@ -71,9 +71,13 @@ pub enum FilterNode {
 }
 
 impl FilterNode {
-    pub fn all(children: Vec<Self>) -> Self { Self::Group { operator: FilterGroupOperator::All, children } }
+    pub fn all(children: Vec<Self>) -> Self {
+        Self::Group { operator: FilterGroupOperator::All, children }
+    }
 
-    pub fn any(children: Vec<Self>) -> Self { Self::Group { operator: FilterGroupOperator::Any, children } }
+    pub fn any(children: Vec<Self>) -> Self {
+        Self::Group { operator: FilterGroupOperator::Any, children }
+    }
 
     pub fn visit_references(&self, visitor: &mut impl FnMut(&str)) {
         match self {
@@ -105,9 +109,13 @@ pub struct ManagedFilterRule {
 }
 
 impl ManagedFilterRule {
-    pub fn template_name(&self) -> String { managed_filter_rule_template_name(&self.id) }
+    pub fn template_name(&self) -> String {
+        managed_filter_rule_template_name(&self.id)
+    }
 
-    pub fn placeholder(&self) -> String { format!("!{}!", self.template_name()) }
+    pub fn placeholder(&self) -> String {
+        format!("!{}!", self.template_name())
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -137,7 +145,9 @@ impl From<&ManagedFilterRuleMetadata> for ManagedFilterRule {
     }
 }
 
-const fn default_filter_rule_schema_version() -> u16 { FILTER_RULE_SCHEMA_VERSION }
+const fn default_filter_rule_schema_version() -> u16 {
+    FILTER_RULE_SCHEMA_VERSION
+}
 
 pub fn managed_filter_rule_template_name(id: &str) -> String {
     let mut result = String::with_capacity(MANAGED_FILTER_RULE_TEMPLATE_PREFIX.len() + id.len());
@@ -152,7 +162,9 @@ pub fn managed_filter_rule_template_name(id: &str) -> String {
     result
 }
 
-pub fn new_managed_filter_rule_id() -> String { format!("{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..)) }
+pub fn new_managed_filter_rule_id() -> String {
+    format!("{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..))
+}
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -188,7 +200,9 @@ impl<'de> serde::Deserialize<'de> for SourcesEditorSaveDto {
 }
 
 impl From<super::SourcesConfigDto> for SourcesEditorSaveDto {
-    fn from(sources: super::SourcesConfigDto) -> Self { Self { sources, filter_rules: None } }
+    fn from(sources: super::SourcesConfigDto) -> Self {
+        Self { sources, filter_rules: None }
+    }
 }
 
 #[cfg(test)]

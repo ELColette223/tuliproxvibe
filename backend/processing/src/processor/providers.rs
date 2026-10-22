@@ -38,7 +38,9 @@ impl StalkerProvider {
 }
 
 impl PlaylistProvider for StalkerProvider {
-    fn name(&self) -> &'static str { "stalker" }
+    fn name(&self) -> &'static str {
+        "stalker"
+    }
 
     async fn fetch(&self, request: &PlaylistFetchRequest<'_>) -> PlaylistFetch {
         download_stalker_playlist(
@@ -59,7 +61,9 @@ impl PlaylistProvider for StalkerProvider {
 pub struct LibraryProvider;
 
 impl PlaylistProvider for LibraryProvider {
-    fn name(&self) -> &'static str { "library" }
+    fn name(&self) -> &'static str {
+        "library"
+    }
 
     async fn fetch(&self, request: &PlaylistFetchRequest<'_>) -> PlaylistFetch {
         let (groups, errors) = download_library_playlist(request.client, request.app_config, request.input).await;
@@ -72,7 +76,9 @@ impl PlaylistProvider for LibraryProvider {
 pub struct MediaServerProvider;
 
 impl PlaylistProvider for MediaServerProvider {
-    fn name(&self) -> &'static str { "media-server" }
+    fn name(&self) -> &'static str {
+        "media-server"
+    }
 
     async fn fetch(&self, request: &PlaylistFetchRequest<'_>) -> PlaylistFetch {
         let (groups, errors) = download_media_server_playlist(request.client, request.input).await;
@@ -132,13 +138,17 @@ impl<'a, E: EventSink + Clone + 'static, M: MetadataUpdateSink> XmltvEpgProvider
     /// EPG download is per-source and partial by nature: three sources where one 404s
     /// still yields a usable guide from the other two, so the failures travel alongside
     /// the outcome rather than replacing it.
-    pub fn take_errors(&self) -> Vec<TuliproxError> { std::mem::take(&mut *self.errors.lock()) }
+    pub fn take_errors(&self) -> Vec<TuliproxError> {
+        std::mem::take(&mut *self.errors.lock())
+    }
 }
 
 impl<E: EventSink + Clone + 'static, M: MetadataUpdateSink> EpgProvider for XmltvEpgProvider<'_, E, M> {
     type Guide = TVGuide;
 
-    fn name(&self) -> &'static str { "xmltv" }
+    fn name(&self) -> &'static str {
+        "xmltv"
+    }
 
     async fn fetch(
         &self,

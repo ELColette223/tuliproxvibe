@@ -94,11 +94,15 @@ impl StalkerAction {
     /// Whether a catalog fetch of this action can fall back to another strategy when the
     /// portal does not implement it.
     #[must_use]
-    pub const fn is_optional_catalog_shortcut(self) -> bool { matches!(self, Self::GetAllChannels) }
+    pub const fn is_optional_catalog_shortcut(self) -> bool {
+        matches!(self, Self::GetAllChannels)
+    }
 }
 
 impl fmt::Display for StalkerAction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.as_str()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[cfg(test)]

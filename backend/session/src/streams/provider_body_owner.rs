@@ -306,7 +306,9 @@ impl Stream for ProviderBodyOwner {
 }
 
 impl Drop for ProviderBodyOwner {
-    fn drop(&mut self) { self.cancel_token.cancel(); }
+    fn drop(&mut self) {
+        self.cancel_token.cancel();
+    }
 }
 
 #[cfg(test)]

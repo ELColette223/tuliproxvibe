@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::{fmt, io};
 
 impl HlsCacheObjectLimitError {
-    pub fn limit(&self) -> u64 { self.limit }
+    pub fn limit(&self) -> u64 {
+        self.limit
+    }
 }
 
 pub fn hls_cache_object_limit_from_io(error: &io::Error) -> Option<&HlsCacheObjectLimitError> {
@@ -34,31 +36,53 @@ impl fmt::Debug for HlsCacheCapacityRevision {
 
 impl HlsCacheCapacityRevision {
     #[cfg(any(test, feature = "test-support"))]
-    pub fn for_test() -> Self { Self(Arc::new(CapacityRevision)) }
+    pub fn for_test() -> Self {
+        Self(Arc::new(CapacityRevision))
+    }
 }
 
 impl HlsCacheCapacityError {
-    pub fn configured_session_bytes(&self) -> u64 { self.configured_session_bytes }
+    pub fn configured_session_bytes(&self) -> u64 {
+        self.configured_session_bytes
+    }
 
-    pub fn configured_global_bytes(&self) -> u64 { self.configured_global_bytes }
+    pub fn configured_global_bytes(&self) -> u64 {
+        self.configured_global_bytes
+    }
 
-    pub fn current_session_bytes(&self) -> u64 { self.current_session_bytes }
+    pub fn current_session_bytes(&self) -> u64 {
+        self.current_session_bytes
+    }
 
-    pub fn current_global_bytes(&self) -> u64 { self.current_global_bytes }
+    pub fn current_global_bytes(&self) -> u64 {
+        self.current_global_bytes
+    }
 
-    pub fn staged_bytes(&self) -> u64 { self.staged_bytes }
+    pub fn staged_bytes(&self) -> u64 {
+        self.staged_bytes
+    }
 
-    pub fn required_session_bytes(&self) -> u64 { self.required_session_bytes }
+    pub fn required_session_bytes(&self) -> u64 {
+        self.required_session_bytes
+    }
 
-    pub fn required_global_bytes(&self) -> u64 { self.required_global_bytes }
+    pub fn required_global_bytes(&self) -> u64 {
+        self.required_global_bytes
+    }
 
-    pub fn revision(&self) -> &HlsCacheCapacityRevision { &self.revision }
+    pub fn revision(&self) -> &HlsCacheCapacityRevision {
+        &self.revision
+    }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn protected_working_set_bytes(&self) -> u64 { self.protected_working_set_bytes }
+    pub fn protected_working_set_bytes(&self) -> u64 {
+        self.protected_working_set_bytes
+    }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn reclaimable_bytes(&self) -> u64 { self.reclaimable_bytes }
+    pub fn reclaimable_bytes(&self) -> u64 {
+        self.reclaimable_bytes
+    }
 
     pub(super) fn pressure(&self) -> CacheCapacityPressure {
         CacheCapacityPressure {

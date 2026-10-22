@@ -119,7 +119,9 @@ impl ConnectionManager {
     }
 
     /// Returns a reference to the history writer.
-    pub fn history_writer(&self) -> &Arc<ArcSwapOption<StreamHistoryWriter>> { &self.history_writer }
+    pub fn history_writer(&self) -> &Arc<ArcSwapOption<StreamHistoryWriter>> {
+        &self.history_writer
+    }
 
     pub async fn release_connection(&self, addr: &SocketAddr) {
         release_connection_with_reason(self, addr, DisconnectReason::ClientClosed, true).await;
@@ -258,10 +260,14 @@ impl ConnectionManager {
         );
     }
 
-    pub fn capacity_notified(&self) -> Arc<Notify> { Arc::clone(&self.capacity_notify) }
+    pub fn capacity_notified(&self) -> Arc<Notify> {
+        Arc::clone(&self.capacity_notify)
+    }
 
     #[inline]
-    pub fn is_shutting_down(&self) -> bool { self.is_shutting_down.load(Ordering::Acquire) }
+    pub fn is_shutting_down(&self) -> bool {
+        self.is_shutting_down.load(Ordering::Acquire)
+    }
 
     pub(crate) async fn begin_admission(&self) -> Option<RwLockReadGuard<'_, ()>> {
         if self.is_shutting_down() {

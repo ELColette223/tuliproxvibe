@@ -218,7 +218,7 @@ async fn ts_direct_capacity_spreads_across_priority_groups_then_rejects_sixth() 
     let capacities = app.active_provider.provider_capacities_for_input(&input.name);
     let current_of = |name: &str| capacities.iter().find(|(n, _, _)| n.as_ref() == name).map(|(_, cur, _)| *cur);
     assert_eq!(current_of("provider_a"), Some(2), "priority group A must hold two allocations");
-    assert_eq!(current_of("provider_b"), Some(3), "priority group B must hold three allocations");
+    assert_eq!(current_of("provider_a/user-b"), Some(3), "priority group B must hold three allocations");
 
     for handle in &handles {
         app.active_provider.release_handle(handle);

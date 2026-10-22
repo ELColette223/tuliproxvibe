@@ -21,8 +21,12 @@ pub fn build_provider_slots(
 }
 
 impl CapacityGroup for ConfigInput {
-    fn name(&self) -> &Arc<str> { &self.name }
-    fn enabled(&self) -> bool { self.enabled }
+    fn name(&self) -> &Arc<str> {
+        &self.name
+    }
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
     fn alias_names(&self) -> impl Iterator<Item = &Arc<str>> {
         self.aliases.iter().flatten().filter(|alias| alias.enabled).map(|alias| &alias.name)
     }
@@ -89,7 +93,7 @@ mod tests {
             exp_date: None,
             enabled: false,
             stalker: None,
-                ..Default::default()
+            ..Default::default()
         }]);
         // The disabled alias and the disabled input must not add spare capacity.
         let disabled_input =

@@ -29,7 +29,9 @@ pub struct InputUpdateCardModel {
 impl InputUpdateCardModel {
     /// Builds the deterministic last-update presentation for a supplied clock value.
     #[must_use]
-    pub fn last_update(&self, now: u64) -> LastUpdateViewModel { last_update_view_model(self.last_update_at, now) }
+    pub fn last_update(&self, now: u64) -> LastUpdateViewModel {
+        last_update_view_model(self.last_update_at, now)
+    }
 }
 
 /// Local, non-persisted controls for one input card.

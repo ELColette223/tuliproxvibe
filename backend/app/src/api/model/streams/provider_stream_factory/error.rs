@@ -170,7 +170,9 @@ impl ProviderStreamRequestFailure {
         }
     }
 
-    pub(super) fn is_account_full(&self) -> bool { matches!(self, Self::AccountFull { .. }) }
+    pub(super) fn is_account_full(&self) -> bool {
+        matches!(self, Self::AccountFull { .. })
+    }
 }
 
 pub(super) fn classify_provider_io_error(err: &std::io::Error) -> &'static str {
@@ -238,7 +240,14 @@ pub(super) fn failed_stream_account(
         if input.name == allocated.name {
             input.clone()
         } else {
-            let alias = input.aliases.iter().flatten().find(|alias| alias.name == allocated.name)?;
+            // The pool keys accounts by their qualified name, while the account carries the
+            // plain username as its label. Match either, so the lookup does not depend on which
+            // naming scheme the caller used.
+            let alias = input.aliases.iter().flatten().find(|alias| {
+                alias.name == allocated.name
+                    || alias.account_name(input.name.as_ref()) == allocated.name
+                    || alias.username.as_deref() == Some(allocated.name.as_ref())
+            })?;
             input.as_input(alias)
         }
     } else if matches(input.username.as_deref(), input.password.as_deref()) && matches_origin(&input.url) {

@@ -11,7 +11,9 @@ use std::fmt;
 pub struct InvalidUserId(String);
 
 impl fmt::Display for InvalidUserId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "invalid user id: {}", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid user id: {}", self.0)
+    }
 }
 
 impl std::error::Error for InvalidUserId {}
@@ -35,16 +37,24 @@ impl UserId {
 
     /// Reserved subject ID for the built-in administrator. Stable across
     /// restarts; never generated dynamically.
-    pub fn builtin_admin() -> Self { Self(Self::BUILTIN_ADMIN_NAMESPACE.to_string()) }
+    pub fn builtin_admin() -> Self {
+        Self(Self::BUILTIN_ADMIN_NAMESPACE.to_string())
+    }
 
-    pub fn is_builtin_admin(&self) -> bool { self.0 == Self::BUILTIN_ADMIN_NAMESPACE }
+    pub fn is_builtin_admin(&self) -> bool {
+        self.0 == Self::BUILTIN_ADMIN_NAMESPACE
+    }
 
     /// The subject of a configured web user. Pass the username as configured,
     /// not as typed at login: sign-in matches web users case-insensitively.
-    pub fn web(username: &str) -> Self { Self::namespaced(Self::WEB_NAMESPACE, username) }
+    pub fn web(username: &str) -> Self {
+        Self::namespaced(Self::WEB_NAMESPACE, username)
+    }
 
     /// The subject of a proxy API user.
-    pub fn api(username: &str) -> Self { Self::namespaced(Self::API_NAMESPACE, username) }
+    pub fn api(username: &str) -> Self {
+        Self::namespaced(Self::API_NAMESPACE, username)
+    }
 
     /// `namespace` followed by the trimmed username, with the few characters
     /// [`UserId::validate`] refuses percent-encoded. `%` is encoded too, so two
@@ -65,9 +75,13 @@ impl UserId {
         Self(id)
     }
 
-    pub fn is_web(&self) -> bool { self.0.starts_with(Self::WEB_NAMESPACE) }
+    pub fn is_web(&self) -> bool {
+        self.0.starts_with(Self::WEB_NAMESPACE)
+    }
 
-    pub fn is_api(&self) -> bool { self.0.starts_with(Self::API_NAMESPACE) }
+    pub fn is_api(&self) -> bool {
+        self.0.starts_with(Self::API_NAMESPACE)
+    }
 
     /// Validate a string before promoting it to a `UserId`. Rejects empty
     /// strings, NUL bytes, path separators, traversal components, and
@@ -95,7 +109,9 @@ impl UserId {
 }
 
 impl fmt::Display for UserId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 // `UserId` exposes both infallible `From` conversions (for internal
@@ -107,15 +123,21 @@ impl fmt::Display for UserId {
 // path or call `UserId::validate` directly.
 
 impl From<String> for UserId {
-    fn from(s: String) -> Self { Self(s) }
+    fn from(s: String) -> Self {
+        Self(s)
+    }
 }
 
 impl From<&str> for UserId {
-    fn from(s: &str) -> Self { Self(s.to_string()) }
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
 }
 
 impl AsRef<str> for UserId {
-    fn as_ref(&self) -> &str { &self.0 }
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for UserId {

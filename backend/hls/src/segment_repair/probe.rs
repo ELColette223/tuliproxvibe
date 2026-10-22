@@ -234,7 +234,9 @@ pub(crate) async fn sha256_file(path: &Path) -> io::Result<String> {
     Ok(hex)
 }
 
-pub(crate) fn ffmpeg_identity_version() -> String { "system".to_string() }
+pub(crate) fn ffmpeg_identity_version() -> String {
+    "system".to_string()
+}
 
 pub(super) fn repair_output_path(raw_path: &Path) -> PathBuf {
     let suffix = fastrand::u64(..);

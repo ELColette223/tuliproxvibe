@@ -127,7 +127,9 @@ impl SharedStreamManager {
         }
     }
 
-    pub fn meter_count(&self) -> usize { self.lock_meter_uids().len() }
+    pub fn meter_count(&self) -> usize {
+        self.lock_meter_uids().len()
+    }
 
     pub(super) fn remove_meter_uid_if_owned_by(&self, stream_url: &str, allocation_id: Option<AllocationId>) {
         let mut uids = self.lock_meter_uids();

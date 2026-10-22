@@ -10,7 +10,9 @@ pub struct ExprId(pub usize);
 impl Deref for ExprId {
     type Target = usize;
 
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -31,7 +31,9 @@ use tuliprox_core::{
 };
 
 impl ProviderReleaseSnapshot {
-    pub fn is_empty(&self) -> bool { self.single_allocations.is_empty() && self.shared_subscribers.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.single_allocations.is_empty() && self.shared_subscribers.is_empty()
+    }
 }
 
 /// Resolves a public live HLS session token to its stable provider playback owner.
@@ -59,7 +61,9 @@ impl<'a> PlaybackLeaseRef<'a> {
     }
 
     /// Stable provider lease identity, independent of the public HLS token suffix.
-    pub fn provider_owner(&self) -> &'a str { playback_lease_owner(self.owner) }
+    pub fn provider_owner(&self) -> &'a str {
+        playback_lease_owner(self.owner)
+    }
 }
 
 pub(super) struct AcquireProviderParams<'a> {
@@ -71,7 +75,9 @@ pub(super) struct AcquireProviderParams<'a> {
 
 impl AcquireProviderParams<'_> {
     #[inline]
-    pub(super) fn session_owner(&self) -> Option<&str> { self.lease.map(|lease| lease.provider_owner()) }
+    pub(super) fn session_owner(&self) -> Option<&str> {
+        self.lease.map(|lease| lease.provider_owner())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -119,7 +125,9 @@ pub(super) struct Connections {
 }
 
 impl CapacityReleases for Connections {
-    fn take_released_providers(&mut self) -> Vec<Arc<str>> { std::mem::take(&mut self.released_providers) }
+    fn take_released_providers(&mut self) -> Vec<Arc<str>> {
+        std::mem::take(&mut self.released_providers)
+    }
 }
 
 impl ProviderCapacityNotifier {
@@ -166,7 +174,9 @@ impl ProviderCapacityNotifier {
 
 impl ManagedProviderHandle {
     #[inline]
-    pub fn manager(&self) -> &Arc<ActiveProviderManager> { &self.manager }
+    pub fn manager(&self) -> &Arc<ActiveProviderManager> {
+        &self.manager
+    }
 
     #[inline]
     pub fn new(manager: Arc<ActiveProviderManager>, handle: ProviderHandle) -> Self {
@@ -174,13 +184,19 @@ impl ManagedProviderHandle {
     }
 
     #[inline]
-    pub fn handle(&self) -> Option<&ProviderHandle> { self.handle.as_ref() }
+    pub fn handle(&self) -> Option<&ProviderHandle> {
+        self.handle.as_ref()
+    }
 
     #[inline]
-    pub fn take(&mut self) -> Option<ProviderHandle> { self.handle.take() }
+    pub fn take(&mut self) -> Option<ProviderHandle> {
+        self.handle.take()
+    }
 
     #[inline]
-    pub fn disarm(&mut self) -> Option<ProviderHandle> { self.handle.take() }
+    pub fn disarm(&mut self) -> Option<ProviderHandle> {
+        self.handle.take()
+    }
 
     pub fn mark_opening(&self) {
         if let Some(handle) = self.handle.as_ref() {
@@ -201,7 +217,9 @@ impl std::ops::Deref for ActiveProviderManager {
     type Target = ActiveProviderManagerCore;
 
     #[inline]
-    fn deref(&self) -> &Self::Target { &self.core }
+    fn deref(&self) -> &Self::Target {
+        &self.core
+    }
 }
 
 impl ActiveProviderManager {
@@ -304,7 +322,9 @@ impl ActiveProviderManager {
         self.providers.reconcile_connections(counts);
     }
 
-    pub(super) fn prune_expired_leases(leases: &mut ProviderLeaseTable) { leases.prune(TokioInstant::now()); }
+    pub(super) fn prune_expired_leases(leases: &mut ProviderLeaseTable) {
+        leases.prune(TokioInstant::now());
+    }
 
     /// A provisional lease only pins its provider while its allocation is active.
     /// Once an unstarted request releases its slot, the next attempt may use another alias.
@@ -948,9 +968,13 @@ impl ActiveProviderManager {
         self.reserved_capacity_blocks_next(provider_name, session_owner)
     }
 
-    pub fn active_connections(&self) -> Option<HashMap<Arc<str>, usize>> { self.providers.active_connections() }
+    pub fn active_connections(&self) -> Option<HashMap<Arc<str>, usize>> {
+        self.providers.active_connections()
+    }
 
-    pub fn is_exhausted(&self, provider_name: &Arc<str>) -> bool { self.providers.is_exhausted(provider_name) }
+    pub fn is_exhausted(&self, provider_name: &Arc<str>) -> bool {
+        self.providers.is_exhausted(provider_name)
+    }
 
     /// Provider account names that belong to the same input pool.
     pub fn provider_names_for_input(&self, input_name: &Arc<str>) -> Vec<Arc<str>> {
@@ -984,7 +1008,9 @@ impl ActiveProviderManager {
         }
     }
 
-    pub fn get_provider_connections_count(&self) -> usize { self.providers.active_connection_count() }
+    pub fn get_provider_connections_count(&self) -> usize {
+        self.providers.active_connection_count()
+    }
 
     pub fn provider_capacities_for_input(&self, input_name: &Arc<str>) -> Vec<(Arc<str>, usize, usize)> {
         let mut result = Vec::new();

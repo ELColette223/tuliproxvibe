@@ -45,7 +45,9 @@ impl PatternTemplate {
         self.placeholder = placeholder;
     }
 
-    pub const fn is_managed_filter_rule(&self) -> bool { self.filter_rule.is_some() }
+    pub const fn is_managed_filter_rule(&self) -> bool {
+        self.filter_rule.is_some()
+    }
 
     pub fn managed_filter_rule(&self) -> Option<ManagedFilterRule> {
         self.filter_rule.as_ref().map(ManagedFilterRule::from)

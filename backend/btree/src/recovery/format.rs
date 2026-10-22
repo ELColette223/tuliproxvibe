@@ -122,10 +122,14 @@ impl RecordEnvelope {
         Ok(())
     }
 
-    pub(crate) fn previous_hash_bytes(&self) -> io::Result<[u8; 32]> { unhex(&self.previous_hash) }
+    pub(crate) fn previous_hash_bytes(&self) -> io::Result<[u8; 32]> {
+        unhex(&self.previous_hash)
+    }
 }
 
-pub(crate) fn hex(bytes: &[u8; 32]) -> String { hex_bytes(bytes) }
+pub(crate) fn hex(bytes: &[u8; 32]) -> String {
+    hex_bytes(bytes)
+}
 
 pub(crate) fn hex_bytes(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
@@ -137,7 +141,9 @@ pub(crate) fn hex_bytes(bytes: &[u8]) -> String {
     out
 }
 
-pub(crate) fn unhex(text: &str) -> io::Result<[u8; 32]> { unhex_array(text) }
+pub(crate) fn unhex(text: &str) -> io::Result<[u8; 32]> {
+    unhex_array(text)
+}
 
 /// Decode exactly `N` bytes of lowercase or uppercase hex. Anything else,
 /// including a short or long input, is corrupt data rather than zero bytes.
@@ -166,7 +172,9 @@ pub(crate) fn chain(previous: [u8; 32], payload_hash: [u8; 32]) -> [u8; 32] {
     *hasher.finalize().as_bytes()
 }
 
-pub(crate) fn payload_hash(payload: &[u8]) -> [u8; 32] { *blake3::hash(payload).as_bytes() }
+pub(crate) fn payload_hash(payload: &[u8]) -> [u8; 32] {
+    *blake3::hash(payload).as_bytes()
+}
 
 /// Encodes one envelope as a complete frame.
 pub(crate) fn encode_frame(envelope: &RecordEnvelope) -> io::Result<(Vec<u8>, [u8; 32])> {

@@ -20,7 +20,9 @@ pub struct ProviderSessionHeaders {
 }
 
 impl ProviderSessionHeaders {
-    pub fn is_empty(&self) -> bool { self.headers.is_empty() && self.cookies.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.headers.is_empty() && self.cookies.is_empty()
+    }
 
     pub fn from_response(headers: &HeaderMap, selected: HashMap<String, String>) -> Self {
         Self {
@@ -78,8 +80,12 @@ pub(crate) fn origin_key(url: &Url) -> Option<String> {
 }
 
 impl ProviderSessionCookieStore {
-    pub fn is_empty(&self) -> bool { self.origins.is_empty() }
-    pub fn clear(&mut self) { self.origins.clear(); }
+    pub fn is_empty(&self) -> bool {
+        self.origins.is_empty()
+    }
+    pub fn clear(&mut self) {
+        self.origins.clear();
+    }
 
     pub fn update(&mut self, source: &Url, response: &ProviderSessionHeaders) {
         if response.is_empty() {

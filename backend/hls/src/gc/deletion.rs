@@ -168,11 +168,17 @@ impl CacheDeletionBatch {
         Self { queue, reserved_slots, deletions: Vec::new() }
     }
 
-    pub(super) fn has_capacity(&self) -> bool { self.deletions.len() < self.reserved_slots }
+    pub(super) fn has_capacity(&self) -> bool {
+        self.deletions.len() < self.reserved_slots
+    }
 
-    pub(super) fn remaining_capacity(&self) -> usize { self.reserved_slots.saturating_sub(self.deletions.len()) }
+    pub(super) fn remaining_capacity(&self) -> usize {
+        self.reserved_slots.saturating_sub(self.deletions.len())
+    }
 
-    pub(super) fn push(&mut self, deletion: CacheObjectDeletion) { self.deletions.push(deletion); }
+    pub(super) fn push(&mut self, deletion: CacheObjectDeletion) {
+        self.deletions.push(deletion);
+    }
 
     pub(super) fn persist_pending(&mut self, report: &mut GarbageCollectionReport) {
         let planned = self.deletions.len();
@@ -190,7 +196,9 @@ impl CacheDeletionBatch {
         report.cache_object_deletions_planned = report.cache_object_deletions_planned.saturating_add(planned);
     }
 
-    pub(super) fn persist(mut self, report: &mut GarbageCollectionReport) { self.persist_pending(report); }
+    pub(super) fn persist(mut self, report: &mut GarbageCollectionReport) {
+        self.persist_pending(report);
+    }
 
     pub(super) async fn execute_prioritized(
         mut self,

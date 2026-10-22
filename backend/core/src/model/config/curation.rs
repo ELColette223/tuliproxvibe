@@ -49,11 +49,15 @@ impl fmt::Debug for TmdbCurationApiConfig {
 
 macros::from_impl!(TmdbCurationApiConfig);
 impl From<&TmdbCurationApiConfigDto> for TmdbCurationApiConfig {
-    fn from(dto: &TmdbCurationApiConfigDto) -> Self { Self { access_token: dto.access_token.clone() } }
+    fn from(dto: &TmdbCurationApiConfigDto) -> Self {
+        Self { access_token: dto.access_token.clone() }
+    }
 }
 
 impl From<&TmdbCurationApiConfig> for TmdbCurationApiConfigDto {
-    fn from(config: &TmdbCurationApiConfig) -> Self { Self { access_token: config.access_token.clone() } }
+    fn from(config: &TmdbCurationApiConfig) -> Self {
+        Self { access_token: config.access_token.clone() }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -40,14 +40,20 @@ pub struct ReqwestTransport {
 
 impl ReqwestTransport {
     #[must_use]
-    pub fn new(client: Client) -> Self { Self { client } }
+    pub fn new(client: Client) -> Self {
+        Self { client }
+    }
 
     #[must_use]
-    pub fn client(&self) -> &Client { &self.client }
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
 }
 
 impl StalkerTransport for ReqwestTransport {
-    fn get(&self, url: &str) -> RequestBuilder { self.client.get(url) }
+    fn get(&self, url: &str) -> RequestBuilder {
+        self.client.get(url)
+    }
 
     fn execute(&self, request: Request) -> impl Future<Output = StalkerResult<Response>> + Send {
         let client = self.client.clone();
@@ -58,7 +64,9 @@ impl StalkerTransport for ReqwestTransport {
 /// Sharing one transport across several clients — several inputs against the same portal
 /// host, say — is just `Arc`.
 impl<T: StalkerTransport> StalkerTransport for std::sync::Arc<T> {
-    fn get(&self, url: &str) -> RequestBuilder { (**self).get(url) }
+    fn get(&self, url: &str) -> RequestBuilder {
+        (**self).get(url)
+    }
 
     fn execute(&self, request: Request) -> impl Future<Output = StalkerResult<Response>> + Send {
         (**self).execute(request)
@@ -87,7 +95,9 @@ pub mod testing {
 
     impl Reply {
         /// `200 OK` carrying `body`.
-        pub fn ok(body: &str) -> Self { Self::Http(200, body.to_string()) }
+        pub fn ok(body: &str) -> Self {
+            Self::Http(200, body.to_string())
+        }
     }
 
     /// A portal that answers from a script instead of the network, and records what it
@@ -109,7 +119,9 @@ pub mod testing {
         }
 
         /// Every URL the client asked for, in order, including query strings.
-        pub fn requested(&self) -> Vec<String> { self.requested.lock().clone() }
+        pub fn requested(&self) -> Vec<String> {
+            self.requested.lock().clone()
+        }
 
         /// The paths asked for, without scheme, host or query — enough to assert which
         /// endpoint candidate was tried without pinning the whole URL.
@@ -124,7 +136,9 @@ pub mod testing {
     }
 
     impl StalkerTransport for FakeTransport {
-        fn get(&self, url: &str) -> RequestBuilder { self.client.get(url) }
+        fn get(&self, url: &str) -> RequestBuilder {
+            self.client.get(url)
+        }
 
         fn execute(&self, request: Request) -> impl Future<Output = StalkerResult<Response>> + Send {
             self.requested.lock().push(request.url().to_string());

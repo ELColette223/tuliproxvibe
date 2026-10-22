@@ -27,11 +27,15 @@ pub struct AtomicWriteError {
 }
 
 impl AtomicWriteError {
-    pub fn new(stage: AtomicWriteStage, source: std::io::Error) -> Self { Self { stage, source } }
+    pub fn new(stage: AtomicWriteStage, source: std::io::Error) -> Self {
+        Self { stage, source }
+    }
 }
 
 impl From<AtomicWriteError> for std::io::Error {
-    fn from(err: AtomicWriteError) -> Self { std::io::Error::new(err.source.kind(), err) }
+    fn from(err: AtomicWriteError) -> Self {
+        std::io::Error::new(err.source.kind(), err)
+    }
 }
 
 /// Filesystem operations needed for an atomic write. Default impls of the

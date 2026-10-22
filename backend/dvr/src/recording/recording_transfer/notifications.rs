@@ -97,7 +97,9 @@ pub(super) struct RecordingNotificationPlan {
 }
 
 impl RecordingNotificationPlan {
-    pub(super) fn empty() -> Self { Self { message: None } }
+    pub(super) fn empty() -> Self {
+        Self { message: None }
+    }
 }
 
 /// Hand a lifecycle notification off for delivery once its marker has

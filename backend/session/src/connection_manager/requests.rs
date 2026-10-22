@@ -134,14 +134,22 @@ impl RegisteredPlaybackRequest {
     /// Transfers the guaranteed cleanup right into the body. The body owns the returned
     /// value and must finish it exactly once with the real provider outcome.
     #[inline]
-    pub fn into_body_cleanup(&mut self) -> Option<OwnedRequestCleanup> { self.cleanup.take() }
+    pub fn into_body_cleanup(&mut self) -> Option<OwnedRequestCleanup> {
+        self.cleanup.take()
+    }
 
     #[inline]
-    pub fn display_uid(&self) -> Option<u32> { self.display_stream.as_ref().map(|s| s.uid) }
+    pub fn display_uid(&self) -> Option<u32> {
+        self.display_stream.as_ref().map(|s| s.uid)
+    }
 
     #[inline]
-    pub fn rejection_reason(&self) -> Option<ConnectionRejectionReason> { self.rejection }
+    pub fn rejection_reason(&self) -> Option<ConnectionRejectionReason> {
+        self.rejection
+    }
 
     #[inline]
-    pub fn into_display_stream(self) -> Option<StreamInfo> { self.display_stream }
+    pub fn into_display_stream(self) -> Option<StreamInfo> {
+        self.display_stream
+    }
 }

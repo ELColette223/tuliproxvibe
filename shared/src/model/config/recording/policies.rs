@@ -121,7 +121,9 @@ impl Default for RecordingNotificationConfigDto {
 }
 
 impl RecordingNotificationConfigDto {
-    pub fn is_empty(&self) -> bool { *self == Self::default() }
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]

@@ -74,7 +74,9 @@ fn register_mouse_pan(
 
 /// A move without the primary button held means the release happened outside the
 /// window, so the pan has to end here.
-fn is_primary_button_held(e: &MouseEvent) -> bool { e.buttons() & 1 != 0 }
+fn is_primary_button_held(e: &MouseEvent) -> bool {
+    e.buttons() & 1 != 0
+}
 
 /// Ends a pan: removes the panning class and the window listeners. The listener closures may be
 /// executing right now (this is called from `mouseup`/`mousemove`), so they are dropped later.
@@ -145,7 +147,9 @@ fn update_now_line(
     }
 }
 
-fn now_minute(start_window_min: i64) -> i64 { Utc::now().timestamp() / 60 - start_window_min }
+fn now_minute(start_window_min: i64) -> i64 {
+    Utc::now().timestamp() / 60 - start_window_min
+}
 
 fn recompute_viewport(
     container_ref: &NodeRef,

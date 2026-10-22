@@ -285,9 +285,13 @@ impl ProviderStreamOpenLifecycle {
         })
     }
 
-    pub fn mark_opening(&self) { self.manager.mark_opening(self.allocation_id); }
+    pub fn mark_opening(&self) {
+        self.manager.mark_opening(self.allocation_id);
+    }
 
-    pub fn register_body_owner(&self) -> bool { self.manager.register_body_owner(self.allocation_id) }
+    pub fn register_body_owner(&self) -> bool {
+        self.manager.register_body_owner(self.allocation_id)
+    }
 }
 
 pub async fn open_provider_stream_with_lifecycle(

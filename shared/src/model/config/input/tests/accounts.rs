@@ -119,11 +119,8 @@ fn lateral_dedup_normalizes_port_slash_and_case() {
     assert_eq!(normalize_lateral_url("http://host.net/path/"), "http://host.net/path");
 
     let mut input = xtream_input();
-    input.url_aliases = Some(vec![
-        "http://Host.NET:80/".intern(),
-        "http://host.net".intern(),
-        "http://other.net".intern(),
-    ]);
+    input.url_aliases =
+        Some(vec!["http://Host.NET:80/".intern(), "http://host.net".intern(), "http://other.net".intern()]);
     input.accounts = Some(vec![account("root_user", "pw")]);
     prepare_dto(&mut input).expect("prepare");
     assert_eq!(input.url_aliases.as_ref().expect("laterals").len(), 2, "the two spellings collapse");

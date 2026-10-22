@@ -80,11 +80,17 @@ mod tests {
     }
 
     impl MediaServerLibraryCandidate for TestCandidate {
-        fn library_key(&self) -> Option<&str> { self.key }
+        fn library_key(&self) -> Option<&str> {
+            self.key
+        }
 
-        fn library_title(&self) -> Option<&str> { self.title }
+        fn library_title(&self) -> Option<&str> {
+            self.title
+        }
 
-        fn library_kind(&self) -> MediaServerLibraryKind { self.kind }
+        fn library_kind(&self) -> MediaServerLibraryKind {
+            self.kind
+        }
     }
 
     fn candidate(key: &'static str, title: &'static str, kind: MediaServerLibraryKind) -> TestCandidate {

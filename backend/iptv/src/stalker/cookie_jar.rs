@@ -23,11 +23,15 @@ pub struct StalkerCookie {
 }
 
 impl StalkerCookie {
-    pub fn is_expired(&self, now_epoch: u64) -> bool { self.expires_at_epoch.is_some_and(|exp| exp <= now_epoch) }
+    pub fn is_expired(&self, now_epoch: u64) -> bool {
+        self.expires_at_epoch.is_some_and(|exp| exp <= now_epoch)
+    }
 }
 
 impl StalkerCookieJar {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Merge a set of `Set-Cookie` header values into the jar. We accept a slice of raw
     /// header strings because `reqwest` exposes them as `HeaderValue` slices.
@@ -53,10 +57,14 @@ impl StalkerCookieJar {
     }
 
     /// Remove the cookie with the given name.
-    pub fn remove(&self, name: &str) { self.inner.write().remove(name); }
+    pub fn remove(&self, name: &str) {
+        self.inner.write().remove(name);
+    }
 
     /// Wipe all stored cookies. Used when the server returns 401/403/456.
-    pub fn clear(&self) { self.inner.write().clear(); }
+    pub fn clear(&self) {
+        self.inner.write().clear();
+    }
 
     /// Return the cookies that are still valid at `now`. Cookies with no `Expires` attribute
     /// are treated as session cookies and emitted until the jar is cleared.
@@ -123,7 +131,9 @@ fn parse_cookie_expires(value: &str) -> Option<u64> {
 
 /// Unix-epoch seconds from the system clock, for the few call sites without one to hand.
 #[must_use]
-pub fn now_epoch_secs() -> u64 { system_epoch_secs() }
+pub fn now_epoch_secs() -> u64 {
+    system_epoch_secs()
+}
 
 /// Helper used by the client to ensure we never block longer than the configured timeout
 /// while parsing/merging cookies. The parsing helpers above are sync; the wrapper makes

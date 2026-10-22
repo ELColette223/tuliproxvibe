@@ -41,7 +41,9 @@ impl HlsManifestLifecycle {
         }
     }
 
-    pub const fn is_finalized(self) -> bool { matches!(self, Self::Finalized) }
+    pub const fn is_finalized(self) -> bool {
+        matches!(self, Self::Finalized)
+    }
 }
 
 /// Whether Shared HLS may apply its rolling live-window transformations to a manifest.
@@ -53,7 +55,9 @@ pub enum HlsManifestWindowPolicy {
 }
 
 impl HlsManifestWindowPolicy {
-    pub const fn preserves_full_manifest(self) -> bool { matches!(self, Self::PreserveFullManifest) }
+    pub const fn preserves_full_manifest(self) -> bool {
+        matches!(self, Self::PreserveFullManifest)
+    }
 }
 
 /// Lifecycle tags parsed independently from normal live-timeline support.
@@ -648,7 +652,9 @@ impl ParseNumericTag for str {
     }
 }
 
-fn tag_name(line: &str) -> &str { line.split_once(':').map_or(line, |(tag, _)| tag) }
+fn tag_name(line: &str) -> &str {
+    line.split_once(':').map_or(line, |(tag, _)| tag)
+}
 
 fn is_allowed_normal_timeline_tag(tag: &str) -> bool {
     matches!(

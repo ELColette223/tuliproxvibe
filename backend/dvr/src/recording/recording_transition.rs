@@ -145,10 +145,14 @@ pub fn transition(
 }
 
 /// `true` when the recording plan can still be changed.
-pub fn can_edit(state: RecordingTaskState) -> bool { EDITABLE.contains(&state) }
+pub fn can_edit(state: RecordingTaskState) -> bool {
+    EDITABLE.contains(&state)
+}
 
 /// `true` when a terminal recording can be removed from a library.
-pub fn can_remove(state: RecordingTaskState) -> bool { state.is_terminal() }
+pub fn can_remove(state: RecordingTaskState) -> bool {
+    state.is_terminal()
+}
 
 /// `true` when a recording of this kind can legitimately be found in `state`.
 ///
