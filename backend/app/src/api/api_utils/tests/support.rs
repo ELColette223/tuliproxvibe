@@ -382,6 +382,7 @@ pub(in crate::api::api_utils::tests) fn create_test_dual_provider_app_config() -
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });

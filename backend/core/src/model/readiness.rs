@@ -89,6 +89,7 @@ mod tests {
             exp_date: None,
             enabled: false,
             stalker: None,
+                ..Default::default()
         }]);
         // The disabled alias and the disabled input must not add spare capacity.
         let disabled_input =

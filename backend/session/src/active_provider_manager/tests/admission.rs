@@ -24,6 +24,7 @@ pub(in crate::active_provider_manager::tests) fn create_test_app_config_with_cap
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         3,
     )

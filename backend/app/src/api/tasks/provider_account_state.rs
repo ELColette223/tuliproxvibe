@@ -359,7 +359,8 @@ alias;user2;pass2;http://provider;1;\n";
                     exp_date: None,
                     enabled: true,
                     stalker: None,
-                }]);
+            ..crate::model::ConfigInputAlias::default()
+        }]);
             }
             next
         });

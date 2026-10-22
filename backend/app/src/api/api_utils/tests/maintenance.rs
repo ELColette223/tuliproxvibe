@@ -75,6 +75,7 @@ async fn aliased_input_is_gated_by_canonical_name() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..(*provider).clone()
     });

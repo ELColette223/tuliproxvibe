@@ -76,6 +76,7 @@ pub(in crate::active_provider_manager::tests) fn create_test_app_config_with_dua
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         1,
     )
@@ -107,6 +108,7 @@ pub(in crate::active_provider_manager::tests) fn create_test_app_config_with_poo
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         primary_max,
     )

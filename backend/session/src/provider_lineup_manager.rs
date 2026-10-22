@@ -1211,6 +1211,7 @@ mod tests {
             panel_api: None,
             provider_configs: None,
             cache_duration_seconds: 0,
+            url_aliases: Vec::new(),
             stalker: None,
         }
     }
@@ -1228,6 +1229,7 @@ mod tests {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }
     }
 

@@ -24,6 +24,14 @@ pub(super) fn prepare_physical_request_attempt(
     Ok((base_client, request))
 }
 
+/// Rewrites the attempt's base URL to the lateral selected by `provider_url_index`.
+///
+/// Two cases reach here: a persisted `provider://` URL, and a plain `http(s)` URL that belongs
+/// to one of the provider's laterals. The second case is what rotates an account between
+/// provider domains without persisting `provider://` anywhere.
+///
+/// A URL that does not belong to the provider is returned untouched: CDN and tokenised
+/// addresses must keep the host the playlist recorded, or the signature stops matching.
 fn resolve_provider_url_for_attempt(
     url: &Url,
     provider: Option<&Arc<ConfigProvider>>,
@@ -33,18 +41,60 @@ fn resolve_provider_url_for_attempt(
         return url.clone();
     };
 
-    match resolve_provider_scheme_url_with_provider_index(url.as_str(), Some(provider.clone()), provider_url_index) {
-        Ok((_provider, resolved)) => {
-            if resolved.as_ref() == url.as_str() {
-                return url.clone();
+    // A persisted `provider://` URL is resolved first: it names the provider explicitly.
+    if url.as_str().starts_with(shared::utils::PROVIDER_SCHEME_PREFIX) {
+        return match resolve_provider_scheme_url_with_provider_index(
+            url.as_str(),
+            Some(provider.clone()),
+            provider_url_index,
+        ) {
+            Ok((_provider, resolved)) => {
+                if resolved.as_ref() == url.as_str() {
+                    url.clone()
+                } else {
+                    Url::parse(resolved.as_ref()).unwrap_or_else(|_| url.clone())
+                }
             }
-            Url::parse(resolved.as_ref()).unwrap_or_else(|_| url.clone())
-        }
-        Err(err) => {
-            debug!("Failed to resolve provider URL: {err}");
-            url.clone()
-        }
+            Err(err) => {
+                debug!("Failed to resolve provider URL: {err}");
+                url.clone()
+            }
+        };
     }
+
+    // Otherwise the address is a plain URL: rotate it only when it is one of the provider's
+    // laterals.
+    localateral_rewrite(url, provider, provider_url_index)
+}
+
+/// Swaps a lateral base for another lateral base of the same provider.
+///
+/// Only the origin (scheme + authority) is replaced when the URL belongs to the provider and
+/// both sides share a path prefix, so `/player_api.php?...` and `/live/...` keep their shape.
+fn localateral_rewrite(url: &Url, provider: &Arc<ConfigProvider>, provider_url_index: usize) -> Url {
+    let Some(target_base) = provider.urls.get(provider_url_index % provider.urls.len().max(1)) else {
+        return url.clone();
+    };
+    let Ok(target) = Url::parse(target_base) else {
+        return url.clone();
+    };
+    if target.origin() == url.origin() {
+        return url.clone();
+    }
+    // The current address has to be one of the laterals; anything else is a foreign host.
+    let belongs = provider.urls.iter().any(|lateral| match Url::parse(lateral) {
+        Ok(lateral) => lateral.origin() == url.origin(),
+        Err(_) => false,
+    });
+    if !belongs {
+        return url.clone();
+    }
+
+    let mut rewritten = url.clone();
+    let _ = rewritten.set_scheme(target.scheme());
+    let _ = rewritten.set_host(target.host_str());
+    let _ = rewritten.set_port(target.port_or_known_default());
+    rewritten
 }
 
 #[derive(Debug, Clone)]

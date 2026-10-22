@@ -111,6 +111,7 @@ async fn catchup_abort_seek_and_window_change_preserve_correct_affinity() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });

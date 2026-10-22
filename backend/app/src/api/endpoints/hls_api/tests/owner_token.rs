@@ -578,6 +578,7 @@ async fn wrapper_seals_the_entry_url_not_the_account_resolved_url() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..crate::model::ConfigInputAlias::default()
         }]);
     })
     .await;
@@ -697,7 +698,8 @@ fn with_alias_account(input: &mut ConfigInput) {
         exp_date: None,
         enabled: true,
         stalker: None,
-    }]);
+            ..crate::model::ConfigInputAlias::default()
+        }]);
 }
 
 fn manifest_fetches_for(fixture: &OwnerTokenFixture, account_path: &str) -> usize {

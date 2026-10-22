@@ -325,6 +325,7 @@ pub(in crate::api::endpoints::hls_api::tests) fn overlap_provider_input() -> Con
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..crate::model::ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     }

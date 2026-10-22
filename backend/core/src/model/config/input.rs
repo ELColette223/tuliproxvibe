@@ -502,12 +502,68 @@ pub struct ConfigInputAlias {
     pub exp_date: Option<i64>,
     pub enabled: bool,
     pub stalker: Option<StalkerInputConfig>,
+    /// Provider base URLs this account may use, in preference order. The first entry is also
+    /// the account's `url`; the rest are the laterals it can rotate to.
+    pub lateral_urls: Vec<Arc<str>>,
+}
+
+/// The runtime account behind a provider-pool slot.
+pub type ConfigInputAccount = ConfigInputAlias;
+
+/// An account with no fields set. Exists so fixtures and hand-built inputs can spread the
+/// struct instead of naming every field the model happens to have today.
+impl Default for ConfigInputAlias {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            name: "".intern(),
+            url: String::new(),
+            username: None,
+            password: None,
+            priority: 0,
+            max_connections: 0,
+            exp_date: None,
+            enabled: true,
+            stalker: None,
+            lateral_urls: Vec::new(),
+        }
+    }
 }
 
 macros::from_impl!(ConfigInputAlias);
 impl ConfigInputAlias {
     pub fn account_identity(&self) -> ProviderAccountIdentity {
         ProviderAccountIdentity::new(&self.url, self.username.as_deref(), self.password.as_deref())
+    }
+
+    /// Opaque, charset-safe key used where the value becomes a path or a file name.
+    ///
+    /// Derived from the input name and the username so it stays stable across reloads and does
+    /// not collide when two inputs declare the same subscription (the configuration does that).
+    pub fn account_key(&self, input_name: &str) -> Arc<str> {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(input_name.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(self.username.as_deref().unwrap_or(self.name.as_ref()).as_bytes());
+        hasher.finalize().to_hex().to_string().intern()
+    }
+
+    /// Human-readable, globally unique name: `<input>/<username>`.
+    ///
+    /// This is what the pool, the connection registry, `/status` and events key on. It contains
+    /// the input name, so two inputs sharing a subscription stay distinct.
+    pub fn account_name(&self, input_name: &str) -> Arc<str> {
+        let username = self.username.as_deref().unwrap_or(self.name.as_ref());
+        format!("{input_name}/{username}").intern()
+    }
+
+    /// The laterals this account may rotate through, or just its own address when it has none.
+    pub fn effective_laterals(&self) -> Vec<Arc<str>> {
+        if self.lateral_urls.is_empty() {
+            (!self.url.trim().is_empty()).then(|| vec![self.url.as_str().intern()]).unwrap_or_default()
+        } else {
+            self.lateral_urls.clone()
+        }
     }
 }
 
@@ -527,6 +583,38 @@ impl From<&ConfigInputAliasDto> for ConfigInputAlias {
                 .stalker
                 .as_ref()
                 .map(|s| StalkerInputConfig::from(s).with_credentials(dto.username.as_ref(), dto.password.as_ref())),
+            lateral_urls: (!dto.url.trim().is_empty()).then(|| vec![dto.url.as_str().intern()]).unwrap_or_default(),
+                ..Default::default()
+        }
+    }
+}
+
+impl ConfigInputAlias {
+    /// Builds the runtime account from the account DTO plus the laterals it may use.
+    ///
+    /// The DTO has no address: the account reaches the provider through the input's laterals (or
+    /// its own override). The first lateral becomes the account's `url`, which is what the
+    /// playlist is built from; the whole list becomes `lateral_urls`, which is what the retry
+    /// rotates through.
+    pub fn from_account_dto(dto: &shared::model::ConfigInputAccountDto, laterals: Option<&[Arc<str>]>) -> Self {
+        let lateral_urls: Vec<Arc<str>> = laterals.map(<[Arc<str>]>::to_vec).unwrap_or_default();
+        let url = lateral_urls.first().map_or_else(String::new, |url| url.as_ref().to_string());
+        Self {
+            id: dto.id,
+            name: dto.username.clone(),
+            url,
+            username: Some(dto.username.as_ref().to_string()),
+            password: dto.password.clone(),
+            priority: dto.priority,
+            max_connections: dto.max_connections,
+            exp_date: dto.exp_date,
+            enabled: dto.enabled,
+            stalker: dto.stalker.as_ref().map(|s| {
+                let username = dto.username.as_ref().to_string();
+                let password = dto.password.clone();
+                StalkerInputConfig::from(s).with_credentials(Some(&username), password.as_ref())
+            }),
+            lateral_urls,
         }
     }
 }
@@ -559,6 +647,8 @@ pub struct ConfigInput {
     pub panel_api: Option<PanelApiConfig>,
     pub cache_duration_seconds: u64,
     pub provider_configs: Option<Vec<Arc<ConfigProvider>>>,
+    /// Provider base URLs (laterals) shared by the accounts of this input.
+    pub url_aliases: Vec<Arc<str>>,
     /// Resolved Stalker device identity + portal hints.
     pub stalker: Option<StalkerInputConfig>,
 }
@@ -589,6 +679,24 @@ impl ConfigInput {
         provider_configs: &[Arc<ConfigProvider>],
         used_provider_configs: &mut Vec<Arc<ConfigProvider>>,
     ) -> Result<(), TuliproxError> {
+        // Accounts of the new schema reach the provider through the input's laterals, never
+        // through `provider://`: the two failover mechanisms would compete. The laterals are
+        // copied onto each account here, which is where the retry reads them from.
+        if !self.url_aliases.is_empty() {
+            if let Some(aliases) = self.aliases.as_mut() {
+                for alias in aliases {
+                    if alias.lateral_urls.is_empty() {
+                        alias.lateral_urls.clone_from(&self.url_aliases);
+                        if alias.url.trim().is_empty() {
+                            if let Some(first) = self.url_aliases.first() {
+                                alias.url = first.as_ref().to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if let Some(aliases) = &mut self.aliases {
             for alias in aliases {
                 if is_input_expired(alias.exp_date) {
@@ -963,6 +1071,7 @@ impl ConfigInput {
             t_batch_url: None,
             panel_api: self.panel_api.clone(),
             cache_duration_seconds: self.cache_duration_seconds,
+            url_aliases: alias.effective_laterals(),
             provider_configs: self.provider_configs.clone(),
             stalker: merge_stalker_config(self.stalker.clone(), alias.stalker.clone()).map(|cfg| {
                 // The alias' own credentials take precedence; fall back to
@@ -1078,6 +1187,11 @@ impl From<&ConfigInputDto> for ConfigInput {
             panel_api: dto.panel_api.as_ref().map(PanelApiConfig::from),
             cache_duration_seconds: dto.cache_duration_seconds,
             provider_configs: None,
+            url_aliases: dto
+                .url_aliases
+                .as_ref()
+                .map(|aliases| aliases.iter().map(|url| url.as_ref().intern()).collect())
+                .unwrap_or_default(),
             stalker: dto
                 .stalker
                 .as_ref()
@@ -1772,6 +1886,7 @@ mod tests {
                 exp_date: None,
                 enabled: true,
                 stalker: None,
+                ..Default::default()
             }]),
             ..Default::default()
         };
@@ -1793,6 +1908,7 @@ mod tests {
             exp_date: None,
             enabled,
             stalker: None,
+                ..Default::default()
         };
         let mut input = ConfigInput {
             name: "root".into(),
@@ -1830,6 +1946,7 @@ mod tests {
                 exp_date: None,
                 enabled: true,
                 stalker: None,
+                ..Default::default()
             }]),
             ..Default::default()
         };
@@ -1859,6 +1976,7 @@ mod tests {
                     exp_date,
                     enabled,
                     stalker: None,
+                ..Default::default()
                 }]),
                 ..ConfigInput::default()
             };
@@ -1959,6 +2077,7 @@ mod tests {
                 exp_date: None,
                 enabled: true,
                 stalker: None,
+                ..Default::default()
             }]),
             ..Default::default()
         };
@@ -1987,6 +2106,7 @@ mod tests {
                 exp_date: None,
                 enabled: true,
                 stalker: None,
+                ..Default::default()
             }]),
             ..Default::default()
         };
@@ -2036,6 +2156,7 @@ mod tests {
             exp_date: None,
             enabled: true,
             stalker: Some(StalkerInputConfig { auth_mode: StalkerAuthMode::CredentialsOnly, ..Default::default() }),
+            ..Default::default()
         };
 
         let stalker = parent.as_input(&alias).stalker.expect("stalker config");
@@ -2075,6 +2196,7 @@ mod tests {
                     }),
                     ..Default::default()
                 }),
+                ..Default::default()
             }]),
             ..Default::default()
         };
@@ -2121,11 +2243,57 @@ mod tests {
             exp_date: None,
             enabled: true,
             stalker: None,
+                ..Default::default()
         };
 
         let merged = parent.as_input(&alias).stalker.expect("inherited stalker config");
         assert_eq!(merged.auth_mode, StalkerAuthMode::MacPlusCredentials);
         assert_eq!(merged.username.as_deref(), Some("alias_user"));
         assert_eq!(merged.password.as_deref(), Some("alias_pass"));
+    }
+}
+
+#[cfg(test)]
+mod account_identity_tests {
+    use super::*;
+
+    fn account(username: &str, url: &str) -> ConfigInputAlias {
+        ConfigInputAlias {
+            name: username.intern(),
+            url: url.to_string(),
+            username: Some(username.to_string()),
+            ..ConfigInputAlias::default()
+        }
+    }
+
+    /// The same subscription in two inputs must not share runtime keys.
+    ///
+    /// The real configuration declares one root username in two inputs, which the legacy
+    /// global namespace rejected. The qualified names keep them distinct.
+    #[test]
+    fn account_names_are_qualified_by_input() {
+        let a = account("892958", "http://a.example");
+        let b = account("892958", "http://a.example");
+        assert_eq!(a.account_name("Servidor 1").as_ref(), "Servidor 1/892958");
+        assert_eq!(b.account_name("JellyFin").as_ref(), "JellyFin/892958");
+        assert_ne!(a.account_key("Servidor 1"), b.account_key("JellyFin"));
+        assert_eq!(a.account_key("Servidor 1"), b.account_key("Servidor 1"), "stable across reloads");
+    }
+
+    /// A `provider://` path or a bucket name must not be affected by the username charset.
+    #[test]
+    fn account_key_is_path_safe() {
+        let with_odd_chars = account("user name/with:odd?chars", "http://a.example");
+        let key = with_odd_chars.account_key("input name with spaces");
+        assert!(key.chars().all(|c| c.is_ascii_hexdigit()), "key must be hex: {key}");
+    }
+
+    /// The laterals of an account are the input's list, or its own narrower override.
+    #[test]
+    fn effective_laterals_fall_back_to_the_account_url() {
+        let mut legacy = account("legacy", "http://only.example");
+        assert_eq!(legacy.effective_laterals().len(), 1);
+        legacy.lateral_urls = vec!["http://a.example".into(), "http://b.example".into()];
+        assert_eq!(legacy.effective_laterals().len(), 2, "an explicit list wins");
     }
 }

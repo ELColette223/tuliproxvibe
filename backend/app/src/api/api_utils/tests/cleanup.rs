@@ -413,6 +413,7 @@ async fn no_first_byte_failure_allows_next_request_to_prefer_provider_a() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });

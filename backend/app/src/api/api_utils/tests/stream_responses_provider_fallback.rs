@@ -349,6 +349,7 @@ async fn resolve_streaming_strategy_rewrites_opaque_m3u_token_after_alias_alloca
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });

@@ -228,6 +228,22 @@ impl From<&ConfigProviderDto> for ConfigProvider {
 }
 
 impl ConfigProvider {
+    /// A provider built from a runtime account's laterals rather than from a `provider:` block.
+    ///
+    /// An account's addresses are its own (shared with the input, optionally narrowed), so it
+    /// needs the rotation engine without a matching `provider:` declaration. The name is the
+    /// account name, which keeps log lines and cycle-exhaustion warnings attributable.
+    pub fn synthetic(name: Arc<str>, urls: Vec<Arc<str>>) -> Self {
+        Self {
+            name,
+            urls,
+            provider_url_selection_policy: ProviderUrlSelectionPolicy::default(),
+            current_url_index: AtomicUsize::new(0),
+            dns: None,
+            dns_cache: Arc::new(ProviderDnsCache::default()),
+        }
+    }
+
     /// Gets the current URL from the provider
     pub fn get_current_url(&self) -> Option<&Arc<str>> {
         let len = self.urls.len();

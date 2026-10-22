@@ -616,6 +616,7 @@ async fn hls_entry_origin_reservation_uses_persisted_alias_manifest_url() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..crate::model::ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     };

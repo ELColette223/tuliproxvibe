@@ -65,6 +65,7 @@ async fn forced_reopen_stays_on_pinned_provider_account() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });
@@ -167,6 +168,7 @@ async fn forced_series_reopen_uses_free_pool_account_and_updates_session_pin() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });

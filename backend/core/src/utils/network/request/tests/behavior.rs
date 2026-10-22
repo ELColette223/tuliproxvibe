@@ -932,3 +932,50 @@ async fn test_on_connect_error_try_next_ip_before_provider_rotation() {
 
     server_handle.abort();
 }
+
+// --- Lateral rotation (accounts + url_aliases) ---------------------------------------------
+
+/// A lateral swap moves the request to another provider domain of the same account.
+#[test]
+fn test_lateral_rotation_swaps_the_origin_of_a_lateral_address() {
+    let provider = Arc::new(ConfigProvider::synthetic(
+        "input/account".into(),
+        vec!["http://a.example".into(), "http://b.example".into()],
+    ));
+    let url = Url::parse("http://a.example/live/user/pass/1.ts").expect("url parse");
+
+    let target = super::super::attempt::resolve_attempt_target_at_provider_index(&url, Some(&provider), 1);
+
+    assert_eq!(target.request_url.as_str(), "http://b.example/live/user/pass/1.ts");
+}
+
+/// A URL on a host that is not one of the account's laterals keeps its origin.
+///
+/// CDN and tokenised URLs carry a host the playlist recorded; rewriting it would break the
+/// signature the provider issued.
+#[test]
+fn test_lateral_rotation_leaves_a_foreign_host_untouched() {
+    let provider = Arc::new(ConfigProvider::synthetic(
+        "input/account".into(),
+        vec!["http://a.example".into(), "http://b.example".into()],
+    ));
+    let url = Url::parse("http://cdn.example/signed/token/1.ts").expect("url parse");
+
+    let target = super::super::attempt::resolve_attempt_target_at_provider_index(&url, Some(&provider), 1);
+
+    assert_eq!(target.request_url.as_str(), "http://cdn.example/signed/token/1.ts");
+}
+
+/// The first lateral index is a no-op, so a healthy account never re-resolves its own address.
+#[test]
+fn test_lateral_rotation_at_index_zero_keeps_the_url() {
+    let provider = Arc::new(ConfigProvider::synthetic(
+        "input/account".into(),
+        vec!["http://a.example".into(), "http://b.example".into()],
+    ));
+    let url = Url::parse("http://a.example/live/1.ts").expect("url parse");
+
+    let target = super::super::attempt::resolve_attempt_target_at_provider_index(&url, Some(&provider), 0);
+
+    assert_eq!(target.request_url.as_str(), "http://a.example/live/1.ts");
+}

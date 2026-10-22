@@ -180,6 +180,7 @@ async fn ts_direct_capacity_spreads_across_priority_groups_then_rejects_sixth() 
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });

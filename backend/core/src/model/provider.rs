@@ -6,13 +6,13 @@
 //! passes them around and would otherwise have to name the API layer.
 
 use crate::{
-    model::{is_input_expired, ConfigInput, ConfigInputAlias, InputUserInfo},
+    model::{is_input_expired, ConfigInput, ConfigInputAlias, ConfigProvider, InputUserInfo},
     utils::debug_if_enabled,
 };
 use log::{debug, info};
 use shared::{
     model::{InputType, ProviderAccountIdentity, ProxyUserStatus},
-    utils::sanitize_sensitive_info,
+    utils::{sanitize_sensitive_info, Internable},
     write_if_some,
 };
 use std::{
@@ -249,8 +249,32 @@ pub struct ProviderConfig {
     account_identity: ProviderAccountIdentity,
     account_disabled: bool,
     bypass_local_cap: bool,
+    /// Provider base URLs this account may rotate through. Empty means "use `url` only".
+    lateral_urls: Vec<Arc<str>>,
     connection: Arc<RwLock<ProviderConfigConnection>>,
     on_connection_change: ProviderConnectionChangeCallback,
+}
+
+impl ProviderConfig {
+    /// The provider failover view of this account.
+    ///
+    /// The retry engine rotates through a `ConfigProvider`; building one from the allocated
+    /// account is what makes laterals work, because the persisted playlist URL is a plain
+    /// `http(s)` address and never carries a `provider://` reference to resolve.
+    pub fn to_config_provider(&self, input_name: &str) -> Option<Arc<ConfigProvider>> {
+        if self.lateral_urls.is_empty() {
+            return None;
+        }
+        let account_name = if self.name.contains('/') {
+            self.name.clone()
+        } else {
+            format!("{input_name}/{}", self.name).intern()
+        };
+        Some(Arc::new(ConfigProvider::synthetic(account_name, self.lateral_urls.clone())))
+    }
+
+    /// Laterals of this account, for URL rewriting decisions.
+    pub fn lateral_urls(&self) -> &[Arc<str>] { &self.lateral_urls }
 }
 
 impl fmt::Display for ProviderConfig {
@@ -376,6 +400,7 @@ impl ProviderConfig {
             account_disabled: cfg.account_disabled,
             account_identity: cfg.account_identity(),
             bypass_local_cap: cfg.bypass_local_connection_cap(),
+            lateral_urls: cfg.url_aliases.clone(),
             connection,
             on_connection_change,
         }
@@ -399,6 +424,9 @@ impl ProviderConfig {
         };
         Self {
             id: alias.id,
+            // The qualified name arrives with the session identity step, which updates every
+            // consumer of the key in the same change. Until then the account keeps the label
+            // the pool already uses, so no reader sees a half-migrated namespace.
             name: alias.name.clone(),
             url: alias.url.clone(),
             username: alias.username.clone(),
@@ -410,6 +438,7 @@ impl ProviderConfig {
             account_disabled: !alias.enabled,
             account_identity: alias.account_identity(),
             bypass_local_cap: cfg.bypass_local_connection_cap(),
+            lateral_urls: alias.effective_laterals(),
             connection,
             on_connection_change,
         }
@@ -661,6 +690,7 @@ mod tests {
             panel_api: None,
             provider_configs: None,
             cache_duration_seconds: 0,
+            url_aliases: Vec::new(),
             stalker: None,
         };
         let conn = Arc::new(RwLock::new(ProviderConfigConnection::default()));

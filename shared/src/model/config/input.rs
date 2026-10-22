@@ -107,6 +107,14 @@ pub struct ConfigInputDto {
     pub cache_duration_seconds: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aliases: Option<Vec<ConfigInputAliasDto>>,
+    /// Subscription accounts of this input. The first entry is the root account.
+    /// Mutually exclusive with the legacy `aliases` list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounts: Option<Vec<ConfigInputAccountDto>>,
+    /// Alternative provider base URLs (laterals) shared by every account of this input.
+    /// An account may narrow the list with its own `url_aliases`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_aliases: Option<Vec<Arc<str>>>,
     #[serde(default, skip_serializing_if = "is_zero_i16")]
     pub priority: i16,
     #[serde(default)]
@@ -150,6 +158,8 @@ impl Default for ConfigInputDto {
             cache_duration: None,
             cache_duration_seconds: 0,
             aliases: None,
+            accounts: None,
+            url_aliases: None,
             priority: 0,
             max_connections: 0,
             method: InputFetchMethod::default(),
@@ -195,12 +205,15 @@ impl ConfigInputDto {
 #[cfg(test)]
 mod tests;
 
+mod accounts;
 mod aliases;
 mod kind;
+mod migrate;
 mod options;
 mod prepare;
 mod provider;
 mod stalker;
+pub use accounts::ConfigInputAccountDto;
 pub use aliases::ConfigInputAliasDto;
 pub use kind::{
     ConfigInputStagedDto, InputCapabilities, InputFetchMethod, InputPersistence, InputType, StagedInputType,

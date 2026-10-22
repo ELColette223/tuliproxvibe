@@ -243,6 +243,7 @@ fn find_input_account_by_signature_matches_main_input_and_alias_accounts() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     };
@@ -297,6 +298,7 @@ fn get_stream_alternative_url_rewrites_opaque_m3u_token_for_alias_account() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     };
@@ -392,6 +394,7 @@ async fn select_provider_stream_url_rewrites_opaque_m3u_token_for_allocated_alia
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     };
