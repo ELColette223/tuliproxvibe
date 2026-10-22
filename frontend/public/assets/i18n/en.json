@@ -1945,7 +1945,12 @@
     "RECORDING_RULE_DELETE_RETAIN": "Delete rule, keep upcoming recordings",
     "RECORDING_RULE_DELETE_CANCEL": "Delete rule and cancel upcoming recordings",
     "RECORDING_RULE_ACTION_ENABLE": "Enable",
-    "RECORDING_RULE_ACTION_DISABLE": "Disable"
+    "RECORDING_RULE_ACTION_DISABLE": "Disable",
+    "ACCOUNTS": "Accounts",
+    "ADD_ACCOUNT": "Add Account",
+    "URL_ALIASES": "Alternative URLs",
+    "ADD_URL_ALIAS": "Add URL",
+    "REMOVE": "Remove"
   },
   "MESSAGES": {
     "CLIPBOARD_NOT_SUPPORTED": "Clipboard not supported.\nYour browser or current context does not allow clipboard access.\nPlease use HTTPS or localhost.",
@@ -2447,6 +2452,9 @@
     "TABLE_CONFIG_SCHEDULES": "Schedules",
     "TABLE_RBAC_PERMISSION_MATRIX": "Permissions",
     "TABLE_PLAYLIST_ACCOUNTS_CSV": "Accounts CSV"
-
+  },
+  "INPUT_FORM": {
+    "ACCOUNTS": "Subscription accounts of this input. The first one is the main account.",
+    "URL_ALIASES": "Alternative provider base URLs. They are shared by every account and are tried in order when a URL fails."
   }
 }

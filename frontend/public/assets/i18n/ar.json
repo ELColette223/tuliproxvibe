@@ -391,7 +391,6 @@
     "CONFIG_TARGET_OPTIONS": {
       "CLEAR_INVALID_EPG_IDS": "يمسح معرفات EPG التي لا تطابق بيانات EPG المعالجة دون إزالة عناصر قائمة التشغيل.",
       "PRESERVE_STREAM_IDS": "يحافظ على معرفات البث (virtual IDs) ثابتة عبر تحديثات المصدر.",
-
       "SHARE_LIVE_STREAMS": "يُفعّل مشاركة البث المباشر. المفتاح الرئيسي يضبط HLS و MPEG-TS معًا؛ يمكن تغيير كل تنسيق أيضًا بشكل منفصل."
     },
     "EPG_OUTPUT_OPTIONS": {
@@ -981,8 +980,8 @@
     "ALIAS_NAME": "اسم الاسم المستعار",
     "ALL": "الكل",
     "DESELECTED": "غير محدد",
-    "MOVE_UP": "تحريك لأعلى",
-    "MOVE_DOWN": "تحريك لأسفل",
+    "MOVE_UP": "نقل لأعلى",
+    "MOVE_DOWN": "نقل لأسفل",
     "NOT_AVAILABLE": "غير متاح",
     "ADD_KEY": "إضافة مفتاح",
     "ADD_VALUE": "إضافة قيمة",
@@ -1946,7 +1945,12 @@
     "RECORDING_RULE_DELETE_RETAIN": "حذف القاعدة والإبقاء على التسجيلات القادمة",
     "RECORDING_RULE_DELETE_CANCEL": "حذف القاعدة وإلغاء التسجيلات القادمة",
     "RECORDING_RULE_ACTION_ENABLE": "تمكين",
-    "RECORDING_RULE_ACTION_DISABLE": "تعطيل"
+    "RECORDING_RULE_ACTION_DISABLE": "تعطيل",
+    "ACCOUNTS": "الحسابات",
+    "ADD_ACCOUNT": "إضافة حساب",
+    "URL_ALIASES": "عناوين URL بديلة",
+    "ADD_URL_ALIAS": "إضافة عنوان URL",
+    "REMOVE": "إزالة"
   },
   "MESSAGES": {
     "CLIPBOARD_NOT_SUPPORTED": "الحافظة غير مدعومة.\nمتصفحك أو السياق الحالي لا يسمح بالوصول إلى الحافظة.\nيرجى استخدام HTTPS أو localhost.",
@@ -2448,5 +2452,9 @@
     "TABLE_CONFIG_SCHEDULES": "الجداول الزمنية",
     "TABLE_RBAC_PERMISSION_MATRIX": "الأذونات",
     "TABLE_PLAYLIST_ACCOUNTS_CSV": "CSV للحسابات"
+  },
+  "INPUT_FORM": {
+    "ACCOUNTS": "حسابات الاشتراك لهذا الإدخال. الحساب الأول هو الحساب الرئيسي.",
+    "URL_ALIASES": "عناوين URL الأساسية البديلة للمزود. تُستخدم لكل الحسابات وتُجرَّب بالترتيب عند فشل عنوان."
   }
 }

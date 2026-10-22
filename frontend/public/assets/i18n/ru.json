@@ -1945,7 +1945,12 @@
     "RECORDING_RULE_DELETE_RETAIN": "Удалить правило, сохранить будущие записи",
     "RECORDING_RULE_DELETE_CANCEL": "Удалить правило и отменить будущие записи",
     "RECORDING_RULE_ACTION_ENABLE": "Включить",
-    "RECORDING_RULE_ACTION_DISABLE": "Отключить"
+    "RECORDING_RULE_ACTION_DISABLE": "Отключить",
+    "ACCOUNTS": "Учетные записи",
+    "ADD_ACCOUNT": "Добавить учетную запись",
+    "URL_ALIASES": "Альтернативные URL",
+    "ADD_URL_ALIAS": "Добавить URL",
+    "REMOVE": "Удалить"
   },
   "MESSAGES": {
     "CLIPBOARD_NOT_SUPPORTED": "Буфер обмена не поддерживается.\nВаш браузер или текущий контекст не позволяют доступ к буферу обмена.\nПожалуйста, используйте HTTPS или localhost.",
@@ -2447,5 +2452,9 @@
     "TABLE_CONFIG_SCHEDULES": "Расписания",
     "TABLE_RBAC_PERMISSION_MATRIX": "Разрешения",
     "TABLE_PLAYLIST_ACCOUNTS_CSV": "CSV учётных записей"
+  },
+  "INPUT_FORM": {
+    "ACCOUNTS": "Учетные записи подписки для этого входа. Первая является основной.",
+    "URL_ALIASES": "Альтернативные базовые URL провайдера. Используются всеми учетными записями и пробуются по порядку при сбое."
   }
 }

@@ -979,8 +979,8 @@
     "ALIAS_NAME": "Nombre del alias",
     "ALL": "Todos",
     "DESELECTED": "Deseleccionado",
-    "MOVE_UP": "Subir",
-    "MOVE_DOWN": "Bajar",
+    "MOVE_UP": "Mover arriba",
+    "MOVE_DOWN": "Mover abajo",
     "NOT_AVAILABLE": "n/d",
     "ADD_KEY": "Añadir clave",
     "ADD_VALUE": "Añadir valor",
@@ -1945,7 +1945,12 @@
     "CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP": "Omitir el limite local",
     "CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL": "Rotar automaticamente al llenarse",
     "CONNECTION_LIMIT_POLICY_STRICT": "Estricta",
-    "PRESERVE_STREAM_IDS": "Mantener los ID de flujo"
+    "PRESERVE_STREAM_IDS": "Mantener los ID de flujo",
+    "ACCOUNTS": "Cuentas",
+    "ADD_ACCOUNT": "Agregar cuenta",
+    "URL_ALIASES": "URL alternativas",
+    "ADD_URL_ALIAS": "Agregar URL",
+    "REMOVE": "Eliminar"
   },
   "MESSAGES": {
     "CLIPBOARD_NOT_SUPPORTED": "Portapapeles no compatible.\nSu navegador o el contexto actual no permite el acceso al portapapeles.\nUtilice HTTPS o localhost.",
@@ -2447,5 +2452,9 @@
     "VISUAL_DESCRIPTION": "Elige las categorias y canales que quieres conservar. Tu seleccion se guarda como una instantanea de los canales actuales.",
     "VISUAL_TITLE": "Elige que se queda en este destino",
     "WRAP_GROUP": "Agrupar en un grupo"
+  },
+  "INPUT_FORM": {
+    "ACCOUNTS": "Cuentas de suscripción de esta entrada. La primera es la cuenta principal.",
+    "URL_ALIASES": "URL base alternativas del proveedor. Las comparten todas las cuentas y se prueban en orden si una falla."
   }
 }
