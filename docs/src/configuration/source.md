@@ -940,6 +940,23 @@ The list is shared, so every account of the input fails over through the same ad
 addresses that belong to the list are rewritten: a CDN or tokenised URL keeps its host, because its
 signature depends on it.
 
+#### Live streams continue across provider body endings
+
+Some panels answer a live channel with a body that ends after a few megabytes and serve the same
+channel again on a fresh request. Tuliprox treats such a body as one episode of a continuous
+stream: when the provider closes it and the viewer is still connected, Tuliprox reopens the channel
+on the **same account** and keeps writing to the same client response. The viewer sees one
+continuous stream, exactly as a player that reconnects on its own would.
+
+Reconnecting stops when the viewer disconnects, or after several consecutive attempts that deliver
+no data at all (the channel is genuinely gone). This applies to live MPEG-TS only — VOD, series,
+recordings and HLS keep their single-response behaviour, because restarting a finite resource would
+replay it from the beginning.
+
+> If you see `channel_unavailable` for a channel that played for a while, the provider stopped
+> serving it entirely: Tuliprox exhausted its reconnect attempts. A short playback that ends is not
+> the same event — that is the provider ending one body.
+
 
 #### Automatic Xtream Expiration Refresh
 

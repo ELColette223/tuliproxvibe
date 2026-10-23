@@ -240,16 +240,21 @@ impl ProviderStreamFactoryOptions {
     #[inline]
     pub fn was_range_requested(&self) -> bool { self.flags.contains(ProviderStreamFactoryFlags::RangeRequested) }
 
-    /// Shared live MPEG-TS bodies get continuity enforcement only when the response is an
-    /// unencoded, complete 200 with `video/mp2t`: only then can a mid-body reopen not be
-    /// mistaken for a continuation of the same transport stream.
-    pub(super) fn shared_mpegts_recovery_enabled(&self, info: &ProviderStreamInfo) -> bool {
-        self.should_retry_provider_request() && self.shared_mpegts_compatible_response(info)
+    /// Live MPEG-TS bodies may be reopened when the provider closes them.
+    ///
+    /// A provider can end the body after a few megabytes and still serve the channel on a fresh
+    /// request. Tying the client response to that first body drops a viewer who is still watching,
+    /// so the body is reopened instead — for shared and per-client streams alike.
+    ///
+    /// The response shape gates it: only a complete, unencoded 200 with `video/mp2t` can be
+    /// continued, because a `content-length`, a range, an encoding or a fallback body all mean the
+    /// upstream bytes are not a plain live transport stream.
+    pub(super) fn live_mpegts_recovery_enabled(&self, info: &ProviderStreamInfo) -> bool {
+        self.should_retry_provider_request() && self.live_mpegts_compatible_response(info)
     }
 
-    fn shared_mpegts_compatible_response(&self, info: &ProviderStreamInfo) -> bool {
-        self.flags.contains(ProviderStreamFactoryFlags::ShareStream)
-            && self.item_type == shared::model::PlaylistItemType::Live
+    fn live_mpegts_compatible_response(&self, info: &ProviderStreamInfo) -> bool {
+        self.item_type == shared::model::PlaylistItemType::Live
             && !self.was_range_requested()
             && matches!(
                 self.content_representation,

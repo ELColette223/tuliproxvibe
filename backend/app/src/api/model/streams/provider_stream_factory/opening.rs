@@ -3,16 +3,16 @@ use super::{
     options::should_wrap_provider_stream_in_buffer,
     request::get_provider_stream,
     ProviderOpenGuard, ProviderStreamFactoryFlags, ProviderStreamFactoryOptions, ProviderStreamOpenLifecycle,
-    SHARED_MPEGTS_BODY_IDLE,
+    LIVE_MPEGTS_BODY_IDLE, LIVE_MPEGTS_MAX_EMPTY_EPISODES, LIVE_MPEGTS_RECONNECT_MIN_INTERVAL,
 };
 use crate::api::model::{
     create_channel_unavailable_stream, get_response_headers, streams::client_stream::ClientStream, BoxedProviderStream,
     CustomVideoStreamType, ProviderStreamFactoryResponse,
 };
-use futures::{stream, StreamExt};
+use futures::{stream, Future, StreamExt};
 use log::warn;
 use reqwest::StatusCode;
-use shared::model::ConnectFailureReason;
+use shared::{model::ConnectFailureReason, utils::sanitize_sensitive_info};
 use std::{sync::Arc, time::Duration};
 use tokio::time::Instant as TokioInstant;
 use tokio_util::sync::CancellationToken;
@@ -34,16 +34,98 @@ pub enum ProviderStreamOpen {
     },
 }
 
-/// Shared live MPEG-TS bodies must not be reopened mid-response: a new upstream HTTP body
-/// cannot be proven to continue the same transport stream, so the origin ends and the next
-/// client request opens a fresh response.
-fn enforce_shared_mpegts_body_continuity(
+/// What the reconnect decided for the episode that just ended.
+pub(super) enum EpisodePlan {
+    /// Another upstream body is ready; its bytes continue on the same client response.
+    ///
+    /// `empty_episodes` carries the running count of consecutive episodes without data, so the
+    /// caller can persist it and the limit is actually reached.
+    Reopen { body: BoxedProviderStream, opened_at: TokioInstant, empty_episodes: u32 },
+    /// No further episode can serve the viewer.
+    Stop,
+}
+
+/// Opens the next episode of a live MPEG-TS stream.
+///
+/// `empty_episodes` counts consecutive episodes that produced no byte, including this one. The
+/// caller resets it on the first byte received, so a provider that legitimately ends bodies after
+/// some megabytes keeps reconnecting, while one that answers with nothing gives up.
+pub(super) async fn next_mpegts_episode<F, Fut>(
+    options: &ProviderStreamFactoryOptions,
+    reopen: &mut F,
+    empty_episodes: u32,
+    opened_at: TokioInstant,
+) -> EpisodePlan
+where
+    F: FnMut() -> Fut + Send + 'static,
+    Fut: Future<Output = Option<BoxedProviderStream>> + Send + 'static,
+{
+    if !options.should_continue() {
+        return EpisodePlan::Stop;
+    }
+    let empty_episodes = empty_episodes.saturating_add(1);
+    if empty_episodes > LIVE_MPEGTS_MAX_EMPTY_EPISODES {
+        warn!(
+            "Live MPEG-TS reconnect gave up after {empty_episodes} episodes without data for {}",
+            sanitize_sensitive_info(options.get_url_as_str())
+        );
+        return EpisodePlan::Stop;
+    }
+
+    // A provider that closes bodies immediately must not turn this into a request flood. The
+    // interval is measured from the previous open, so episodes that delivered data do not wait.
+    let since_open = TokioInstant::now().saturating_duration_since(opened_at);
+    if since_open < LIVE_MPEGTS_RECONNECT_MIN_INTERVAL {
+        let wait = LIVE_MPEGTS_RECONNECT_MIN_INTERVAL - since_open;
+        tokio::select! {
+            biased;
+            () = options.reconnect_flag.cancelled() => return EpisodePlan::Stop,
+            () = tokio::time::sleep(wait) => {},
+        }
+    }
+
+    match reopen().await {
+        Some(body) if options.should_continue() => {
+            EpisodePlan::Reopen { body, opened_at: TokioInstant::now(), empty_episodes }
+        }
+        _ => EpisodePlan::Stop,
+    }
+}
+
+/// A live MPEG-TS body is reopened when the provider closes it.
+///
+/// Many panels answer a channel with a body that ends after a few megabytes and serve the same
+/// channel on a fresh request. The viewer is still watching and still expects bytes, so ending the
+/// client response at that first EOF drops a working stream. This wrapper treats the upstream body
+/// as a sequence of episodes: when one ends, the next request is opened and its bytes continue on
+/// the same downstream response.
+///
+/// Reopening is bounded by two things the caller can trust:
+/// - the client's `reconnect_flag` — once the viewer leaves there is nobody to serve;
+/// - `LIVE_MPEGTS_MAX_EMPTY_EPISODES` consecutive episodes that produced no byte, so a channel that
+///   never comes back ends instead of looping.
+///
+/// `reopen` receives the same options the first open used (URL already selected for the account,
+/// headers, laterals), so a reconnect stays on the same account and does not re-resolve anything.
+pub(super) fn enforce_live_mpegts_body_continuity<F, Fut>(
     initial: BoxedProviderStream,
     options: ProviderStreamFactoryOptions,
-) -> BoxedProviderStream {
+    reopen: F,
+) -> BoxedProviderStream
+where
+    F: FnMut() -> Fut + Send + 'static,
+    Fut: Future<Output = Option<BoxedProviderStream>> + Send + 'static,
+{
     stream::unfold(
-        (initial, options, TokioInstant::now() + SHARED_MPEGTS_BODY_IDLE),
-        |(mut body, options, mut idle_deadline)| async move {
+        (
+            initial,
+            options,
+            TokioInstant::now() + LIVE_MPEGTS_BODY_IDLE,
+            reopen,
+            0_u32,
+            TokioInstant::now(),
+        ),
+        |(mut body, options, mut idle_deadline, mut reopen, mut empty_episodes, mut opened_at)| async move {
             if !options.should_continue() {
                 return None;
             }
@@ -57,13 +139,16 @@ fn enforce_shared_mpegts_body_continuity(
                     Ok(Some(Ok(bytes))) if !bytes.is_empty() => {
                         // Media progress pushes the idle deadline forward; only a genuinely
                         // silent upstream reaches it.
-                        idle_deadline = TokioInstant::now() + SHARED_MPEGTS_BODY_IDLE;
-                        return Some((Ok(bytes), (body, options, idle_deadline)));
+                        idle_deadline = TokioInstant::now() + LIVE_MPEGTS_BODY_IDLE;
+                        return Some((Ok(bytes), (body, options, idle_deadline, reopen, 0, opened_at)));
                     }
                     Ok(Some(Ok(_))) => {
                         if TokioInstant::now() >= idle_deadline {
-                            warn!("Shared MPEG-TS upstream body idle timeout; ending origin");
-                            return Some((Err(StreamError::ProviderIdleTimeout), (body, options, idle_deadline)));
+                            warn!("Live MPEG-TS upstream body idle timeout; ending stream");
+                            return Some((
+                                Err(StreamError::ProviderIdleTimeout),
+                                (body, options, idle_deadline, reopen, empty_episodes, opened_at),
+                            ));
                         }
                         tokio::select! {
                             biased;
@@ -73,16 +158,51 @@ fn enforce_shared_mpegts_body_continuity(
                         }
                     }
                     Ok(Some(Err(error))) => {
-                        warn!("Shared MPEG-TS upstream body error; ending origin");
-                        return Some((Err(error), (body, options, idle_deadline)));
+                        // A transport error mid-body means this episode is over; the reconnect
+                        // below decides whether another one can serve the viewer.
+                        debug_if_enabled!("Live MPEG-TS upstream body error; reopening");
+                        warn!("Live MPEG-TS upstream body error ({error}); reopening");
+                        match next_mpegts_episode(&options, &mut reopen, empty_episodes, opened_at).await {
+                            EpisodePlan::Reopen { body: next, opened_at: next_opened, empty_episodes: next_empty } => {
+                                body = next;
+                                idle_deadline = TokioInstant::now() + LIVE_MPEGTS_BODY_IDLE;
+                                opened_at = next_opened;
+                                empty_episodes = next_empty;
+                                // Continue polling the new body in this same unfold step: emitting an
+                                // empty chunk would surface a zero-length read to the viewer.
+                                continue;
+                            }
+                            EpisodePlan::Stop => {
+                                return Some((
+                                    Err(error),
+                                    (body, options, idle_deadline, reopen, empty_episodes, opened_at),
+                                ));
+                            }
+                        }
                     }
                     Ok(None) => {
-                        debug_if_enabled!("Shared MPEG-TS upstream body ended; closing origin");
-                        return None;
+                        debug_if_enabled!("Live MPEG-TS upstream body ended; reopening");
+                        match next_mpegts_episode(&options, &mut reopen, empty_episodes, opened_at).await {
+                            EpisodePlan::Reopen { body: next, opened_at: next_opened, empty_episodes: next_empty } => {
+                                body = next;
+                                idle_deadline = TokioInstant::now() + LIVE_MPEGTS_BODY_IDLE;
+                                opened_at = next_opened;
+                                empty_episodes = next_empty;
+                                // Same as the error branch: keep polling so no empty chunk is emitted.
+                                continue;
+                            }
+                            EpisodePlan::Stop => {
+                                debug_if_enabled!("Live MPEG-TS reconnect gave up; closing stream");
+                                return None;
+                            }
+                        }
                     }
                     Err(_) => {
-                        warn!("Shared MPEG-TS upstream body idle timeout; ending origin");
-                        return Some((Err(StreamError::ProviderIdleTimeout), (body, options, idle_deadline)));
+                        warn!("Live MPEG-TS upstream body idle timeout; ending stream");
+                        return Some((
+                            Err(StreamError::ProviderIdleTimeout),
+                            (body, options, idle_deadline, reopen, empty_episodes, opened_at),
+                        ));
                     }
                 }
             }
@@ -122,9 +242,23 @@ pub async fn create_provider_stream_outcome(
     let mut open_guard = ProviderOpenGuard { token: stream_options.get_completion_token(), handed_off: false };
     match get_provider_stream(ctx, client, &stream_options).await {
         Ok(Some(ProviderStreamFactoryResponse { stream: init_stream, info, provider_session_headers, .. })) => {
-            let continuity_guarded = stream_options.shared_mpegts_recovery_enabled(&info);
-            let init_stream = if continuity_guarded {
-                enforce_shared_mpegts_body_continuity(init_stream, stream_options.clone())
+            let init_stream = if stream_options.live_mpegts_recovery_enabled(&info) {
+                // Reopen with the same options: the URL is already the one selected for this
+                // account, so a reconnect stays on it instead of re-resolving laterals.
+                let reopen_ctx = ctx.clone();
+                let reopen_client = client.clone();
+                let reopen_options = stream_options.clone();
+                enforce_live_mpegts_body_continuity(init_stream, stream_options.clone(), move || {
+                    let ctx = reopen_ctx.clone();
+                    let client = reopen_client.clone();
+                    let options = reopen_options.clone();
+                    async move {
+                        match get_provider_stream(&ctx, &client, &options).await {
+                            Ok(Some(ProviderStreamFactoryResponse { stream, .. })) => Some(stream),
+                            _ => None,
+                        }
+                    }
+                })
             } else {
                 init_stream
             };
