@@ -191,7 +191,7 @@ impl Stream for ActiveClientStream {
                                 DeferredProviderOpenState::Pending(context) => {
                                     let app_state = Arc::clone(&context.app_state);
                                     let client = {
-                                        let http_client = app_state.http_clients.default.load();
+                                        let http_client = app_state.http_clients.stream.load();
                                         http_client.as_ref().clone()
                                     };
                                     let lifecycle = self

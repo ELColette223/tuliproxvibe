@@ -53,7 +53,10 @@ fn bandwidth_limit_exceeded_status() -> StatusCode {
 }
 
 pub(super) fn is_account_full_status(status: StatusCode) -> bool {
+    // Panels disagree on the status for "you already hold your only connection": 429 and 509 are
+    // common, and 409 Conflict is what this deployment's panel answers (seen in production).
     status == StatusCode::TOO_MANY_REQUESTS
+        || status == StatusCode::CONFLICT
         || status == StatusCode::SERVICE_UNAVAILABLE
         || status == bandwidth_limit_exceeded_status()
 }
@@ -80,12 +83,20 @@ pub(super) fn looks_like_connection_limit_message(text: &str) -> bool {
 /// `rotate_on_full` can treat account-full responses as `AccountFull`
 /// instead of a generic channel-unavailable failure.
 pub(super) fn account_full_status_from_io_error(err: &std::io::Error) -> Option<StatusCode> {
+    let status = status_from_io_error(err)?;
+    is_account_full_status(status).then_some(status)
+}
+
+/// Recovers the HTTP status a low-level helper encoded into an `io::Error`.
+///
+/// The lateral failover engine walks every address of the account and reports the last failure as
+/// an `io::Error`, so a panel answer never reaches the response branch. Recovering the status is
+/// what keeps "this account has no such channel" distinguishable from a transport failure.
+pub(super) fn status_from_io_error(err: &std::io::Error) -> Option<StatusCode> {
     let message = err.to_string();
     let rest = message.strip_prefix("Request failed (")?;
     let code_token = rest.split([' ', ')']).next()?;
-    let code = code_token.parse::<u16>().ok()?;
-    let status = StatusCode::from_u16(code).ok()?;
-    is_account_full_status(status).then_some(status)
+    StatusCode::from_u16(code_token.parse::<u16>().ok()?).ok()
 }
 
 fn provider_content_type_looks_like_html(headers: &HeaderMap) -> bool {
@@ -114,6 +125,15 @@ pub(super) enum ProviderStreamRequestFailure {
     /// Kept distinct so `rotate_on_full` can retry on another account instead of
     /// serving a channel-unavailable response.
     AccountFull {
+        status: StatusCode,
+        provider_error_class: &'static str,
+    },
+    /// The provider resolved the account but has no such channel for it.
+    ///
+    /// Accounts of one panel can hold different channel sets, so a `404` on one account says
+    /// nothing about the next one. Kept distinct from `Status` so the caller can try another
+    /// account instead of serving a channel-unavailable body on the first attempt.
+    ChannelMissing {
         status: StatusCode,
         provider_error_class: &'static str,
     },
@@ -149,15 +169,18 @@ impl ProviderStreamPreparationError {
 impl ProviderStreamRequestFailure {
     pub(super) fn status(&self) -> StatusCode {
         match self {
-            Self::Status { status, .. } | Self::HlsStatus { status, .. } | Self::AccountFull { status, .. } => *status,
+            Self::Status { status, .. }
+            | Self::HlsStatus { status, .. }
+            | Self::AccountFull { status, .. }
+            | Self::ChannelMissing { status, .. } => *status,
         }
     }
 
     pub(super) fn provider_error_class(&self) -> &'static str {
         match self {
-            Self::Status { provider_error_class, .. } | Self::AccountFull { provider_error_class, .. } => {
-                provider_error_class
-            }
+            Self::Status { provider_error_class, .. }
+            | Self::AccountFull { provider_error_class, .. }
+            | Self::ChannelMissing { provider_error_class, .. } => provider_error_class,
             Self::HlsStatus { status, .. } => classify_provider_status_error(*status),
         }
     }
@@ -165,13 +188,20 @@ impl ProviderStreamRequestFailure {
     pub(super) fn should_serve_channel_unavailable(&self) -> bool {
         match self {
             Self::Status { serve_channel_unavailable, .. } => *serve_channel_unavailable,
-            Self::AccountFull { .. } => true,
+            Self::AccountFull { .. } | Self::ChannelMissing { .. } => true,
             Self::HlsStatus { .. } => false,
         }
     }
 
     pub(super) fn is_account_full(&self) -> bool {
         matches!(self, Self::AccountFull { .. })
+    }
+
+    /// Whether the panel has no such channel for this account.
+    ///
+    /// The answer is account-scoped: another account of the same input may hold the channel.
+    pub(super) fn is_channel_missing(&self) -> bool {
+        matches!(self, Self::ChannelMissing { .. })
     }
 }
 

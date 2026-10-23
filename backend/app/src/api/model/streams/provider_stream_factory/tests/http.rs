@@ -78,7 +78,6 @@ fn test_provider_stream_factory_options_range_logic() {
         stream_channel: None,
         connect_failure_stage: None,
         content_representation: ProviderContentRepresentationMode::PreserveOrigin,
-        proxy: None,
     });
     assert!(!options.was_range_requested());
     assert!(options.get_requested_range().is_none());
@@ -101,7 +100,6 @@ fn test_provider_stream_factory_options_range_logic() {
         stream_channel: None,
         connect_failure_stage: None,
         content_representation: ProviderContentRepresentationMode::PreserveOrigin,
-        proxy: None,
     });
     assert!(options.was_range_requested());
     assert_eq!(options.get_requested_range().and_then(|value| value.to_str().ok()), Some("bytes=100-"));
@@ -124,7 +122,6 @@ fn test_provider_stream_factory_options_range_logic() {
         stream_channel: None,
         connect_failure_stage: None,
         content_representation: ProviderContentRepresentationMode::PreserveOrigin,
-        proxy: None,
     });
     assert!(!options.was_range_requested());
     assert!(options.get_requested_range().is_none());
@@ -148,7 +145,6 @@ fn test_provider_stream_factory_options_range_logic() {
         stream_channel: None,
         connect_failure_stage: None,
         content_representation: ProviderContentRepresentationMode::PreserveOrigin,
-        proxy: None,
     });
     assert!(!options.was_range_requested()); // Stripped by filter
     assert!(options.get_requested_range().is_none());

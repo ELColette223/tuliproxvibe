@@ -62,7 +62,6 @@ pub struct ProviderStreamFactoryOptions {
     requested_range: Option<HeaderValue>,
     reconnect_flag: CancellationToken,
     provider: Option<Arc<ConfigProvider>>,
-    proxy: Option<crate::model::ProxyConfig>,
     username: Option<String>,
     client_ip: Option<String>,
     user_agent: Option<String>,

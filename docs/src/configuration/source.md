@@ -138,7 +138,7 @@ inputs:
 | `type`                  | Enum   |    No    | `m3u`   | Allowed: `m3u`, `xtream`, `stalker`, `library`, `staged`, `emby`, `jellyfin`, `plex` (see [Media server inputs](#27-media-server-inputs-plex-emby-jellyfin)), and `m3u_batch` / `xtream_batch` / `stalker_batch` (CSV offloading). Stalker inputs use the portal handshake/catalog flow instead of a plain playlist download.                                                                                                            |
 | `url`                   | String |  Yes*   |         | The Provider URL. *Optional when the input declares `url_aliases`, which then supply the address. Tuliprox supports magic scheme prefixes: `http(s)://`, `file://`, `batch://`, and **`provider://my_failover_provider`** (for the Failover System above).                                                                                                                                                                                                                                                               |
 | `username` / `password` | String |  Often   |         | Mandatory for `xtream` and for Stalker inputs using `credentials_only` or `mac_plus_credentials`. Stalker inputs using `mac_only` do not need them. `emby` and `jellyfin` inputs may use them instead of a token (login bootstrap).                                                                                                                                                                                                      |
-| `proxy`                 | Object |    No    |         | Xtream-only outgoing proxy (`url`, optional `username` and `password`). When present, this input proxy replaces the global `config.yml` proxy for this input's playlist, EPG, account-expiry, metadata, probe, HLS, and playback requests. Aliases inherit it. Supported URL schemes: `http`, `https`, `socks5`, and `socks5h`. Without this block, the global proxy remains the fallback.                                               |
+| `proxy`                 | Object |    No    |         | Xtream-only outgoing proxy (`url`, optional `username` and `password`). When present, this input proxy replaces the global `config.yml` proxy for this input's playlist, EPG, account-expiry, metadata, and probe requests. **Playback is never proxied** (MPEG-TS and HLS connect directly). Aliases inherit it. Supported URL schemes: `http`, `https`, `socks5`, and `socks5h`. Without this block, the global proxy remains the fallback. |
 | `enabled`               | Bool   |    No    | `true`  | If `false`, this input is completely ignored in all processing.                                                                                                                                                                                                                                                                                                                                                                          |
 | `sequential_group`      | Int    |    No    |         | Optional non-zero process-wide group ID. With `process_parallel: true`, complete refreshes of inputs sharing an ID run one after another, including all Stalker page slices. Different groups and ungrouped inputs may overlap. Not valid for `staged` inputs; a staged overlay inherits its provider job.                                                                                                                               |
 | `cache_duration`        | String |    No    | `0`     | **Crucial:** Determines how often Tuliprox actually downloads the raw list from the provider. At `1d` (1 day), Tuliprox serves from its local `.db` for 24 hours, even if you trigger hourly updates. This heavily protects against provider bans! Supported units are `s`, `m`, `h`, and `d`. If `cache_duration` is set, the cached provider playlist stored on disk is reused for subsequent updates instead of downloading it again. |
@@ -148,7 +148,7 @@ inputs:
 | `headers`               | Dict   |    No    |         | Custom HTTP headers for the download (e.g., `User-Agent: My-Player`).                                                                                                                                                                                                                                                                                                                                                                    |
 | `epg`                   | Object |    No    |         | Allows mapping of external XMLTV files (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                    |
 | `accounts`              | List   |    No    |         | Subscription accounts of this input; the first one is the main account (see [Accounts and Alternative URLs](#24-accounts-and-alternative-urls-accounts--url_aliases)). The legacy `aliases` list is still read and converted.                                                                         |
-| `url_aliases`           | List   |    No    |         | Alternative provider base URLs shared by the accounts, tried in order when a request fails (see [Accounts and Alternative URLs](#24-accounts-and-alternative-urls-accounts--url_aliases)).                                                                                                                                     |
+| `url_aliases`           | List   |    No    |         | Alternative provider base URLs shared by the accounts, used as a host fallback when a hostname does not answer (see [Accounts and Alternative URLs](#24-accounts-and-alternative-urls-accounts--url_aliases)).                                                                                                                  |
 | `staged`                | Object |    No    |         | Staged overlay settings. Only valid when `type: staged` (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                   |
 | `panel_api`             | Object |    No    |         | Automated reseller account generation (see [below](#input-subsections-object-keys)).                                                                                                                                                                                                                                                                                                                                                     |
 | `media_server`          | Object |   Yes*   |         | Settings of `plex`, `emby` and `jellyfin` inputs: library selection, credentials and catalog options. *Mandatory for these input types only; see [Media server inputs](#27-media-server-inputs-plex-emby-jellyfin).                                                                                                                                                                                                                      |
@@ -218,9 +218,14 @@ inputs:
 ```
 
 The override is all-or-nothing: once `inputs[].proxy` is defined, Tuliprox does not use the global `config.yml` proxy
-for that input. The same proxy is used for playlist import, automatic XMLTV, account login/expiration refresh,
-provider metadata, remote probes, reverse-proxy playback, and HLS manifests/resources. Input aliases inherit the parent
-proxy. Remove the input-level block to resume using the global proxy.
+for that input. The same proxy is used for playlist import, automatic XMLTV, account login/expiration refresh, provider
+metadata, and remote probes. Input aliases inherit the parent proxy. Remove the input-level block to resume using the
+global proxy.
+
+> **Playback is never proxied.** Live and VOD streams (MPEG-TS and HLS, including HLS manifests and segments) always
+> connect directly to the provider. A proxy adds a hop the provider does not see for a direct client, hides the client's
+> address, and makes a working channel depend on the proxy's own reachability. Configure the proxy for what needs it —
+> playlist fetching and discovery — and expect streaming to egress from this host.
 
 Proxy credentials must be either both present or both omitted. Supported schemes are `http://`, `https://`, `socks5://`,
 and `socks5h://`; invalid URLs or unsupported schemes make the source configuration fail validation instead of falling
@@ -921,10 +926,19 @@ declare or restrict a list of its own. The input-level `headers`, `epg`, `option
 
 #### Failover between alternative URLs
 
-When a request fails, Tuliprox retries it against the next address of the input's list and
-remembers the address that worked. The list is shared, so every account of the input fails over
-through the same addresses. Only addresses that belong to the list are rewritten: a CDN or
-tokenised URL keeps its host, because its signature depends on it.
+A lateral is a **URL fallback for the host**, not a second account. The login is what identifies the
+subscription; switching addresses is only useful when the hostname itself does not answer.
+
+When a request fails because of the host — connection error, timeout, or a 5xx/gateway status —
+Tuliprox retries it against the next address of the input's list and remembers the address that
+worked. When the panel answers with something about the **account** — 404 for a channel this login
+does not include, 401/403 for credentials, 402/451 for the account's state — the address is not the
+problem: every lateral of that account gets the same answer, so Tuliprox does not walk the list. On
+a 404 it moves to another account of the input instead.
+
+The list is shared, so every account of the input fails over through the same addresses. Only
+addresses that belong to the list are rewritten: a CDN or tokenised URL keeps its host, because its
+signature depends on it.
 
 
 #### Automatic Xtream Expiration Refresh

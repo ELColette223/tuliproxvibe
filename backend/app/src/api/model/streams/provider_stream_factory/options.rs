@@ -40,8 +40,6 @@ pub(crate) struct ProviderStreamFactoryParams<'a> {
     pub stream_channel: Option<&'a StreamChannel>,
     pub connect_failure_stage: Option<FailureStage>,
     pub content_representation: ProviderContentRepresentationMode,
-    /// Per-input outbound proxy; `None` means the shared/global client.
-    pub proxy: Option<&'a crate::model::ProxyConfig>,
 }
 
 impl ProviderStreamFactoryOptions {
@@ -63,7 +61,6 @@ impl ProviderStreamFactoryOptions {
             stream_channel,
             connect_failure_stage,
             content_representation,
-            proxy,
         } = request;
         let buffer_size = if stream_options.buffer_enabled { stream_options.buffer_size } else { 0 };
         let buffer_max_bytes = stream_options.buffer_max_bytes;
@@ -151,7 +148,6 @@ impl ProviderStreamFactoryOptions {
             completion_token: None,
             close_reason: None,
             account: None,
-            proxy: proxy.cloned(),
         }
     }
 
@@ -173,10 +169,6 @@ impl ProviderStreamFactoryOptions {
     pub fn get_close_reason(&self) -> Option<Arc<AtomicU8>> { self.close_reason.clone() }
 
     pub fn set_provider(&mut self, provider: Option<Arc<ConfigProvider>>) { self.provider = provider; }
-
-    pub fn set_proxy(&mut self, proxy: Option<crate::model::ProxyConfig>) { self.proxy = proxy; }
-
-    pub(crate) fn proxy(&self) -> Option<&crate::model::ProxyConfig> { self.proxy.as_ref() }
 
     pub fn apply_user_agent_stream_index(&mut self, stream_index: u64) {
         crate::utils::request::append_user_agent_stream_index(&mut self.headers, stream_index);

@@ -268,6 +268,8 @@ pub(in crate::api::endpoints::hls_api::tests) fn test_app_state_with_hls_proxy_a
             reqwest::Client::new(),
             reqwest::Client::new(),
             reqwest::Client::new(),
+            reqwest::Client::new(),
+            reqwest::Client::new(),
         )),
         recordings: Arc::new(crate::api::model::RecordingQueue::new()),
         cache: Arc::new(ArcSwapOption::default()),

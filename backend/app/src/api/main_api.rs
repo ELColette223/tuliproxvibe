@@ -354,6 +354,11 @@ async fn create_shared_data(
 
     let client = create_http_client(app_config)?;
     let client_no_redirect = create_http_client_no_redirect(app_config)?;
+    // Playback never uses a configured proxy; see `create_stream_client`.
+    let stream_client =
+        tuliprox_core::utils::request::create_stream_client(app_config, reqwest::redirect::Policy::limited(10))?;
+    let stream_client_no_redirect =
+        tuliprox_core::utils::request::create_stream_client(app_config, reqwest::redirect::Policy::none())?;
     let public_client_no_redirect = create_public_http_client_no_redirect(app_config)?;
     let resource_client_no_redirect = create_resource_http_client_no_redirect(app_config)?;
     let resource_public_client_no_redirect = create_resource_public_http_client_no_redirect(app_config)?;
@@ -378,6 +383,8 @@ async fn create_shared_data(
         http_clients: Arc::new(HttpClients::new(
             client,
             client_no_redirect,
+            stream_client,
+            stream_client_no_redirect,
             public_client_no_redirect,
             resource_client_no_redirect,
             resource_public_client_no_redirect,

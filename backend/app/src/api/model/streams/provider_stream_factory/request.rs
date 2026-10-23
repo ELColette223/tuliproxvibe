@@ -2,7 +2,7 @@ use super::{
     error::{
         account_full_status_from_io_error, classify_provider_io_error, classify_provider_status_error,
         failed_stream_account, is_account_full_status, looks_like_connection_limit_message,
-        should_reject_success_response_content_type, ProviderStreamRequestFailure,
+        should_reject_success_response_content_type, status_from_io_error, ProviderStreamRequestFailure,
     },
     options::ProviderRequestCredentialState,
     response::prepare_provider_stream_response_for_request,
@@ -234,11 +234,9 @@ async fn provider_stream_request(
     request_client: &reqwest::Client,
     stream_options: &ProviderStreamFactoryOptions,
 ) -> Result<Option<ProviderStreamFactoryResponse>, ProviderStreamRequestFailure> {
-    let global_proxy = ctx.app_config.config.load().proxy.clone();
+    // Playback connects directly: a configured proxy must never sit between the provider and the
+    // stream, so redirects are handled manually only when the destination policy requires it.
     let use_manual_redirects = stream_options.requires_public_destination()
-        || tuliprox_core::model::should_use_manual_redirects_for_proxy(
-            stream_options.proxy().or(global_proxy.as_ref()),
-        )
         || provider_headers_require_manual_redirects(stream_options.get_headers());
     if log_enabled!(log::Level::Debug) {
         let diagnostics =
@@ -252,45 +250,17 @@ async fn provider_stream_request(
     let response_result = if use_manual_redirects {
         let client_no_redirect = if stream_options.requires_public_destination() {
             ctx.http_clients.public_no_redirect.load().as_ref().clone()
-        } else if stream_options.proxy().is_some() {
-            // The input's proxy must be honoured on redirects too; the shared client is not.
-            let fallback = ctx.http_clients.no_redirect.load();
-            match tuliprox_core::utils::request::create_input_http_client_no_redirect(
-                &ctx.app_config,
-                &fallback,
-                stream_options.proxy(),
-            ) {
-                Ok(client) => client,
-                Err(err) => {
-                    return Err(ProviderStreamRequestFailure::Status {
-                        status: StatusCode::BAD_GATEWAY,
-                        provider_error_class: classify_provider_io_error(&io::Error::other(err.to_string())),
-                        serve_channel_unavailable: true,
-                    });
-                }
-            }
         } else {
-            ctx.http_clients.no_redirect.load().as_ref().clone()
+            ctx.http_clients.stream_no_redirect.load().as_ref().clone()
         };
         send_with_manual_redirects(&client_no_redirect, stream_options, &ctx.app_config).await
     } else {
         // Use send_with_retry_and_provider for automatic failover support
         let url = stream_options.get_url();
         let provider = stream_options.get_provider().cloned();
-        let request_client = match tuliprox_core::utils::request::create_input_http_client(
-            &ctx.app_config,
-            request_client,
-            stream_options.proxy(),
-        ) {
-            Ok(client) => client,
-            Err(err) => {
-                return Err(ProviderStreamRequestFailure::Status {
-                    status: StatusCode::BAD_GATEWAY,
-                    provider_error_class: classify_provider_io_error(&io::Error::other(err.to_string())),
-                    serve_channel_unavailable: true,
-                });
-            }
-        };
+        // The caller supplies the proxy-free stream client; a configured proxy is never used
+        // for playback.
+        let request_client = request_client.clone();
 
         send_with_retry_and_provider_policy_with_options(
             &ctx.app_config,
@@ -394,6 +364,17 @@ async fn provider_stream_request(
             }
             if status.is_client_error() {
                 debug!("Client error status response : {status}");
+                // A 404 means the panel resolved the account but has no such channel for it.
+                // Accounts of the same input can hold different channel sets, so another account
+                // may still serve the stream; keep the answer distinguishable from a dead channel.
+                if status == StatusCode::NOT_FOUND
+                    && !stream_options.flags.contains(ProviderStreamFactoryFlags::HlsResource)
+                {
+                    return Err(ProviderStreamRequestFailure::ChannelMissing {
+                        status,
+                        provider_error_class: classify_provider_status_error(status),
+                    });
+                }
                 return match status {
                     StatusCode::NOT_FOUND
                     | StatusCode::FORBIDDEN
@@ -452,6 +433,16 @@ async fn provider_stream_request(
                     return Err(ProviderStreamRequestFailure::AccountFull {
                         status,
                         provider_error_class: "account_full",
+                    });
+                }
+                // The lateral failover already tried every address of this account; a 404 there
+                // means the panel has no such channel for it, not that the origin is unreachable.
+                // With laterals no longer retried on a 404, this also covers the first attempt.
+                if status_from_io_error(&err) == Some(StatusCode::NOT_FOUND) {
+                    debug!("Channel-missing status recovered from transport error: {err}");
+                    return Err(ProviderStreamRequestFailure::ChannelMissing {
+                        status: StatusCode::NOT_FOUND,
+                        provider_error_class: classify_provider_status_error(StatusCode::NOT_FOUND),
                     });
                 }
             }

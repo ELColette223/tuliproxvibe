@@ -4,7 +4,7 @@ use super::{
     next_provider_url_index, preview_request_diagnostics_for_logging, preview_request_target_for_logging,
     request_header_value, resolve_attempt_target, response_with_body, same_origin,
     send_input_with_retry_and_provider_policy_with_manual_redirects_and_options_result, send_with_retry_and_provider,
-    should_try_next_ip_on_connect_error, start_plain_http_server_with_body, start_plain_http_server_with_response,
+    should_try_next_ip_on_connect_error, should_trigger_failover, start_plain_http_server_with_body, start_plain_http_server_with_response,
     start_recording_http_server, test_input_source, test_retry_config, text_response_error_log_label,
     InputEpgFileRequest, PublicIpResolver, RequestFetchOptions, ResourceDestination, TextContentBodyOptions,
     TextContentFetchOptions,
@@ -978,4 +978,42 @@ fn test_lateral_rotation_at_index_zero_keeps_the_url() {
     let target = super::super::attempt::resolve_attempt_target_at_provider_index(&url, Some(&provider), 0);
 
     assert_eq!(target.request_url.as_str(), "http://a.example/live/1.ts");
+}
+
+/// A lateral is a URL fallback for a host that does not answer, not a rotation of accounts.
+///
+/// A 404 is the panel saying "this login does not hold that channel". Every lateral of the same
+/// account is answered by the same panel, so retrying there cannot help; the caller must fall back
+/// to another account instead.
+#[test]
+fn a_missing_channel_does_not_switch_laterals() {
+    assert!(
+        !should_trigger_failover(reqwest::StatusCode::NOT_FOUND),
+        "the panel answered; another hostname cannot add the channel"
+    );
+}
+
+/// Host and transport failures do fall back to the next lateral.
+#[test]
+fn host_failures_switch_to_the_next_lateral() {
+    for status in [
+        reqwest::StatusCode::BAD_GATEWAY,
+        reqwest::StatusCode::GATEWAY_TIMEOUT,
+        reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        reqwest::StatusCode::REQUEST_TIMEOUT,
+        reqwest::StatusCode::PROXY_AUTHENTICATION_REQUIRED,
+        reqwest::StatusCode::GONE,
+    ] {
+        assert!(should_trigger_failover(status), "{status} must fall back to the next lateral");
+    }
+}
+
+/// Answers about the login itself are never a reason to change host.
+#[test]
+fn account_answers_do_not_switch_laterals() {
+    for status in [reqwest::StatusCode::UNAUTHORIZED, reqwest::StatusCode::FORBIDDEN] {
+        assert!(!should_trigger_failover(status), "{status} is about the login, not the host");
+    }
 }

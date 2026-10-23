@@ -169,6 +169,9 @@ async fn open_provider_stream_with_optional_rotation(
     session_owner: Option<&str>,
     request_url: &mut Arc<str>,
 ) -> (Option<BoxedProviderStream>, ProviderStreamInfo, ProviderSessionHeaders, Option<CancellationToken>) {
+    // Copied out of the strategy so the rotation step can mutate the handle while this closure
+    // still builds options for the next attempt.
+    let input_headers = streaming_strategy.input_headers.clone();
     // The provider this attempt rotates through. It comes from the allocated account, not from
     // the URL: a persisted playlist URL is a plain `http(s)` address, so `get_resolve_provider`
     // returns `None` for it and the account's laterals would never reach the retry engine.
@@ -182,7 +185,7 @@ async fn open_provider_stream_with_optional_rotation(
             stream_options,
             stream_url: url,
             req_headers,
-            input_headers: streaming_strategy.input_headers.as_ref(),
+            input_headers: input_headers.as_ref(),
             session_headers,
             disabled_headers: disabled_headers.as_ref(),
             default_user_agent: default_user_agent.as_deref(),
@@ -191,13 +194,11 @@ async fn open_provider_stream_with_optional_rotation(
             stream_channel: Some(stream_channel),
             connect_failure_stage: Some(FailureStage::ProviderOpen),
             content_representation,
-            proxy: input.proxy.as_ref(),
         });
         if let Some(stream_index) = user_agent_stream_index {
             options.apply_user_agent_stream_index(stream_index);
         }
         options.set_provider(account_provider.or_else(|| input.get_resolve_provider(url.as_str())));
-        options.set_proxy(input.proxy.clone());
         options.apply_input_options(input);
         if input.input_type.is_stalker() {
             options.require_public_destination();
@@ -206,11 +207,11 @@ async fn open_provider_stream_with_optional_rotation(
     };
 
     let mut excluded_providers = HashSet::new();
-    let max_attempts = if input.rotate_on_connection_full() {
-        app_state.active_provider.provider_names_for_input(&input.name).len().max(1)
-    } else {
-        1
-    };
+    // An account can be missing a channel even though the panel serves it for another login, so
+    // a channel-scoped rejection always gets another account. The connection policy only decides
+    // whether an account-full rejection rotates.
+    let account_count = app_state.active_provider.provider_names_for_input(&input.name).len().max(1);
+    let max_attempts = if account_count > 1 { account_count } else { 1 };
 
     let mut last_account_full: Option<(StatusCode, &'static str)> = None;
     for attempt in 0..max_attempts {
@@ -233,7 +234,7 @@ async fn open_provider_stream_with_optional_rotation(
         let lifecycle = streaming_strategy.provider_handle.as_ref().and_then(ProviderStreamOpenLifecycle::from_managed);
         match open_provider_stream_outcome_with_lifecycle(
             &app_state.provider_stream_ctx(),
-            &app_state.http_clients.default.load(),
+            &app_state.http_clients.stream.load(),
             options,
             lifecycle,
         )
@@ -244,67 +245,59 @@ async fn open_provider_stream_with_optional_rotation(
             }
             ProviderStreamOpenOutcome::AccountFull { status, provider_error_class } => {
                 last_account_full = Some((status, provider_error_class));
+                // Only the connection policy decides whether a full account rotates.
                 if !input.rotate_on_connection_full() {
                     break;
                 }
-                let failed_provider = streaming_strategy
-                    .provider_handle
-                    .as_ref()
-                    .and_then(|managed| managed.handle())
-                    .and_then(|handle| handle.allocation.get_provider_name());
-                let Some(failed_provider) = failed_provider else {
-                    break;
-                };
-                excluded_providers.insert(failed_provider);
-                drop(streaming_strategy.provider_handle.take());
-
-                let lease = session_owner.map(|owner| {
-                    PlaybackLeaseRef::new(
-                        owner,
-                        PlaybackKind::classify(item_type, extract_extension_from_url(stream_url)),
-                    )
-                });
-                let Some(next_handle) = app_state
-                    .active_provider
-                    .acquire_connection_with_lease_for_session_await_excluding(
-                        &input.name,
-                        &fingerprint.addr,
-                        allow_provider_grace,
-                        user_priority,
-                        connection_kind,
-                        lease,
-                        &excluded_providers,
-                    )
-                    .await
-                else {
-                    break;
-                };
-                let managed =
-                    tuliprox_session::ManagedProviderHandle::new(Arc::clone(&app_state.active_provider), next_handle);
-                let Some(provider_cfg) = managed.handle().and_then(|handle| handle.allocation.provider()) else {
-                    drop(managed);
-                    break;
-                };
-                let Some((_provider_name, rewritten_url)) = select_provider_stream_url(
-                    stream_url,
+                let rotated = rotate_to_next_account(RotateContext {
+                    app_state,
                     input,
-                    provider_cfg,
+                    streaming_strategy,
+                    excluded_providers: &mut excluded_providers,
+                    request_url,
+                    stream_url,
+                    fingerprint,
+                    item_type,
+                    session_owner,
+                    allow_provider_grace,
+                    user_priority,
+                    connection_kind,
                     accept_requested_stream_url,
-                    &app_state.app_config,
-                )
-                .await
-                else {
-                    drop(managed);
+                })
+                .await;
+                if !rotated {
                     break;
-                };
-                *request_url = Arc::<str>::from(rewritten_url);
-                streaming_strategy.provider_handle = Some(managed);
+                }
+            }
+            ProviderStreamOpenOutcome::ChannelMissing { status, provider_error_class } => {
+                // The panel has no such channel for this login. Another account of the same input
+                // may carry it, so retry there before answering channel-unavailable.
                 warn!(
-                    "rotate_on_full: attempt {} failed with {} (status {}); retrying with next provider",
+                    "Attempt {}: account has no channel {} (status {} / {}); retrying with next account",
                     attempt + 1,
-                    provider_error_class,
-                    status
+                    sanitize_sensitive_info(request_url.as_ref()),
+                    status,
+                    provider_error_class
                 );
+                let rotated = rotate_to_next_account(RotateContext {
+                    app_state,
+                    input,
+                    streaming_strategy,
+                    excluded_providers: &mut excluded_providers,
+                    request_url,
+                    stream_url,
+                    fingerprint,
+                    item_type,
+                    session_owner,
+                    allow_provider_grace,
+                    user_priority,
+                    connection_kind,
+                    accept_requested_stream_url,
+                })
+                .await;
+                if !rotated {
+                    break;
+                }
             }
             ProviderStreamOpenOutcome::UpstreamStatus { status, headers } => {
                 // HLS resources never rotate: the upstream status and its retry headers are the
@@ -321,6 +314,90 @@ async fn open_provider_stream_with_optional_rotation(
         }
     }
     (None, None, ProviderSessionHeaders::default(), None)
+}
+
+/// Everything one rotation step needs to acquire the next account and rewrite its URL.
+struct RotateContext<'a> {
+    app_state: &'a Arc<AppState>,
+    input: &'a Arc<ConfigInput>,
+    streaming_strategy: &'a mut StreamingStrategy,
+    excluded_providers: &'a mut HashSet<Arc<str>>,
+    request_url: &'a mut Arc<str>,
+    stream_url: &'a str,
+    fingerprint: &'a Fingerprint,
+    item_type: PlaylistItemType,
+    session_owner: Option<&'a str>,
+    allow_provider_grace: bool,
+    user_priority: i8,
+    connection_kind: crate::api::model::ConnectionKind,
+    accept_requested_stream_url: bool,
+}
+
+/// Moves the request to another account of the same input.
+///
+/// Returns `false` when no further account is available, which tells the caller to stop trying.
+/// The previous account is excluded so a rejection that is scoped to it cannot loop.
+async fn rotate_to_next_account(context: RotateContext<'_>) -> bool {
+    let RotateContext {
+        app_state,
+        input,
+        streaming_strategy,
+        excluded_providers,
+        request_url,
+        stream_url,
+        fingerprint,
+        item_type,
+        session_owner,
+        allow_provider_grace,
+        user_priority,
+        connection_kind,
+        accept_requested_stream_url,
+    } = context;
+
+    let Some(failed_provider) = streaming_strategy
+        .provider_handle
+        .as_ref()
+        .and_then(|managed| managed.handle())
+        .and_then(|handle| handle.allocation.get_provider_name())
+    else {
+        return false;
+    };
+    excluded_providers.insert(failed_provider);
+    drop(streaming_strategy.provider_handle.take());
+
+    let lease = session_owner.map(|owner| {
+        PlaybackLeaseRef::new(owner, PlaybackKind::classify(item_type, extract_extension_from_url(stream_url)))
+    });
+    let Some(next_handle) = app_state
+        .active_provider
+        .acquire_connection_with_lease_for_session_await_excluding(
+            &input.name,
+            &fingerprint.addr,
+            allow_provider_grace,
+            user_priority,
+            connection_kind,
+            lease,
+            excluded_providers,
+        )
+        .await
+    else {
+        return false;
+    };
+    let managed = tuliprox_session::ManagedProviderHandle::new(Arc::clone(&app_state.active_provider), next_handle);
+    let Some(provider_cfg) = managed.handle().and_then(|handle| handle.allocation.provider()) else {
+        drop(managed);
+        return false;
+    };
+    let Some((_provider_name, rewritten_url)) =
+        select_provider_stream_url(stream_url, input, provider_cfg, accept_requested_stream_url, &app_state.app_config)
+            .await
+    else {
+        drop(managed);
+        return false;
+    };
+    *request_url = Arc::<str>::from(rewritten_url);
+    streaming_strategy.provider_handle = Some(managed);
+    true
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines, clippy::fn_params_excessive_bools)]
@@ -587,7 +664,6 @@ pub(super) async fn create_stream_response_details(
                                             stream_channel: Some(stream_channel),
                                             connect_failure_stage: Some(FailureStage::ProviderOpen),
                                             content_representation,
-                                            proxy: input.proxy.as_ref(),
                                         },
                                     );
                                     if let Some(stream_index) = user_agent_stream_index {
@@ -604,7 +680,6 @@ pub(super) async fn create_stream_response_details(
                                     options.set_provider(
                                         account_provider.or_else(|| input.get_resolve_provider(url.as_ref())),
                                     );
-                                    options.set_proxy(input.proxy.clone());
                                     options.apply_input_options(input);
                                     options.require_public_destination();
                                     if let Some(m) = streaming_strategy.provider_handle.as_mut() {
@@ -617,7 +692,7 @@ pub(super) async fn create_stream_response_details(
                                         .and_then(ProviderStreamOpenLifecycle::from_managed);
                                     let retried = open_provider_stream_with_lifecycle(
                                         &app_state.provider_stream_ctx(),
-                                        &app_state.http_clients.default.load(),
+                                        &app_state.http_clients.stream.load(),
                                         options,
                                         retry_lifecycle,
                                     )

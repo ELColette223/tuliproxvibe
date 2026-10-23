@@ -104,6 +104,12 @@ pub enum ProviderStreamOpenOutcome {
         status: StatusCode,
         provider_error_class: &'static str,
     },
+    /// The panel has no such channel for this account. Another account of the same input may
+    /// have it, so the caller retries there before giving up on the stream.
+    ChannelMissing {
+        status: StatusCode,
+        provider_error_class: &'static str,
+    },
     Failed,
 }
 
@@ -218,6 +224,11 @@ pub async fn create_provider_stream_outcome(
                 );
                 return ProviderStreamOpenOutcome::AccountFull { status, provider_error_class };
             }
+            if failure.is_channel_missing() {
+                // The channel name is valid at this panel but absent for this account; another
+                // account of the same input may still carry it.
+                return ProviderStreamOpenOutcome::ChannelMissing { status, provider_error_class };
+            }
             record_provider_open_failure(
                 ctx,
                 &stream_options,
@@ -256,7 +267,7 @@ pub async fn create_provider_stream(
         ProviderStreamOpenOutcome::UpstreamStatus { status, headers } => {
             Some(ProviderStreamOpen::UpstreamStatus { status, headers })
         }
-        ProviderStreamOpenOutcome::AccountFull { .. } => {
+        ProviderStreamOpenOutcome::AccountFull { .. } | ProviderStreamOpenOutcome::ChannelMissing { .. } => {
             let (boxed_provider_stream, response_info) =
                 create_channel_unavailable_stream(&ctx.app_config, &response_headers, StatusCode::OK);
             boxed_provider_stream.map(|stream| {
