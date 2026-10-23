@@ -105,6 +105,7 @@ pub struct ProviderStreamOpenLifecycle {
 mod tests;
 
 mod error;
+mod mpegts_pts_gate;
 mod opening;
 mod options;
 mod request;

@@ -1,5 +1,6 @@
 use super::{
     error::{record_provider_open_failure, ProviderStreamRequestFailure},
+    mpegts_pts_gate::MpegTsPtsGate,
     options::should_wrap_provider_stream_in_buffer,
     request::get_provider_stream,
     ProviderOpenGuard, ProviderStreamFactoryFlags, ProviderStreamFactoryOptions, ProviderStreamOpenLifecycle,
@@ -9,6 +10,7 @@ use crate::api::model::{
     create_channel_unavailable_stream, get_response_headers, streams::client_stream::ClientStream, BoxedProviderStream,
     CustomVideoStreamType, ProviderStreamFactoryResponse,
 };
+use bytes::Bytes;
 use futures::{stream, Future, StreamExt};
 use log::warn;
 use reqwest::StatusCode;
@@ -107,6 +109,10 @@ where
 ///
 /// `reopen` receives the same options the first open used (URL already selected for the account,
 /// headers, laterals), so a reconnect stays on the same account and does not re-resolve anything.
+///
+/// Each reopened episode begins with a few seconds of replayed content (the provider serves from
+/// behind live edge). The [`MpegTsPtsGate`] drops that overlap so the timestamps the viewer
+/// receives never jump backwards, which is what keeps a player's clock from freezing the picture.
 pub(super) fn enforce_live_mpegts_body_continuity<F, Fut>(
     initial: BoxedProviderStream,
     options: ProviderStreamFactoryOptions,
@@ -124,8 +130,9 @@ where
             reopen,
             0_u32,
             TokioInstant::now(),
+            MpegTsPtsGate::new(),
         ),
-        |(mut body, options, mut idle_deadline, mut reopen, mut empty_episodes, mut opened_at)| async move {
+        |(mut body, options, mut idle_deadline, mut reopen, mut empty_episodes, mut opened_at, mut gate)| async move {
             if !options.should_continue() {
                 return None;
             }
@@ -140,14 +147,23 @@ where
                         // Media progress pushes the idle deadline forward; only a genuinely
                         // silent upstream reaches it.
                         idle_deadline = TokioInstant::now() + LIVE_MPEGTS_BODY_IDLE;
-                        return Some((Ok(bytes), (body, options, idle_deadline, reopen, 0, opened_at)));
+                        let mut delivered = Vec::with_capacity(bytes.len());
+                        gate.push_chunk(&bytes, &mut delivered);
+                        if delivered.is_empty() {
+                            // The whole chunk was overlapped replay; keep reading this episode.
+                            continue;
+                        }
+                        return Some((
+                            Ok(Bytes::from(delivered)),
+                            (body, options, idle_deadline, reopen, 0, opened_at, gate),
+                        ));
                     }
                     Ok(Some(Ok(_))) => {
                         if TokioInstant::now() >= idle_deadline {
                             warn!("Live MPEG-TS upstream body idle timeout; ending stream");
                             return Some((
                                 Err(StreamError::ProviderIdleTimeout),
-                                (body, options, idle_deadline, reopen, empty_episodes, opened_at),
+                                (body, options, idle_deadline, reopen, empty_episodes, opened_at, gate),
                             ));
                         }
                         tokio::select! {
@@ -168,6 +184,7 @@ where
                                 idle_deadline = TokioInstant::now() + LIVE_MPEGTS_BODY_IDLE;
                                 opened_at = next_opened;
                                 empty_episodes = next_empty;
+                                gate.begin_new_episode();
                                 // Continue polling the new body in this same unfold step: emitting an
                                 // empty chunk would surface a zero-length read to the viewer.
                                 continue;
@@ -175,7 +192,7 @@ where
                             EpisodePlan::Stop => {
                                 return Some((
                                     Err(error),
-                                    (body, options, idle_deadline, reopen, empty_episodes, opened_at),
+                                    (body, options, idle_deadline, reopen, empty_episodes, opened_at, gate),
                                 ));
                             }
                         }
@@ -188,6 +205,7 @@ where
                                 idle_deadline = TokioInstant::now() + LIVE_MPEGTS_BODY_IDLE;
                                 opened_at = next_opened;
                                 empty_episodes = next_empty;
+                                gate.begin_new_episode();
                                 // Same as the error branch: keep polling so no empty chunk is emitted.
                                 continue;
                             }
@@ -201,7 +219,7 @@ where
                         warn!("Live MPEG-TS upstream body idle timeout; ending stream");
                         return Some((
                             Err(StreamError::ProviderIdleTimeout),
-                            (body, options, idle_deadline, reopen, empty_episodes, opened_at),
+                            (body, options, idle_deadline, reopen, empty_episodes, opened_at, gate),
                         ));
                     }
                 }
