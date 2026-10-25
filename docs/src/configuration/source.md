@@ -962,7 +962,6 @@ replay it from the beginning.
 > serving it entirely: Tuliprox exhausted its reconnect attempts. A short playback that ends is not
 > the same event — that is the provider ending one body.
 
-
 #### Automatic Xtream Expiration Refresh
 
 In server mode, Tuliprox runs an autonomous task that refreshes expiration dates for enabled Xtream inputs and aliases.
