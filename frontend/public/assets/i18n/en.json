@@ -373,6 +373,7 @@
       "XTREAM_LIVE_STREAM_USE_PREFIX": "If true, adds /live/ prefix to Xtream stream links (default true).",
       "XTREAM_LIVE_STREAM_WITHOUT_EXTENSION": "If true, removes .ts extension from Xtream stream links (default false).",
       "DISABLE_HLS_STREAMING": "Replaces live Xtream .m3u8 requests with .ts. Enable only when the provider supports MPEG-TS endpoints; this does not transcode HLS.",
+      "PROXY_STREAM_FALLBACK": "Playback always connects directly first. When this is enabled and the direct connection fails for a transport reason (timeout, DNS, connection refused or a 5xx), Tuliprox retries the same stream once through this input's proxy. A missing channel (404) or a full account is never retried through the proxy.",
       "FLUSSONIC_HLS_CATCHUP": "native keeps the provider’s native catch-up behavior (default). bounded_archive generates a fixed archive source for live M3U entries with catchup=\"fs\" and a /CHANNEL/mono.m3u8 URL when no catchup-source exists. The live URL and token remain unchanged.",
       "FLUSSONIC_HLS_CATCHUP_MAX_DURATION_SECS": "Maximum archive playback window requested from the provider in bounded_archive mode. Default: 14400 seconds (4 hours). Allowed range: 1–604800 seconds. Longer player requests are shortened to this window from the selected start time; shorter requests keep their duration. Applies only to automatically generated Flussonic HLS archive sources. Explicit catchup sources, native mode and TS streams are unaffected. Refresh the playlist after changing this value.",
       "USER_AGENT_STREAM_INDEX": "Appends a process-local numeric index to the configured User-Agent. The index stays stable for one playback session across manifests, segments, seeks, reconnects, and provider failover.",
@@ -1210,6 +1211,7 @@
     "LIVE_STREAM_USE_PREFIX": "Use prefix",
     "LIVE_STREAM_WITHOUT_EXTENSION": "Without ext.",
     "DISABLE_HLS_STREAMING": "Force MPEG-TS",
+    "PROXY_STREAM_FALLBACK": "Proxy fallback for streaming",
     "FLUSSONIC_HLS_CATCHUP": "Flussonic HLS catch-up",
     "FLUSSONIC_HLS_CATCHUP_MAX_DURATION_SECS": "Max. Flussonic archive window (secs)",
     "USER_AGENT_STREAM_INDEX": "Append stream index to User-Agent",
@@ -1945,7 +1947,13 @@
     "RECORDING_RULE_DELETE_RETAIN": "Delete rule, keep upcoming recordings",
     "RECORDING_RULE_DELETE_CANCEL": "Delete rule and cancel upcoming recordings",
     "RECORDING_RULE_ACTION_ENABLE": "Enable",
-    "RECORDING_RULE_ACTION_DISABLE": "Disable"
+    "RECORDING_RULE_ACTION_DISABLE": "Disable",
+    "ACCOUNTS": "Accounts",
+    "ADD_ACCOUNT": "Add Account",
+    "URL_ALIASES": "Alternative URLs",
+    "URL_ALIAS": "URL",
+    "ADD_URL_ALIAS": "Add URL",
+    "REMOVE": "Remove"
   },
   "MESSAGES": {
     "CLIPBOARD_NOT_SUPPORTED": "Clipboard not supported.\nYour browser or current context does not allow clipboard access.\nPlease use HTTPS or localhost.",
@@ -2447,6 +2455,9 @@
     "TABLE_CONFIG_SCHEDULES": "Schedules",
     "TABLE_RBAC_PERMISSION_MATRIX": "Permissions",
     "TABLE_PLAYLIST_ACCOUNTS_CSV": "Accounts CSV"
-
+  },
+  "INPUT_FORM": {
+    "ACCOUNTS": "Subscription accounts of this input. The first one is the main account.",
+    "URL_ALIASES": "Alternative provider base URLs. They are shared by every account and are tried in order when a URL fails."
   }
 }

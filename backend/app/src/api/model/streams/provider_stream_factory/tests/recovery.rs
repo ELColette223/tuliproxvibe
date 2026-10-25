@@ -30,7 +30,6 @@ fn test_provider_stream_factory_options_keeps_initial_retry_for_live_adaptive_st
         stream_channel: None,
         connect_failure_stage: None,
         content_representation: ProviderContentRepresentationMode::PreserveOrigin,
-        proxy: None,
     });
 
     let dash_options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
@@ -49,7 +48,6 @@ fn test_provider_stream_factory_options_keeps_initial_retry_for_live_adaptive_st
         stream_channel: None,
         connect_failure_stage: None,
         content_representation: ProviderContentRepresentationMode::PreserveOrigin,
-        proxy: None,
     });
 
     assert!(hls_options.should_retry_provider_request());

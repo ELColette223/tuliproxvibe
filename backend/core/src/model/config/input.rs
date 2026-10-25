@@ -54,7 +54,8 @@ create_bitset!(
     ProbeSeries,
     ProbeVod,
     ProbeLive,
-    StalkerBulkEpg
+    StalkerBulkEpg,
+    ProxyStreamFallback
 );
 
 #[derive(Debug, Clone)]
@@ -74,16 +75,24 @@ pub struct ConfigInputOptions {
 macros::from_impl!(ConfigInputOptions);
 impl ConfigInputOptions {
     #[inline]
-    pub fn has_flag(&self, flag: ConfigInputFlags) -> bool { self.flags.contains(flag) }
+    pub fn has_flag(&self, flag: ConfigInputFlags) -> bool {
+        self.flags.contains(flag)
+    }
 
     #[inline]
-    pub fn has_any_flags(&self, flags: ConfigInputFlagsSet) -> bool { self.flags.contains_any(&flags) }
+    pub fn has_any_flags(&self, flags: ConfigInputFlagsSet) -> bool {
+        self.flags.contains_any(&flags)
+    }
 
     #[inline]
-    pub fn has_all_flags(&self, flags: ConfigInputFlagsSet) -> bool { self.flags.contains_all(&flags) }
+    pub fn has_all_flags(&self, flags: ConfigInputFlagsSet) -> bool {
+        self.flags.contains_all(&flags)
+    }
 
     #[inline]
-    pub fn defaults() -> &'static Self { &DEFAULT_CONFIG_INPUT_OPTIONS }
+    pub fn defaults() -> &'static Self {
+        &DEFAULT_CONFIG_INPUT_OPTIONS
+    }
 }
 impl From<&ConfigInputOptionsDto> for ConfigInputOptions {
     fn from(dto: &ConfigInputOptionsDto) -> Self {
@@ -106,6 +115,7 @@ impl From<&ConfigInputOptionsDto> for ConfigInputOptions {
             (probe_vod, ProbeVod),
             (probe_live, ProbeLive),
             (stalker_bulk_epg, StalkerBulkEpg),
+            (proxy_stream_fallback, ProxyStreamFallback),
         );
 
         Self {
@@ -227,7 +237,9 @@ pub struct ConfigInputStaged {
 }
 
 impl From<&ConfigInputStagedDto> for ConfigInputStaged {
-    fn from(dto: &ConfigInputStagedDto) -> Self { Self { for_input: dto.for_input.clone(), clusters: dto.clusters } }
+    fn from(dto: &ConfigInputStagedDto) -> Self {
+        Self { for_input: dto.for_input.clone(), clusters: dto.clusters }
+    }
 }
 
 impl From<&MediaServerInputConfigDto> for MediaServerInputConfig {
@@ -312,7 +324,9 @@ pub struct StalkerDeviceProfile {
 }
 
 impl StalkerDeviceProfile {
-    pub fn mac(&self) -> Option<&str> { self.mac_address.as_deref().map(str::trim).filter(|s| !s.is_empty()) }
+    pub fn mac(&self) -> Option<&str> {
+        self.mac_address.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    }
 
     fn with_alias_overrides(self, alias: Self) -> Self {
         Self {
@@ -465,7 +479,9 @@ pub struct StalkerSizeCaps {
 }
 
 impl Default for StalkerSizeCaps {
-    fn default() -> Self { Self { create_link_kb: 64, ordered_list_mb: 8, get_epg_mb: 64 } }
+    fn default() -> Self {
+        Self { create_link_kb: 64, ordered_list_mb: 8, get_epg_mb: 64 }
+    }
 }
 
 impl From<&StalkerInputConfigDto> for StalkerInputConfig {
@@ -502,12 +518,68 @@ pub struct ConfigInputAlias {
     pub exp_date: Option<i64>,
     pub enabled: bool,
     pub stalker: Option<StalkerInputConfig>,
+    /// Provider base URLs this account may use, in preference order. The first entry is also
+    /// the account's `url`; the rest are the laterals it can rotate to.
+    pub lateral_urls: Vec<Arc<str>>,
+}
+
+/// The runtime account behind a provider-pool slot.
+pub type ConfigInputAccount = ConfigInputAlias;
+
+/// An account with no fields set. Exists so fixtures and hand-built inputs can spread the
+/// struct instead of naming every field the model happens to have today.
+impl Default for ConfigInputAlias {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            name: "".intern(),
+            url: String::new(),
+            username: None,
+            password: None,
+            priority: 0,
+            max_connections: 0,
+            exp_date: None,
+            enabled: true,
+            stalker: None,
+            lateral_urls: Vec::new(),
+        }
+    }
 }
 
 macros::from_impl!(ConfigInputAlias);
 impl ConfigInputAlias {
     pub fn account_identity(&self) -> ProviderAccountIdentity {
         ProviderAccountIdentity::new(&self.url, self.username.as_deref(), self.password.as_deref())
+    }
+
+    /// Opaque, charset-safe key used where the value becomes a path or a file name.
+    ///
+    /// Derived from the input name and the username so it stays stable across reloads and does
+    /// not collide when two inputs declare the same subscription (the configuration does that).
+    pub fn account_key(&self, input_name: &str) -> Arc<str> {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(input_name.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(self.username.as_deref().unwrap_or(self.name.as_ref()).as_bytes());
+        hasher.finalize().to_hex().to_string().intern()
+    }
+
+    /// Human-readable, globally unique name: `<input>/<username>`.
+    ///
+    /// This is what the pool, the connection registry, `/status` and events key on. It contains
+    /// the input name, so two inputs sharing a subscription stay distinct.
+    pub fn account_name(&self, input_name: &str) -> Arc<str> {
+        let username = self.username.as_deref().unwrap_or(self.name.as_ref());
+        format!("{input_name}/{username}").intern()
+    }
+
+    /// The laterals this account may rotate through, or just its own address when it has none.
+    pub fn effective_laterals(&self) -> Vec<Arc<str>> {
+        if self.lateral_urls.is_empty() {
+            (!self.url.trim().is_empty()).then(|| vec![self.url.as_str().intern()]).unwrap_or_default()
+        } else {
+            self.lateral_urls.clone()
+        }
     }
 }
 
@@ -527,6 +599,38 @@ impl From<&ConfigInputAliasDto> for ConfigInputAlias {
                 .stalker
                 .as_ref()
                 .map(|s| StalkerInputConfig::from(s).with_credentials(dto.username.as_ref(), dto.password.as_ref())),
+            lateral_urls: (!dto.url.trim().is_empty()).then(|| vec![dto.url.as_str().intern()]).unwrap_or_default(),
+            ..Default::default()
+        }
+    }
+}
+
+impl ConfigInputAlias {
+    /// Builds the runtime account from the account DTO plus the input's shared laterals.
+    ///
+    /// The DTO has no address: every account of an input reaches the provider through the same
+    /// `url_aliases` list. The first lateral becomes the account's `url`, which is what the
+    /// playlist is built from; the whole list becomes `lateral_urls`, which is what the retry
+    /// rotates through.
+    pub fn from_account_dto(dto: &shared::model::ConfigInputAccountDto, laterals: &[Arc<str>]) -> Self {
+        let lateral_urls: Vec<Arc<str>> = laterals.to_vec();
+        let url = lateral_urls.first().map_or_else(String::new, |url| url.as_ref().to_string());
+        Self {
+            id: dto.id,
+            name: dto.username.clone(),
+            url,
+            username: Some(dto.username.as_ref().to_string()),
+            password: dto.password.clone(),
+            priority: dto.priority,
+            max_connections: dto.max_connections,
+            exp_date: dto.exp_date,
+            enabled: dto.enabled,
+            stalker: dto.stalker.as_ref().map(|s| {
+                let username = dto.username.as_ref().to_string();
+                let password = dto.password.clone();
+                StalkerInputConfig::from(s).with_credentials(Some(&username), password.as_ref())
+            }),
+            lateral_urls,
         }
     }
 }
@@ -559,6 +663,8 @@ pub struct ConfigInput {
     pub panel_api: Option<PanelApiConfig>,
     pub cache_duration_seconds: u64,
     pub provider_configs: Option<Vec<Arc<ConfigProvider>>>,
+    /// Provider base URLs (laterals) shared by the accounts of this input.
+    pub url_aliases: Vec<Arc<str>>,
     /// Resolved Stalker device identity + portal hints.
     pub stalker: Option<StalkerInputConfig>,
 }
@@ -589,6 +695,24 @@ impl ConfigInput {
         provider_configs: &[Arc<ConfigProvider>],
         used_provider_configs: &mut Vec<Arc<ConfigProvider>>,
     ) -> Result<(), TuliproxError> {
+        // Accounts of the new schema reach the provider through the input's laterals, never
+        // through `provider://`: the two failover mechanisms would compete. The laterals are
+        // copied onto each account here, which is where the retry reads them from.
+        if !self.url_aliases.is_empty() {
+            if let Some(aliases) = self.aliases.as_mut() {
+                for alias in aliases {
+                    if alias.lateral_urls.is_empty() {
+                        alias.lateral_urls.clone_from(&self.url_aliases);
+                        if alias.url.trim().is_empty() {
+                            if let Some(first) = self.url_aliases.first() {
+                                alias.url = first.as_ref().to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if let Some(aliases) = &mut self.aliases {
             for alias in aliases {
                 if is_input_expired(alias.exp_date) {
@@ -625,7 +749,9 @@ impl ConfigInput {
     }
 
     #[inline]
-    pub fn get_download_input_type(&self) -> InputType { self.input_type }
+    pub fn get_download_input_type(&self) -> InputType {
+        self.input_type
+    }
 
     pub fn resolve_staged_download_type(&mut self) {
         self.input_type = self.staged_type.input_type();
@@ -641,7 +767,9 @@ impl ConfigInput {
     }
 
     #[inline]
-    pub fn has_flag(&self, flag: ConfigInputFlags) -> bool { self.has_flag_or(flag, false) }
+    pub fn has_flag(&self, flag: ConfigInputFlags) -> bool {
+        self.has_flag_or(flag, false)
+    }
 
     #[inline]
     pub fn connection_limit_policy(&self) -> ConnectionLimitPolicy {
@@ -667,7 +795,9 @@ impl ConfigInput {
     }
 
     #[inline]
-    pub fn has_any_flags(&self, flags: ConfigInputFlagsSet) -> bool { self.has_any_flags_or(flags, false) }
+    pub fn has_any_flags(&self, flags: ConfigInputFlagsSet) -> bool {
+        self.has_any_flags_or(flags, false)
+    }
 
     #[inline]
     /// Returns `default` when `self.options` is `None`; unlike `has_any_flags`, which returns
@@ -678,7 +808,9 @@ impl ConfigInput {
     }
 
     #[inline]
-    pub fn has_all_flags(&self, flags: ConfigInputFlagsSet) -> bool { self.has_all_flags_or(flags, false) }
+    pub fn has_all_flags(&self, flags: ConfigInputFlagsSet) -> bool {
+        self.has_all_flags_or(flags, false)
+    }
 
     #[inline]
     /// Returns `default` when `self.options` is `None`; unlike `has_all_flags`, which returns
@@ -963,6 +1095,7 @@ impl ConfigInput {
             t_batch_url: None,
             panel_api: self.panel_api.clone(),
             cache_duration_seconds: self.cache_duration_seconds,
+            url_aliases: alias.effective_laterals(),
             provider_configs: self.provider_configs.clone(),
             stalker: merge_stalker_config(self.stalker.clone(), alias.stalker.clone()).map(|cfg| {
                 // The alias' own credentials take precedence; fall back to
@@ -1030,7 +1163,9 @@ impl ConfigInput {
         }
     }
 
-    pub fn resolve(&self) -> Result<Cow<'_, str>, TuliproxError> { self.resolve_url(&self.url) }
+    pub fn resolve(&self) -> Result<Cow<'_, str>, TuliproxError> {
+        self.resolve_url(&self.url)
+    }
 
     pub fn get_resolve_provider(&self, url: &str) -> Option<Arc<ConfigProvider>> {
         if !url.starts_with(PROVIDER_SCHEME_PREFIX) {
@@ -1050,7 +1185,23 @@ impl From<&ConfigInputDto> for ConfigInput {
     fn from(dto: &ConfigInputDto) -> Self {
         let options =
             dto.options.as_ref().map_or_else(|| ConfigInputOptions::defaults().clone(), ConfigInputOptions::from);
-
+        // The addresses an account may use: the input's laterals, or the root URL when the input
+        // declares no laterals. `accounts[0]` is the root and is projected onto the input fields,
+        // so only the remaining rows become runtime aliases.
+        let laterals: Vec<Arc<str>> = if let Some(url_aliases) = dto.url_aliases.as_ref().filter(|list| !list.is_empty())
+        {
+            url_aliases.iter().map(|url| url.as_ref().intern()).collect()
+        } else if dto.url.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![dto.url.trim().intern()]
+        };
+        let aliases = match dto.accounts.as_ref().filter(|accounts| !accounts.is_empty()) {
+            Some(accounts) => {
+                Some(accounts.iter().skip(1).map(|account| ConfigInputAlias::from_account_dto(account, &laterals)).collect())
+            }
+            None => dto.aliases.as_ref().map(|list| list.iter().map(ConfigInputAlias::from).collect()),
+        };
         Self {
             id: dto.id,
             name: dto.name.clone(),
@@ -1067,7 +1218,7 @@ impl From<&ConfigInputDto> for ConfigInput {
             sequential_group: dto.sequential_group,
             options: Some(options),
             media_server: dto.media_server.as_ref().map(MediaServerInputConfig::from),
-            aliases: dto.aliases.as_ref().map(|list| list.iter().map(ConfigInputAlias::from).collect()),
+            aliases,
             priority: dto.priority,
             max_connections: dto.max_connections,
             method: dto.method,
@@ -1078,6 +1229,7 @@ impl From<&ConfigInputDto> for ConfigInput {
             panel_api: dto.panel_api.as_ref().map(PanelApiConfig::from),
             cache_duration_seconds: dto.cache_duration_seconds,
             provider_configs: None,
+            url_aliases: laterals,
             stalker: dto
                 .stalker
                 .as_ref()
@@ -1298,6 +1450,50 @@ mod tests {
         assert_eq!(options.update_quality.threshold(XtreamCluster::Live), 95);
         assert_eq!(options.update_quality.threshold(XtreamCluster::Video), 90);
         assert_eq!(options.update_quality.threshold(XtreamCluster::Series), 85);
+    }
+
+    /// The DTO's `accounts` list must reach the runtime, not just the config file.
+    ///
+    /// The migration consumes `aliases` when it builds `accounts`, so a conversion that reads only
+    /// `dto.aliases` drops every non-root login from the pool: the editor shows them, the file
+    /// stores them, and nothing is ever allocated. This pins the bridge.
+    #[test]
+    fn accounts_become_runtime_aliases_and_share_the_input_laterals() {
+        let dto = ConfigInputDto {
+            name: Arc::from("provider"),
+            input_type: InputType::Xtream,
+            enabled: true,
+            url: String::new(),
+            username: Some("root".to_string()),
+            password: Some("root-pass".to_string()),
+            url_aliases: Some(vec![
+                shared::utils::Internable::intern("http://main.example"),
+                shared::utils::Internable::intern("http://mirror.example"),
+            ]),
+            accounts: Some(vec![
+                shared::model::ConfigInputAccountDto {
+                    username: Arc::from("root"),
+                    password: Some("root-pass".to_string()),
+                    enabled: true,
+                    ..Default::default()
+                },
+                shared::model::ConfigInputAccountDto {
+                    username: Arc::from("second"),
+                    password: Some("second-pass".to_string()),
+                    enabled: true,
+                    ..Default::default()
+                },
+            ]),
+            ..ConfigInputDto::default()
+        };
+
+        let input = ConfigInput::from(&dto);
+
+        assert_eq!(input.url_aliases.len(), 2, "the input keeps the shared laterals");
+        let aliases = input.aliases.as_ref().expect("non-root accounts become runtime aliases");
+        assert_eq!(aliases.len(), 1, "account 1 is the root and is projected onto the input, not duplicated");
+        assert_eq!(aliases[0].username.as_deref(), Some("second"));
+        assert_eq!(aliases[0].lateral_urls.len(), 2, "every account reaches the same shared list");
     }
 
     #[test]
@@ -1772,6 +1968,7 @@ mod tests {
                 exp_date: None,
                 enabled: true,
                 stalker: None,
+                ..Default::default()
             }]),
             ..Default::default()
         };
@@ -1793,6 +1990,7 @@ mod tests {
             exp_date: None,
             enabled,
             stalker: None,
+            ..Default::default()
         };
         let mut input = ConfigInput {
             name: "root".into(),
@@ -1830,6 +2028,7 @@ mod tests {
                 exp_date: None,
                 enabled: true,
                 stalker: None,
+                ..Default::default()
             }]),
             ..Default::default()
         };
@@ -1859,6 +2058,7 @@ mod tests {
                     exp_date,
                     enabled,
                     stalker: None,
+                    ..Default::default()
                 }]),
                 ..ConfigInput::default()
             };
@@ -1959,6 +2159,7 @@ mod tests {
                 exp_date: None,
                 enabled: true,
                 stalker: None,
+                ..Default::default()
             }]),
             ..Default::default()
         };
@@ -1987,6 +2188,7 @@ mod tests {
                 exp_date: None,
                 enabled: true,
                 stalker: None,
+                ..Default::default()
             }]),
             ..Default::default()
         };
@@ -2036,6 +2238,7 @@ mod tests {
             exp_date: None,
             enabled: true,
             stalker: Some(StalkerInputConfig { auth_mode: StalkerAuthMode::CredentialsOnly, ..Default::default() }),
+            ..Default::default()
         };
 
         let stalker = parent.as_input(&alias).stalker.expect("stalker config");
@@ -2075,6 +2278,7 @@ mod tests {
                     }),
                     ..Default::default()
                 }),
+                ..Default::default()
             }]),
             ..Default::default()
         };
@@ -2121,11 +2325,57 @@ mod tests {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..Default::default()
         };
 
         let merged = parent.as_input(&alias).stalker.expect("inherited stalker config");
         assert_eq!(merged.auth_mode, StalkerAuthMode::MacPlusCredentials);
         assert_eq!(merged.username.as_deref(), Some("alias_user"));
         assert_eq!(merged.password.as_deref(), Some("alias_pass"));
+    }
+}
+
+#[cfg(test)]
+mod account_identity_tests {
+    use super::*;
+
+    fn account(username: &str, url: &str) -> ConfigInputAlias {
+        ConfigInputAlias {
+            name: username.intern(),
+            url: url.to_string(),
+            username: Some(username.to_string()),
+            ..ConfigInputAlias::default()
+        }
+    }
+
+    /// The same subscription in two inputs must not share runtime keys.
+    ///
+    /// The real configuration declares one root username in two inputs, which the legacy
+    /// global namespace rejected. The qualified names keep them distinct.
+    #[test]
+    fn account_names_are_qualified_by_input() {
+        let a = account("892958", "http://a.example");
+        let b = account("892958", "http://a.example");
+        assert_eq!(a.account_name("Servidor 1").as_ref(), "Servidor 1/892958");
+        assert_eq!(b.account_name("JellyFin").as_ref(), "JellyFin/892958");
+        assert_ne!(a.account_key("Servidor 1"), b.account_key("JellyFin"));
+        assert_eq!(a.account_key("Servidor 1"), b.account_key("Servidor 1"), "stable across reloads");
+    }
+
+    /// A `provider://` path or a bucket name must not be affected by the username charset.
+    #[test]
+    fn account_key_is_path_safe() {
+        let with_odd_chars = account("user name/with:odd?chars", "http://a.example");
+        let key = with_odd_chars.account_key("input name with spaces");
+        assert!(key.chars().all(|c| c.is_ascii_hexdigit()), "key must be hex: {key}");
+    }
+
+    /// The laterals of an account are the input's list, or its own narrower override.
+    #[test]
+    fn effective_laterals_fall_back_to_the_account_url() {
+        let mut legacy = account("legacy", "http://only.example");
+        assert_eq!(legacy.effective_laterals().len(), 1);
+        legacy.lateral_urls = vec!["http://a.example".into(), "http://b.example".into()];
+        assert_eq!(legacy.effective_laterals().len(), 2, "an explicit list wins");
     }
 }

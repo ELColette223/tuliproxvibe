@@ -413,6 +413,7 @@ async fn no_first_byte_failure_allows_next_request_to_prefer_provider_a() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });
@@ -1065,8 +1066,23 @@ async fn shared_proxy_clients_keep_independent_bodies_and_cleanup() {
 
     drop(resp1);
 
-    let body2 = resp2.into_body().collect().await.expect("client 2 body collects").to_bytes();
-    assert!(!body2.is_empty(), "client 2 receives stream bytes after client 1 dropped");
+    // A live MPEG-TS body is reopened when the provider ends it, so the client body no longer
+    // terminates on its own upstream EOF. What this test proves is that client 2 keeps receiving
+    // bytes after client 1 dropped; read a bounded amount instead of waiting for an end.
+    let mut body2 = resp2.into_body();
+    let mut client2_bytes = 0_usize;
+    while client2_bytes < 188 * 3 {
+        let Some(Ok(frame)) = tokio::time::timeout(std::time::Duration::from_secs(5), body2.frame())
+            .await
+            .expect("client 2 receives stream bytes after client 1 dropped")
+        else {
+            break;
+        };
+        if let Ok(data) = frame.into_data() {
+            client2_bytes += data.len();
+        }
+    }
+    assert!(client2_bytes >= 188, "client 2 receives stream bytes after client 1 dropped");
     drop(body2);
 
     for _ in 0..50 {
@@ -1413,7 +1429,6 @@ async fn test_provider_open_cancelled_during_header_wait_releases_slot_without_l
             stream_channel: None,
             connect_failure_stage: None,
             content_representation: tuliprox_session::ProviderContentRepresentationMode::PreserveOrigin,
-            proxy: None,
         });
     options.set_provider_handle_tokens(
         handle.cancel_token.clone(),

@@ -111,6 +111,7 @@ async fn catchup_abort_seek_and_window_change_preserve_correct_affinity() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });
@@ -200,7 +201,7 @@ async fn catchup_abort_seek_and_window_change_preserve_correct_affinity() {
     assert_eq!(resp2.status(), StatusCode::PARTIAL_CONTENT);
 
     let mut session_w2 = make_catchup_session("catchup-w2", "w2");
-    session_w2.provider = "provider_2".intern();
+    session_w2.provider = "provider_1/provider_2".intern();
     session_w2.stream_url = format!("http://{origin_b}/timeshift/1.ts?window=w2").intern();
     let mut channel_w2 = make_catchup_channel("w2");
     channel_w2.url = Arc::clone(&session_w2.stream_url);
@@ -253,7 +254,7 @@ async fn catchup_abort_seek_and_window_change_preserve_correct_affinity() {
     app_state.active_provider.clear_provider_reservation("catchup-w1");
     app_state.active_provider.clear_provider_reservation("catchup-w2");
     assert_eq!(app_state.active_provider.provider_lease_usage(&input.name).total(), 0);
-    assert_eq!(app_state.active_provider.provider_lease_usage(&"provider_2".intern()).total(), 0);
+    assert_eq!(app_state.active_provider.provider_lease_usage(&"provider_1/provider_2".intern()).total(), 0);
 }
 
 #[test]

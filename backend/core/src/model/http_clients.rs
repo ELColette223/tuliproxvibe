@@ -11,6 +11,11 @@ pub struct HttpClients {
     pub default: ArcSwap<Client>,
     /// Client that does not follow redirects, for provider requests.
     pub no_redirect: ArcSwap<Client>,
+    /// Streaming client that follows redirects. It never uses a proxy: a proxy adds a hop the
+    /// provider never sees in a direct client, and streaming must not depend on it.
+    pub stream: ArcSwap<Client>,
+    /// Streaming client that does not follow redirects; counterpart of [`Self::stream`].
+    pub stream_no_redirect: ArcSwap<Client>,
     /// The same, but connecting directly and refusing non-public destinations.
     pub public_no_redirect: ArcSwap<Client>,
     /// No-redirect client for a resource hop reachable only from the local network: connects directly
@@ -25,6 +30,8 @@ impl HttpClients {
     pub fn new(
         default: Client,
         no_redirect: Client,
+        stream: Client,
+        stream_no_redirect: Client,
         public_no_redirect: Client,
         resource_no_redirect: Client,
         resource_public_no_redirect: Client,
@@ -32,6 +39,8 @@ impl HttpClients {
         Self {
             default: ArcSwap::from_pointee(default),
             no_redirect: ArcSwap::from_pointee(no_redirect),
+            stream: ArcSwap::from_pointee(stream),
+            stream_no_redirect: ArcSwap::from_pointee(stream_no_redirect),
             public_no_redirect: ArcSwap::from_pointee(public_no_redirect),
             resource_no_redirect: ArcSwap::from_pointee(resource_no_redirect),
             resource_public_no_redirect: ArcSwap::from_pointee(resource_public_no_redirect),
@@ -41,5 +50,15 @@ impl HttpClients {
 
 impl Default for HttpClients {
     /// Unconfigured clients; for tests and contexts built without a server.
-    fn default() -> Self { Self::new(Client::new(), Client::new(), Client::new(), Client::new(), Client::new()) }
+    fn default() -> Self {
+        Self::new(
+            Client::new(),
+            Client::new(),
+            Client::new(),
+            Client::new(),
+            Client::new(),
+            Client::new(),
+            Client::new(),
+        )
+    }
 }

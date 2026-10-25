@@ -24,7 +24,12 @@ fn config_input_alias_serialization_uses_block_default_and_reads_both_styles() {
             let options = prepared.options.as_ref().expect("options");
             assert_eq!(options.update_quality, ConfigInputUpdateQualityDto { live: 85, vod: 85, series: 85 });
             assert!(!options.resolve_background);
-            assert_eq!(prepared.aliases.as_ref().expect("aliases").len(), 1);
+            // Preparing folds the legacy list into accounts, so the runtime only sees one model.
+            assert!(prepared.aliases.is_none(), "the legacy list is consumed by the migration");
+            let accounts = prepared.accounts.as_ref().expect("accounts");
+            assert_eq!(accounts.len(), 2, "root + one alias");
+            assert_eq!(accounts[0].username.as_ref(), "root");
+            assert_eq!(accounts[1].username.as_ref(), "alias");
             assert!(prepared.panel_api.is_some());
         }
 }

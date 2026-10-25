@@ -1,6 +1,9 @@
 #[macro_export]
 macro_rules! check_input_credentials {
     ($this:ident, $input_type:expr, $definition:expr, $alias:expr ) => {
+        $crate::check_input_credentials!($this, $input_type, $definition, $alias, false)
+    };
+    ($this:ident, $input_type:expr, $definition:expr, $alias:expr, $lateral_backed:expr ) => {
         let input_name = $this.name.to_string();
         let input_name = input_name.trim().to_string();
         let input_name_suffix =
@@ -10,7 +13,9 @@ macro_rules! check_input_credentials {
             $this.url = $this.url.trim().to_string();
             // This generic check only applies to classic URL-backed playlist inputs. Media-server
             // inputs have provider-specific URL/discovery validation in their prepare path.
-            if $input_type.uses_standard_input_url() && $this.url.is_empty() {
+            // A lateral-backed input carries its addresses in `url_aliases`, so its root has no
+            // address of its own and must not be required to declare one.
+            if $input_type.uses_standard_input_url() && $this.url.is_empty() && !$lateral_backed {
                 return Err($crate::error::TuliproxError::ConfigInput(format!("url for input is mandatory{input_name_suffix}")));
             }
 

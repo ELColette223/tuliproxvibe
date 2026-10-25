@@ -1100,11 +1100,17 @@ pub(super) fn is_retryable_text_response_status(status: StatusCode) -> bool {
 /// Returns true for server-side errors that might be resolved by trying another URL.
 /// Returns false for client-side errors (401, 403, etc.) where the problem is with
 /// credentials or permissions, not the server availability.
+/// Whether a response means "try the next address of the same account".
+///
+/// A lateral is a URL fallback, not a rotation: it exists because a hostname may be down, blocked
+/// or missing the resource. An answer that comes *from* the panel — 404 for a channel this login
+/// does not include, 401/403 for credentials, 402/451 for the account's state — is the same on
+/// every lateral, because it is about the login, not the host. Retrying those against the other
+/// addresses only delays the real fallback (another account) and multiplies requests to the panel.
 pub fn should_trigger_failover(status: StatusCode) -> bool {
     matches!(
         status,
-        StatusCode::NOT_FOUND
-            | StatusCode::GONE
+        StatusCode::GONE
             | StatusCode::SERVICE_UNAVAILABLE
             | StatusCode::BAD_GATEWAY
             | StatusCode::GATEWAY_TIMEOUT
@@ -1114,6 +1120,7 @@ pub fn should_trigger_failover(status: StatusCode) -> bool {
             | StatusCode::PROXY_AUTHENTICATION_REQUIRED
     )
     // Explicitly NOT triggering failover for:
+    // - 404 Not Found (this account does not hold the channel; another account may)
     // - 401 Unauthorized (wrong credentials)
     // - 403 Forbidden (permission issue)
     // - 402 Payment Required (subscription issue)

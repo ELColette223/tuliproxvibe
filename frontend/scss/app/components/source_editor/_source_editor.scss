@@ -221,9 +221,17 @@
    overflow: hidden;
 }
 
+// The arrows sit in a `min-content` icon button; scaling the 1.3rem icon up made the glyph spill
+// out of its box and touch the field next to it. A fixed square, matching the placeholder that
+// keeps the columns aligned, holds the glyph at its natural size instead.
 .tp__form-list__item-arrow-btn {
-   svg {
-      transform: scale(2);
+   width: 1.75rem;
+   height: 1.75rem;
+
+   .svg-icon {
+      width: 1.1rem;
+      height: 1.1rem;
+      transform: none;
    }
 }
 .tp__form-list__item-placeholder-btn {

@@ -46,7 +46,7 @@ async fn unstarted_series_retry_uses_free_alias_while_started_playback_stays_pin
         )
         .expect("retry should use free alias");
     let alias = retry.allocation.get_provider_name().expect("alias name");
-    assert_eq!(alias.as_ref(), "provider_2");
+    assert_eq!(alias.as_ref(), "provider_1/provider_2");
     assert!(manager.should_reuse_playback_provider(owner, &alias));
     manager.refresh_adaptive_playback_lease(&alias, owner, PlaybackKind::Series, 15);
     manager.confirm_identified_playback_activity(owner, retry.playback_request_id.expect("request id"));

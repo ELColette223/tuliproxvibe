@@ -370,6 +370,7 @@
       "XTREAM_LIVE_STREAM_USE_PREFIX": "Si es verdadero, añade el prefijo /live/ a los enlaces de stream de Xtream (por defecto verdadero).",
       "XTREAM_LIVE_STREAM_WITHOUT_EXTENSION": "Si es verdadero, elimina la extensión .ts de los enlaces de stream de Xtream (por defecto falso).",
       "DISABLE_HLS_STREAMING": "Sustituye las solicitudes .m3u8 en directo de Xtream por .ts. Actívelo solo cuando el proveedor admita endpoints MPEG-TS; esto no transcodifica HLS.",
+      "PROXY_STREAM_FALLBACK": "La reproducción siempre conecta directamente primero. Si se activa y la conexión directa falla por un motivo de transporte (tiempo de espera, DNS, conexión rechazada o un 5xx), Tuliprox reintenta el mismo stream una vez a través del proxy de esta entrada. Un canal inexistente (404) o una cuenta llena nunca se reintentan por el proxy.",
       "FLUSSONIC_HLS_CATCHUP": "native mantiene el comportamiento de catch-up nativo del proveedor (predeterminado). bounded_archive genera una fuente de archivo fija para las entradas M3U en directo con catchup=\"fs\" y una URL /CANAL/mono.m3u8 cuando no existe catchup-source. La URL en directo y el token no cambian.",
       "FLUSSONIC_HLS_CATCHUP_MAX_DURATION_SECS": "Ventana máxima de reproducción del archivo solicitada al proveedor en el modo bounded_archive. Predeterminado: 14400 segundos (4 horas). Rango permitido: 1–604800 segundos. Las solicitudes más largas del reproductor se acortan a esta ventana desde la hora de inicio elegida; las más cortas conservan su duración. Solo se aplica a las fuentes de archivo HLS de Flussonic generadas automáticamente. Las fuentes catchup explícitas, el modo native y los streams TS no se ven afectados. Actualiza la lista de reproducción después de cambiar este valor.",
       "USER_AGENT_STREAM_INDEX": "Añade al User-Agent configurado un índice numérico local del proceso. El índice se mantiene estable durante una sesión de reproducción a través de manifiestos, segmentos, saltos, reconexiones y cambios de proveedor.",
@@ -979,8 +980,8 @@
     "ALIAS_NAME": "Nombre del alias",
     "ALL": "Todos",
     "DESELECTED": "Deseleccionado",
-    "MOVE_UP": "Subir",
-    "MOVE_DOWN": "Bajar",
+    "MOVE_UP": "Mover arriba",
+    "MOVE_DOWN": "Mover abajo",
     "NOT_AVAILABLE": "n/d",
     "ADD_KEY": "Añadir clave",
     "ADD_VALUE": "Añadir valor",
@@ -1210,6 +1211,7 @@
     "LIVE_STREAM_USE_PREFIX": "Usar prefijo",
     "LIVE_STREAM_WITHOUT_EXTENSION": "Sin extensión",
     "DISABLE_HLS_STREAMING": "Forzar MPEG-TS",
+    "PROXY_STREAM_FALLBACK": "Proxy alternativo para streaming",
     "FLUSSONIC_HLS_CATCHUP": "Catch-up HLS de Flussonic",
     "FLUSSONIC_HLS_CATCHUP_MAX_DURATION_SECS": "Ventana máx. del archivo Flussonic (s)",
     "USER_AGENT_STREAM_INDEX": "Añadir índice de stream al User-Agent",
@@ -1945,7 +1947,13 @@
     "CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP": "Omitir el limite local",
     "CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL": "Rotar automaticamente al llenarse",
     "CONNECTION_LIMIT_POLICY_STRICT": "Estricta",
-    "PRESERVE_STREAM_IDS": "Mantener los ID de flujo"
+    "PRESERVE_STREAM_IDS": "Mantener los ID de flujo",
+    "ACCOUNTS": "Cuentas",
+    "ADD_ACCOUNT": "Agregar cuenta",
+    "URL_ALIASES": "URL alternativas",
+    "URL_ALIAS": "URL",
+    "ADD_URL_ALIAS": "Agregar URL",
+    "REMOVE": "Eliminar"
   },
   "MESSAGES": {
     "CLIPBOARD_NOT_SUPPORTED": "Portapapeles no compatible.\nSu navegador o el contexto actual no permite el acceso al portapapeles.\nUtilice HTTPS o localhost.",
@@ -2447,5 +2455,9 @@
     "VISUAL_DESCRIPTION": "Elige las categorias y canales que quieres conservar. Tu seleccion se guarda como una instantanea de los canales actuales.",
     "VISUAL_TITLE": "Elige que se queda en este destino",
     "WRAP_GROUP": "Agrupar en un grupo"
+  },
+  "INPUT_FORM": {
+    "ACCOUNTS": "Cuentas de suscripción de esta entrada. La primera es la cuenta principal.",
+    "URL_ALIASES": "URL base alternativas del proveedor. Las comparten todas las cuentas y se prueban en orden si una falla."
   }
 }

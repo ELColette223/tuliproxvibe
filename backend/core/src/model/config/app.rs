@@ -338,16 +338,19 @@ impl AppConfig {
             seen_names.insert(input_name.to_string());
             if let Some(aliases) = &input.aliases {
                 for alias in aliases {
-                    let input_name = alias.name.trim().to_string();
-                    if input_name.is_empty() {
+                    // Accounts are keyed by `<input>/<username>`: the same subscription may be
+                    // declared by several inputs, and those are distinct members.
+                    let account = alias.account_name(input.name.as_ref());
+                    let account = account.trim().to_string();
+                    if alias.username.as_deref().unwrap_or_default().trim().is_empty() {
                         return Err(TuliproxError::Config("input name required".to_string()));
                     }
-                    if seen_names.contains(&input_name) {
+                    if seen_names.contains(&account) {
                         return Err(TuliproxError::Config(format!(
-                            "input and alias names should be unique: {input_name}"
+                            "input and alias names should be unique: {account}"
                         )));
                     }
-                    seen_names.insert(input_name.clone());
+                    seen_names.insert(account);
                 }
             }
         }

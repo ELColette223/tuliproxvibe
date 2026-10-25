@@ -86,6 +86,35 @@ $form-width: 520px;
     }
   }
 
+  // The rows of a list need their own spacing: without it the fields of consecutive URLs sit
+  // flush against each other and the block reads as one glued mass.
+  .tp__form-list__items {
+    display: flex;
+    flex-flow: column;
+    gap: var(--gap-small);
+  }
+
+  // A URL row holds an editable field, so the field takes the remaining width instead of
+  // collapsing to the size used by the read-only text rows. The icon groups keep a fixed width,
+  // which is what stops the arrows from crowding the field and the delete button.
+  .tp__url-alias-list-item {
+    gap: var(--gap-default);
+
+    .tp__form-list__item-toolbar,
+    .tp__form-list__item-delete {
+      flex: 0 0 auto;
+    }
+
+    .tp__form-list__item-content {
+      flex: 1 1 auto;
+      min-width: 0;
+
+      .tp__input {
+        width: 100%;
+      }
+    }
+  }
+
   .tp__provider-list-item {
     align-items: flex-start;
 

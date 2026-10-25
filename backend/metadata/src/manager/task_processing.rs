@@ -163,9 +163,17 @@ impl InputWorker {
         let pre_live_updates = collector.live.len();
 
         // Determine input to use (may be alias)
+        // The pool names an account `<input>/<username>`; the runtime account carries the plain
+        // username, so the allocation has to be compared against that qualified key.
         let input_to_use = config_to_use
             .filter(|alloc| alloc.name != input_base.name)
-            .and_then(|alloc| input_base.aliases.as_ref()?.iter().find(|a| a.enabled && a.name == alloc.name))
+            .and_then(|alloc| {
+                input_base
+                    .aliases
+                    .as_ref()?
+                    .iter()
+                    .find(|a| a.enabled && a.account_name(input_base.name.as_ref()) == alloc.name)
+            })
             .map(|alias_def| {
                 let mut temp_input = (*input_base).clone();
                 temp_input.url.clone_from(&alias_def.url);

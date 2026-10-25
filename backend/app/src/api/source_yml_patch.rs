@@ -700,7 +700,9 @@ impl AccountFieldSpans {
         })
     }
 
-    fn name_anchor(&self) -> Range<usize> { self.name.clone() }
+    fn name_anchor(&self) -> Range<usize> {
+        self.name.clone()
+    }
 }
 
 /// Values that changed between `before` and `expected` for one account.
@@ -989,6 +991,10 @@ pub(crate) fn runtime_patch_document(sources: &crate::model::SourcesConfig) -> S
                         })
                         .collect()
                 }),
+                // The patch planners mutate `aliases`, so the document keeps that list as the
+                // working form; it is what the merge applies. `accounts` is deliberately left
+                // empty here so the planners and the merge cannot disagree about the same rows.
+                url_aliases: (!input.url_aliases.is_empty()).then(|| input.url_aliases.clone()),
                 ..shared::model::ConfigInputDto::default()
             })
             .collect(),
@@ -1022,28 +1028,63 @@ pub(crate) fn merge_runtime_document(
         input.max_connections = updated.max_connections;
         input.priority = updated.priority;
         input.panel_api = updated.panel_api.as_ref().map(crate::model::PanelApiConfig::from);
+        if let Some(url_aliases) = updated.url_aliases {
+            input.url_aliases = url_aliases;
+        }
 
-        if let Some(aliases) = updated.aliases {
-            let previous = input.aliases.take().unwrap_or_default();
-            let mut converted = Vec::with_capacity(aliases.len());
-            for alias in aliases {
-                let mut runtime = crate::model::ConfigInputAlias::from(&alias);
-                if let Some(old) = previous.iter().find(|old| old.name == alias.name) {
-                    runtime.id = old.id;
-                    runtime.stalker.clone_from(&old.stalker);
-                    if let Some(stalker) = runtime.stalker.as_mut() {
-                        stalker.username.clone_from(&runtime.username);
-                        stalker.password.clone_from(&runtime.password);
+        match updated.accounts {
+            // The new schema is authoritative: its rows carry no address of their own, so the
+            // runtime account is rebuilt from the account plus the input's laterals.
+            Some(accounts) => {
+                let previous = input.aliases.take().unwrap_or_default();
+                let laterals = input.url_aliases.clone();
+                let mut converted = Vec::with_capacity(accounts.len());
+                for account in accounts {
+                    let mut runtime = crate::model::ConfigInputAlias::from_account_dto(&account, &laterals);
+                    match previous.iter().find(|old| old.username.as_deref() == Some(account.username.as_ref())) {
+                        Some(old) => {
+                            runtime.id = old.id;
+                            runtime.stalker.clone_from(&old.stalker);
+                            if let Some(stalker) = runtime.stalker.as_mut() {
+                                stalker.username.clone_from(&runtime.username);
+                                stalker.password.clone_from(&runtime.password);
+                            }
+                        }
+                        None => {
+                            next_id = next_id.checked_add(1).ok_or_else(|| {
+                                TuliproxError::ConfigInput("Provider account ID space exhausted".to_string())
+                            })?;
+                            runtime.id = next_id;
+                        }
                     }
-                } else {
-                    next_id = next_id
-                        .checked_add(1)
-                        .ok_or_else(|| TuliproxError::ConfigInput("Provider account ID space exhausted".to_string()))?;
-                    runtime.id = next_id;
+                    converted.push(runtime);
                 }
-                converted.push(runtime);
+                input.aliases = Some(converted);
             }
-            input.aliases = Some(converted);
+            None => {
+                if let Some(aliases) = updated.aliases {
+                    let previous = input.aliases.take().unwrap_or_default();
+                    let mut converted = Vec::with_capacity(aliases.len());
+                    for alias in aliases {
+                        let mut runtime = crate::model::ConfigInputAlias::from(&alias);
+                        if let Some(old) = previous.iter().find(|old| old.name == alias.name) {
+                            runtime.id = old.id;
+                            runtime.stalker.clone_from(&old.stalker);
+                            if let Some(stalker) = runtime.stalker.as_mut() {
+                                stalker.username.clone_from(&runtime.username);
+                                stalker.password.clone_from(&runtime.password);
+                            }
+                        } else {
+                            next_id = next_id.checked_add(1).ok_or_else(|| {
+                                TuliproxError::ConfigInput("Provider account ID space exhausted".to_string())
+                            })?;
+                            runtime.id = next_id;
+                        }
+                        converted.push(runtime);
+                    }
+                    input.aliases = Some(converted);
+                }
+            }
         }
     }
     next.group_lookup = shared::model::provider_saturation::build_group_lookup(&next.inputs);
@@ -1313,6 +1354,86 @@ mod tests {
 
         assert!(!reparsed.inputs[0].value.enabled.as_ref().expect("enabled").value);
         assert!(patched_text.contains("name: provider, enabled: false"));
+    }
+
+    /// The patch document must carry the laterals and the account rows.
+    ///
+    /// The planners mutate the alias list (the working form the merge applies), so the schema
+    /// travels as aliases + url_aliases. Without the laterals the merge would rebuild every
+    /// account with no address at all.
+    #[test]
+    fn runtime_document_carries_accounts_and_laterals() {
+        let input = tuliprox_core::model::ConfigInput {
+            id: 1,
+            name: "provider".intern(),
+            input_type: shared::model::InputType::Xtream,
+            url: "http://main.example".to_string(),
+            username: Some("root".to_string()),
+            password: Some("secret".to_string()),
+            url_aliases: vec!["http://main.example".intern(), "http://mirror.example".intern()],
+            aliases: Some(vec![tuliprox_core::model::ConfigInputAlias {
+                id: 2,
+                name: "second".intern(),
+                url: "http://mirror.example".to_string(),
+                username: Some("second".to_string()),
+                password: Some("pw".to_string()),
+                lateral_urls: vec!["http://mirror.example".intern()],
+                ..tuliprox_core::model::ConfigInputAlias::default()
+            }]),
+            ..tuliprox_core::model::ConfigInput::default()
+        };
+        let sources = tuliprox_core::model::SourcesConfig {
+            inputs: vec![Arc::new(input)],
+            ..tuliprox_core::model::SourcesConfig::default()
+        };
+
+        let doc = runtime_patch_document(&sources);
+
+        let aliases = doc.inputs[0].aliases.as_ref().expect("account rows in the document");
+        assert_eq!(aliases.len(), 1);
+        assert_eq!(aliases[0].name.as_ref(), "second");
+        let laterals = doc.inputs[0].url_aliases.as_ref().expect("laterals in the document");
+        assert_eq!(laterals.len(), 2);
+    }
+
+    /// A round trip through the document keeps the accounts usable.
+    #[test]
+    fn merging_the_runtime_document_keeps_accounts_and_their_laterals() {
+        let input = tuliprox_core::model::ConfigInput {
+            id: 1,
+            name: "provider".intern(),
+            input_type: shared::model::InputType::Xtream,
+            url: "http://main.example".to_string(),
+            username: Some("root".to_string()),
+            password: Some("secret".to_string()),
+            url_aliases: vec!["http://main.example".intern(), "http://mirror.example".intern()],
+            aliases: Some(vec![tuliprox_core::model::ConfigInputAlias {
+                id: 2,
+                name: "second".intern(),
+                url: "http://mirror.example".to_string(),
+                username: Some("second".to_string()),
+                password: Some("pw".to_string()),
+                lateral_urls: vec!["http://mirror.example".intern()],
+                ..tuliprox_core::model::ConfigInputAlias::default()
+            }]),
+            ..tuliprox_core::model::ConfigInput::default()
+        };
+        let sources = tuliprox_core::model::SourcesConfig {
+            inputs: vec![Arc::new(input)],
+            ..tuliprox_core::model::SourcesConfig::default()
+        };
+
+        let doc = runtime_patch_document(&sources);
+        let merged = merge_runtime_document(&sources, doc).expect("merge");
+
+        let account = merged.inputs[0]
+            .aliases
+            .as_ref()
+            .and_then(|aliases| aliases.first())
+            .expect("the account survives the round trip");
+        assert_eq!(account.username.as_deref(), Some("second"));
+        assert_eq!(account.url, "http://mirror.example");
+        assert_eq!(account.lateral_urls.len(), 1, "the account keeps the address it may reach");
     }
 
     // -----------------------------------------------------------------------

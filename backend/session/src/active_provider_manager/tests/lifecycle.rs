@@ -716,7 +716,7 @@ async fn capacity_release_wakes_only_waiters_of_that_provider() {
     let event_manager = Arc::new(EventManager::new());
     let manager = ActiveProviderManager::new(&app_cfg, &event_manager);
     let provider_1: Arc<str> = "provider_1".intern();
-    let provider_2: Arc<str> = "provider_2".intern();
+    let provider_2: Arc<str> = "provider_1/provider_2".intern();
     let acquire = |provider: &Arc<str>, port: u16| {
         manager
             .acquire_exact_connection_with_lease_for_session(

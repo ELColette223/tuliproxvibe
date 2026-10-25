@@ -575,6 +575,7 @@ async fn hls_cache_canonical_prepare_service_unavailable_sets_retry_after() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..crate::model::ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     };

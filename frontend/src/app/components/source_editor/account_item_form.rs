@@ -3,15 +3,15 @@ use crate::{
         build_options, format_date_input_value, input::Input, select::Select, selection_parse_first, Card,
         DropDownSelection, TextButton, ToolAction,
     },
-    config_field, config_field_bool, config_field_child, config_field_custom, config_field_optional,
-    config_field_optional_hide, edit_field_bool, edit_field_exp_date, edit_field_number_i16, edit_field_number_u16,
-    edit_field_text, edit_field_text_option, generate_form_reducer,
+    config_field_bool, config_field_child, config_field_custom, config_field_optional_hide, edit_field_bool,
+    edit_field_exp_date, edit_field_number_i16, edit_field_number_u16, edit_field_text, edit_field_text_option,
+    generate_form_reducer,
     hooks::use_service_context,
     i18n::use_translation,
 };
 use shared::{
     model::{
-        ConfigInputAliasDto, ConfigProviderDto, InputType, ProxyConfigDto, StalkerAuthMode, StalkerDeviceProfileDto,
+        ConfigInputAccountDto, ConfigProviderDto, InputType, ProxyConfigDto, StalkerAuthMode, StalkerDeviceProfileDto,
         StalkerEndpointPreference, StalkerInputConfigDto, StalkerMagPreset, XtreamLoginRequest,
     },
     utils::Internable,
@@ -20,8 +20,6 @@ use std::{rc::Rc, str::FromStr, sync::Arc};
 use strum::IntoEnumIterator;
 use yew::{platform::spawn_local, prelude::*};
 
-const LABEL_ALIAS_NAME: &str = "LABEL.ALIAS_NAME";
-const LABEL_URL: &str = "LABEL.URL";
 const LABEL_USERNAME: &str = "LABEL.USERNAME";
 const LABEL_PASSWORD: &str = "LABEL.PASSWORD";
 const LABEL_PRIORITY: &str = "LABEL.PRIORITY";
@@ -30,13 +28,11 @@ const LABEL_EXP_DATE: &str = "LABEL.EXP_DATE";
 const LABEL_ENABLED: &str = "LABEL.ENABLED";
 
 generate_form_reducer!(
-    state: AliasFormState { form: ConfigInputAliasDto },
-    action_name: AliasFormAction,
+    state: AccountFormState { form: ConfigInputAccountDto },
+    action_name: AccountFormAction,
     fields {
         Enabled => enabled: bool,
-        Name => name: Arc<str>,
-        Url => url: String,
-        Username => username: Option<String>,
+        Username => username: Arc<str>,
         Password => password: Option<String>,
         Priority => priority: i16,
         MaxConnections => max_connections: u16,
@@ -45,8 +41,8 @@ generate_form_reducer!(
     }
 );
 
-fn stalker_alias_choice<T, F>(
-    form_state: &UseReducerHandle<AliasFormState>,
+fn stalker_account_choice<T, F>(
+    form_state: &UseReducerHandle<AccountFormState>,
     name: &'static str,
     label: String,
     selected: T,
@@ -67,7 +63,7 @@ where
                     if let Some(value) = selection_parse_first::<T>(&selections) {
                         let mut config = state.form.stalker.clone().unwrap_or_default();
                         update(&mut config, value);
-                        state.dispatch(AliasFormAction::Stalker(Some(config)));
+                        state.dispatch(AccountFormAction::Stalker(Some(config)));
                     }
                 })}
                 options={options}
@@ -77,8 +73,8 @@ where
 }
 
 #[derive(Properties, PartialEq, Clone)]
-pub struct AliasItemFormProps {
-    pub on_submit: Callback<ConfigInputAliasDto>,
+pub struct AccountItemFormProps {
+    pub on_submit: Callback<ConfigInputAccountDto>,
     pub on_cancel: Callback<()>,
     pub input_type: InputType,
     #[prop_or_default]
@@ -87,23 +83,25 @@ pub struct AliasItemFormProps {
     pub providers: Vec<ConfigProviderDto>,
     #[prop_or_default]
     pub proxy: Option<ProxyConfigDto>,
+    /// The address the owning input uses for this account (its primary lateral). The account
+    /// itself has none, but resolving the expiration date still needs to reach the provider.
     #[prop_or_default]
-    pub initial: Option<ConfigInputAliasDto>,
+    pub account_url: String,
+    #[prop_or_default]
+    pub initial: Option<ConfigInputAccountDto>,
     #[prop_or(false)]
     pub readonly: bool,
 }
 
 #[component]
-pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
+pub fn AccountItemForm(props: &AccountItemFormProps) -> Html {
     let translate = use_translation();
     let services = use_service_context();
 
-    let form_state: UseReducerHandle<AliasFormState> = use_reducer(|| AliasFormState {
-        form: props.initial.clone().unwrap_or_else(|| ConfigInputAliasDto {
+    let form_state: UseReducerHandle<AccountFormState> = use_reducer(|| AccountFormState {
+        form: props.initial.clone().unwrap_or_else(|| ConfigInputAccountDto {
             id: 0,
-            name: "".intern(),
-            url: String::new(),
-            username: None,
+            username: "".intern(),
             password: None,
             priority: 0,
             max_connections: 1,
@@ -135,7 +133,7 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
             if is_stalker && data.stalker.is_none() {
                 data.stalker = Some(StalkerInputConfigDto::default());
             }
-            if !data.name.trim().is_empty() && !data.url.trim().is_empty() {
+            if !data.username.trim().is_empty() {
                 on_submit.emit(data);
             }
         })
@@ -157,6 +155,7 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
         let providers = props.providers.clone();
         let proxy = props.proxy.clone();
         let translate = translate.clone();
+        let resolved_account_url = props.account_url.clone();
 
         Some(ToolAction {
             name: Some("RefreshAliasExpDate".to_string()),
@@ -168,8 +167,8 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
                     return;
                 }
 
-                let url = form_state.form.url.clone();
-                let username = form_state.form.username.clone().unwrap_or_default();
+                let url = resolved_account_url.clone();
+                let username = form_state.form.username.to_string();
                 let password = form_state.form.password.clone().unwrap_or_default();
 
                 if url.trim().is_empty() || username.trim().is_empty() || password.trim().is_empty() {
@@ -197,12 +196,13 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
                     providers: (!providers.is_empty()).then_some(providers.clone()),
                 };
                 let no_exp_date_msg = translate.t("MESSAGES.SOURCE_EDITOR.NO_EXPIRATION_DATE_RETURNED");
+                let account_url_for_snapshot = resolved_account_url.clone();
 
                 spawn_local(async move {
                     let current_snapshot = || {
                         (
-                            form_state.form.url.clone(),
-                            form_state.form.username.clone().unwrap_or_default(),
+                            account_url_for_snapshot.clone(),
+                            form_state.form.username.to_string(),
                             form_state.form.password.clone().unwrap_or_default(),
                         )
                     };
@@ -213,7 +213,7 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
                                     == (request.url.clone(), request.username.clone(), request.password.clone());
                                 if snapshot_matches {
                                     if let Some(exp_date) = login_info.exp_date {
-                                        form_state.dispatch(AliasFormAction::ExpDate(Some(exp_date)));
+                                        form_state.dispatch(AccountFormAction::ExpDate(Some(exp_date)));
                                     } else {
                                         services.toastr.warning(no_exp_date_msg);
                                     }
@@ -241,11 +241,9 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
         <Card class="tp__config-view__card tp__item-form">
             if props.readonly {
                 { config_field_bool!(form_state.form, translate.t(LABEL_ENABLED), enabled) }
-                { config_field!(form_state.form, translate.t(LABEL_ALIAS_NAME), name) }
-                { config_field!(form_state.form, translate.t(LABEL_URL), url) }
                 if show_credentials {
                     <div class="tp__config-view__cols-2">
-                      { config_field_optional!(form_state.form, translate.t(LABEL_USERNAME), username) }
+                      { config_field_custom!(translate.t(LABEL_USERNAME), form_state.form.username.to_string()) }
                       { config_field_optional_hide!(form_state.form, translate.t(LABEL_PASSWORD), password) }
                     </div>
                 }
@@ -255,18 +253,16 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
                 </div>
             } else {
                 <>
-                    { edit_field_bool!(form_state, translate.t(LABEL_ENABLED), enabled, AliasFormAction::Enabled) }
-                    { edit_field_text!(form_state, translate.t(LABEL_ALIAS_NAME), name, AliasFormAction::Name) }
-                    { edit_field_text!(form_state, translate.t(LABEL_URL), url, AliasFormAction::Url) }
+                    { edit_field_bool!(form_state, translate.t(LABEL_ENABLED), enabled, AccountFormAction::Enabled) }
                     if show_credentials {
                         <div class="tp__config-view__cols-2">
-                          { edit_field_text_option!(form_state, translate.t(LABEL_USERNAME), username, AliasFormAction::Username) }
-                          { edit_field_text_option!(form_state, translate.t(LABEL_PASSWORD), password, AliasFormAction::Password, true) }
+                          { edit_field_text!(form_state, translate.t(LABEL_USERNAME), username, AccountFormAction::Username) }
+                          { edit_field_text_option!(form_state, translate.t(LABEL_PASSWORD), password, AccountFormAction::Password, true) }
                         </div>
                     }
                     <div class="tp__config-view__cols-2">
-                      { edit_field_number_i16!(form_state, translate.t(LABEL_PRIORITY), priority, AliasFormAction::Priority) }
-                      { edit_field_number_u16!(form_state, translate.t(LABEL_MAX_CONNECTIONS), max_connections, AliasFormAction::MaxConnections) }
+                      { edit_field_number_i16!(form_state, translate.t(LABEL_PRIORITY), priority, AccountFormAction::Priority) }
+                      { edit_field_number_u16!(form_state, translate.t(LABEL_MAX_CONNECTIONS), max_connections, AccountFormAction::MaxConnections) }
                     </div>
                 </>
             }
@@ -280,7 +276,7 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
                         { config_field_custom!(translate.t("LABEL.STALKER_ENDPOINT_PREFERENCE"), stalker_config.endpoint_preference.to_string()) }
                     } else {
                         <div class="tp__form-field tp__form-field__text">
-                            <Input label={translate.t("LABEL.STALKER_MAC_ADDRESS")} name="alias_stalker_mac"
+                            <Input label={translate.t("LABEL.STALKER_MAC_ADDRESS")} name="account_stalker_mac"
                                 value={stalker_device.mac_address.clone().unwrap_or_default()}
                                 on_change={{
                                     let form_state = form_state.clone();
@@ -289,27 +285,27 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
                                         let device = config.device.get_or_insert_with(StalkerDeviceProfileDto::default);
                                         let value = value.trim().to_string();
                                         device.mac_address = (!value.is_empty()).then_some(value);
-                                        form_state.dispatch(AliasFormAction::Stalker(Some(config)));
+                                        form_state.dispatch(AccountFormAction::Stalker(Some(config)));
                                     })
                                 }} />
                         </div>
-                        { stalker_alias_choice::<StalkerAuthMode, _>(
+                        { stalker_account_choice::<StalkerAuthMode, _>(
                             &form_state,
-                            "alias_stalker_auth_mode",
+                            "account_stalker_auth_mode",
                             translate.t("LABEL.STALKER_AUTH_MODE"),
                             effective_stalker_auth_mode,
                             |config, value| config.auth_mode = value,
                         ) }
-                        { stalker_alias_choice::<StalkerMagPreset, _>(
+                        { stalker_account_choice::<StalkerMagPreset, _>(
                             &form_state,
-                            "alias_stalker_mag_preset",
+                            "account_stalker_mag_preset",
                             translate.t("LABEL.STALKER_MAG_PRESET"),
                             stalker_config.mag_preset,
                             |config, value| config.mag_preset = value,
                         ) }
-                        { stalker_alias_choice::<StalkerEndpointPreference, _>(
+                        { stalker_account_choice::<StalkerEndpointPreference, _>(
                             &form_state,
-                            "alias_stalker_endpoint_preference",
+                            "account_stalker_endpoint_preference",
                             translate.t("LABEL.STALKER_ENDPOINT_PREFERENCE"),
                             stalker_config.endpoint_preference,
                             |config, value| config.endpoint_preference = value,
@@ -324,13 +320,13 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
                     format_date_input_value(form_state.form.exp_date)
                 ) }
             } else {
-                { edit_field_exp_date!(form_state, translate.t(LABEL_EXP_DATE), exp_date, AliasFormAction::ExpDate, exp_date_tool_action) }
+                { edit_field_exp_date!(form_state, translate.t(LABEL_EXP_DATE), exp_date, AccountFormAction::ExpDate, exp_date_tool_action) }
             }
 
             <div class="tp__form-page__toolbar">
                 <TextButton
                     class="secondary"
-                    name="cancel_alias"
+                    name="cancel_account"
                     icon="Cancel"
                     title={translate.t("LABEL.CANCEL")}
                     onclick={handle_cancel}
@@ -338,7 +334,7 @@ pub fn AliasItemForm(props: &AliasItemFormProps) -> Html {
                 if !props.readonly {
                     <TextButton
                         class="primary"
-                        name="submit_alias"
+                        name="submit_account"
                         icon="Accept"
                         title={translate.t("LABEL.SUBMIT")}
                         onclick={handle_submit}

@@ -39,16 +39,17 @@ fn invalidate_account(
         InvalidAccount::DisabledRoot => input.account_disabled = true,
         InvalidAccount::DisabledAlias => input.aliases.as_mut().unwrap()[0].enabled = false,
         InvalidAccount::RuntimeRoot | InvalidAccount::RuntimeAlias => {
+            // The pool names an account "<input>/<username>"; observations use that key.
             let name = if matches!(invalid, InvalidAccount::RuntimeRoot) {
-                &input.name
+                input.name.clone()
             } else {
-                &input.aliases.as_ref().unwrap()[0].name
+                input.aliases.as_ref().unwrap()[0].account_name(input.name.as_ref())
             };
-            let config = app.active_provider.find_provider_config(name).unwrap();
+            let config = app.active_provider.find_provider_config(&name).unwrap();
             assert!(app
                 .active_provider
                 .observe_account(ProviderAccountObservation {
-                    name: Arc::clone(name),
+                    name: Arc::clone(&name),
                     identity: config.account_identity(),
                     status: Some(shared::model::ProxyUserStatus::Banned),
                     exp_date: None,
@@ -107,11 +108,14 @@ async fn handover_updates_all_viewers_without_followup_media_requests() {
     )
     .await
     .expect("replacement account publishes");
-    assert_eq!(session.read().await.origin_account_binding.as_ref().unwrap().account_name.as_ref(), "account-a");
+    assert_eq!(
+        session.read().await.origin_account_binding.as_ref().unwrap().account_name.as_ref(),
+        "overlap-input/account-user"
+    );
     let rows = app.active_users.panel_streams().await;
     assert_eq!(rows.len(), 2);
     assert!(
-        rows.iter().all(|row| row.provider.as_ref() == "account-a"),
+        rows.iter().all(|row| row.provider.as_ref() == "overlap-input/account-user"),
         "all viewer rows must change immediately: {rows:?}"
     );
     let mut updated = Vec::new();
@@ -122,7 +126,7 @@ async fn handover_updates_all_viewers_without_followup_media_requests() {
         }
     }
     assert_eq!(updated.len(), 2);
-    assert!(updated.iter().all(|row| row.provider.as_ref() == "account-a"));
+    assert!(updated.iter().all(|row| row.provider.as_ref() == "overlap-input/account-user"));
     app.connection_manager.release_managed_provider_handle(prepared.preacquired_origin_account_handle);
 }
 
@@ -177,7 +181,7 @@ async fn invalid_root_alias_matrix_rebinds_within_input_and_preserves_session() 
         let binding = session.origin_account_binding.as_ref().unwrap();
         assert_eq!(
             binding.account_name.as_ref(),
-            if old == "account-a" { "overlap-input" } else { "account-a" },
+            if old == "account-a" { "overlap-input" } else { "overlap-input/account-user" },
             "{invalid:?}"
         );
         assert_eq!(binding.input_name, input.name);
@@ -353,7 +357,9 @@ pub(super) struct RebindOrigin {
     release_old_media: Arc<tokio::sync::Semaphore>,
 }
 impl Drop for RebindOrigin {
-    fn drop(&mut self) { self.task.abort(); }
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -673,7 +679,7 @@ async fn segment_and_background_work_fetch_new_manifest_and_media_without_client
         );
         let s = session.read().await;
         assert_eq!((&s.key, &s.proxy_session_id), (&key, &id));
-        assert_eq!(s.origin_account_binding.as_ref().unwrap().account_name.as_ref(), "account-a");
+        assert_eq!(s.origin_account_binding.as_ref().unwrap().account_name.as_ref(), "overlap-input/account-user");
         assert_eq!(s.origin_account_binding.as_ref().unwrap().generation, 1);
         assert!(s.origin_account_manifest_pending.is_none());
         if let Some(cached) = cached {
@@ -706,6 +712,9 @@ async fn independent_sessions_share_source_capacity_and_leave_other_source_uncha
     let mut alias = input.aliases.as_ref().unwrap()[0].clone();
     alias.id = 3;
     alias.name = Arc::from("account-b");
+    // Distinct username: the pool keys an account by its subscription, so two entries with
+    // the same username would be the same account and could not both hold capacity.
+    alias.username = Some("account-b".to_string());
     input.aliases.as_mut().unwrap().push(alias);
     let mut other = single_hls_provider_input("other-source");
     other.id = 8;
@@ -1168,7 +1177,9 @@ async fn account_blocked_between_prepare_and_acquire_still_rebinds_from_media_wo
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let s = session.read().await;
-            if s.origin_account_binding.as_ref().is_some_and(|binding| binding.account_name.as_ref() == "account-a")
+            if s.origin_account_binding
+                .as_ref()
+                .is_some_and(|binding| binding.account_name.as_ref() == "overlap-input/account-user")
                 && s.segments.values().any(|entry| matches!(entry.status, SegmentCacheStatus::Ready { .. }))
             {
                 break;
@@ -1648,7 +1659,12 @@ async fn initiating_viewer_cancellation_does_not_lose_handover_updates() {
     published.notified().await;
     request.abort();
     assert!(request.await.unwrap_err().is_cancelled());
-    assert!(app.active_users.panel_streams().await.iter().all(|row| row.provider.as_ref() == "account-a"));
+    assert!(app
+        .active_users
+        .panel_streams()
+        .await
+        .iter()
+        .all(|row| row.provider.as_ref() == "overlap-input/account-user"));
     super::observability::register_hls_cache_stream_for_stats_test(
         &app,
         &session,
@@ -1660,7 +1676,7 @@ async fn initiating_viewer_cancellation_does_not_lose_handover_updates() {
     .await;
     let rows = app.active_users.panel_streams().await;
     assert_eq!(rows.len(), 3);
-    assert!(rows.iter().all(|row| row.provider.as_ref() == "account-a"));
+    assert!(rows.iter().all(|row| row.provider.as_ref() == "overlap-input/account-user"));
 }
 
 #[tokio::test]

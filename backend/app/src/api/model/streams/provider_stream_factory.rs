@@ -18,7 +18,17 @@ use url::Url;
 const RETRY_SECONDS: u64 = 5;
 
 const ERR_MAX_RETRY_COUNT: u32 = 5;
-const SHARED_MPEGTS_BODY_IDLE: Duration = Duration::from_secs(40);
+/// How long a live MPEG-TS body may stay silent before it is treated as stalled.
+const LIVE_MPEGTS_BODY_IDLE: Duration = Duration::from_secs(40);
+/// Floor between two reopen attempts, so a provider that answers with an empty body
+/// cannot turn the reconnect loop into a request flood.
+const LIVE_MPEGTS_RECONNECT_MIN_INTERVAL: Duration = Duration::from_millis(200);
+/// Consecutive episodes that failed to produce a single byte before the reconnect gives up.
+///
+/// A provider may legitimately close the body after a few megabytes and accept a fresh request;
+/// the counter is reset by the first byte of the next episode, so only a channel that never comes
+/// back reaches this limit.
+const LIVE_MPEGTS_MAX_EMPTY_EPISODES: u32 = 5;
 
 /// Describes whether the provider response head is available before Tuliprox commits the client response head.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,7 +56,8 @@ create_bitset!(
     RangeRequested,
     PublicDestinationRequired,
     HlsResource,
-    FlussonicAudioTracks
+    FlussonicAudioTracks,
+    ProxyStreamFallback
 );
 
 #[derive(Debug, Clone)]
@@ -62,7 +73,6 @@ pub struct ProviderStreamFactoryOptions {
     requested_range: Option<HeaderValue>,
     reconnect_flag: CancellationToken,
     provider: Option<Arc<ConfigProvider>>,
-    proxy: Option<crate::model::ProxyConfig>,
     username: Option<String>,
     client_ip: Option<String>,
     user_agent: Option<String>,
@@ -75,6 +85,8 @@ pub struct ProviderStreamFactoryOptions {
     completion_token: Option<CancellationToken>,
     close_reason: Option<Arc<AtomicU8>>,
     account: Option<Arc<crate::model::ProviderConfig>>,
+    /// Egress alternative for playback, set only when the input opts into a proxy fallback.
+    stream_proxy: Option<crate::model::ProxyConfig>,
 }
 
 struct ProviderOpenGuard {
@@ -96,6 +108,7 @@ pub struct ProviderStreamOpenLifecycle {
 mod tests;
 
 mod error;
+mod mpegts_pts_gate;
 mod opening;
 mod options;
 mod request;

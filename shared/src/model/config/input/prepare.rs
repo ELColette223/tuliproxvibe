@@ -246,6 +246,15 @@ impl ConfigInputDto {
 
         self.url = self.url.trim().to_string();
         self.normalize_input_type_from_batch_url();
+        // The root fields (`username`/`password`/`max_connections`) are still what the
+        // per-type credential checks read, and `accounts[0]` is the root. Normalizing the
+        // legacy list here — before validation — is what lets both schemas pass the same
+        // checks without special-casing the rest of the pipeline.
+        self.validate_schema_exclusivity()?;
+        // New-schema inputs project account 1 onto the root before validation, because the
+        // per-type credential checks read the root fields. Legacy inputs keep their own
+        // validation semantics and are converted only after it, at the end of prepare.
+        self.derive_root_from_accounts();
         if let Some(proxy) = self.proxy.as_mut() {
             if !self.input_type.is_xtream() {
                 return Err(TuliproxError::ConfigInput(format!(
@@ -278,7 +287,8 @@ impl ConfigInputDto {
             )));
         }
 
-        check_input_credentials!(self, self.input_type, true, false);
+        let lateral_backed = self.url_aliases.as_ref().is_some_and(|aliases| !aliases.is_empty());
+        check_input_credentials!(self, self.input_type, true, false, lateral_backed);
         check_input_connections!(self, self.input_type, false);
         // Always run stalker validation: it rejects a stray `stalker` block on
         // non-stalker inputs and surfaces a malformed MAC at config load even
@@ -291,12 +301,18 @@ impl ConfigInputDto {
 
         let mut current_index = index + 1;
         self.id = current_index;
+        current_index = self.prepare_accounts(current_index)?;
         if let Some(aliases) = self.aliases.as_mut() {
             let input_type = &self.input_type;
             for alias in aliases {
                 current_index = alias.prepare(current_index, input_type)?;
                 check_provider_scheme_url!(alias.url.as_str(), provider_names);
             }
+        }
+        // A legacy file keeps working unchanged: its aliases are folded into accounts after the
+        // legacy validation has accepted them, so the runtime only ever sees one model.
+        if !self.input_type.is_batch() {
+            self.normalize_legacy_aliases();
         }
 
         if let Some(panel_api) = self.panel_api.as_mut() {

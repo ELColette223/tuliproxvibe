@@ -141,6 +141,7 @@ async fn m3u_alias_playlist_is_downloaded_and_indexed_separately() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..tuliprox_core::model::ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });
@@ -197,6 +198,7 @@ async fn failed_m3u_alias_is_retried_after_primary_input_is_processed() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..tuliprox_core::model::ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });
@@ -322,7 +324,9 @@ fn memory_source(channels: Vec<PlaylistItem>) -> PlaylistSource {
     .into_source()
 }
 
-fn channel_count(source: &mut PlaylistSource) -> usize { source.take_groups().iter().map(|g| g.channels.len()).sum() }
+fn channel_count(source: &mut PlaylistSource) -> usize {
+    source.take_groups().iter().map(|g| g.channels.len()).sum()
+}
 
 #[test]
 fn map_playlist_applies_only_the_requested_stage() {

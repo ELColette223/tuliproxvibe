@@ -616,6 +616,7 @@ async fn hls_entry_origin_reservation_uses_persisted_alias_manifest_url() {
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..crate::model::ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     };
@@ -684,7 +685,7 @@ async fn hls_entry_origin_reservation_uses_persisted_alias_manifest_url() {
 
     assert_eq!(
         reservation.selected_provider_config.as_ref().map(|provider| provider.name.as_ref()),
-        Some("alias-account")
+        Some("primary-account/alias-account")
     );
     assert_eq!(reservation.request_url, "http://stream.example:4000/news24hd/mono.m3u8?token=alias-stream-token");
 

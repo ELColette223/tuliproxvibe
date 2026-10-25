@@ -373,6 +373,7 @@
       "XTREAM_LIVE_STREAM_USE_PREFIX": "إذا كان صحيحًا، يُضيف بادئة /live/ إلى روابط بث Xtream (الافتراضي صحيح).",
       "XTREAM_LIVE_STREAM_WITHOUT_EXTENSION": "إذا كان صحيحًا، يزيل امتداد .ts من روابط بث Xtream (الافتراضي خطأ).",
       "DISABLE_HLS_STREAMING": "يستبدل طلبات البث المباشر من Xtream بصيغة .m3u8 بصيغة .ts. فعّله فقط عندما يدعم المزوّد نقاط نهاية MPEG-TS؛ هذا الخيار لا يقوم بتحويل ترميز HLS.",
+      "PROXY_STREAM_FALLBACK": "يتصل التشغيل دائمًا مباشرة أولاً. عند تفعيل هذا الخيار وفشل الاتصال المباشر لسبب متعلق بالنقل (مهلة، DNS، رفض الاتصال أو 5xx)، يعيد Tuliprox محاولة البث نفسه مرة واحدة عبر وكيل هذا الإدخال. لا تتم إعادة محاولة القناة غير الموجودة (404) أو الحساب الممتلئ عبر الوكيل أبدًا.",
       "FLUSSONIC_HLS_CATCHUP": "يحافظ native على سلوك المشاهدة المؤجلة الأصلي للمزوّد (الافتراضي). ينشئ bounded_archive مصدر أرشيف بحدود ثابتة لقنوات M3U المباشرة التي تحتوي على catchup=\"fs\" ورابط /CHANNEL/mono.m3u8 عندما لا يوجد catchup-source. يبقى رابط البث المباشر والرمز دون تغيير.",
       "FLUSSONIC_HLS_CATCHUP_MAX_DURATION_SECS": "المدة القصوى للأرشيف المطلوب من المزوّد في وضع bounded_archive. القيمة الافتراضية: 14400 ثانية (4 ساعات). النطاق المسموح: 1–604800 ثانية. تُختصر طلبات المشغّل الأطول إلى هذه المدة بدءًا من وقت البداية المحدد، وتحتفظ الطلبات الأقصر بمدتها. ينطبق ذلك فقط على مصادر أرشيف Flussonic HLS المُنشأة تلقائيًا. لا تتأثر مصادر catchup المحددة صراحةً أو وضع native أو تدفقات TS. حدّث قائمة التشغيل بعد تغيير هذه القيمة.",
       "USER_AGENT_STREAM_INDEX": "يضيف فهرسًا رقميًا محليًا للعملية إلى وكيل المستخدم المضبوط. يبقى الفهرس ثابتًا لجلسة تشغيل واحدة عبر القوائم والمقاطع والتنقل وإعادة الاتصال وتبديل المزوّد.",
@@ -391,7 +392,6 @@
     "CONFIG_TARGET_OPTIONS": {
       "CLEAR_INVALID_EPG_IDS": "يمسح معرفات EPG التي لا تطابق بيانات EPG المعالجة دون إزالة عناصر قائمة التشغيل.",
       "PRESERVE_STREAM_IDS": "يحافظ على معرفات البث (virtual IDs) ثابتة عبر تحديثات المصدر.",
-
       "SHARE_LIVE_STREAMS": "يُفعّل مشاركة البث المباشر. المفتاح الرئيسي يضبط HLS و MPEG-TS معًا؛ يمكن تغيير كل تنسيق أيضًا بشكل منفصل."
     },
     "EPG_OUTPUT_OPTIONS": {
@@ -981,8 +981,8 @@
     "ALIAS_NAME": "اسم الاسم المستعار",
     "ALL": "الكل",
     "DESELECTED": "غير محدد",
-    "MOVE_UP": "تحريك لأعلى",
-    "MOVE_DOWN": "تحريك لأسفل",
+    "MOVE_UP": "نقل لأعلى",
+    "MOVE_DOWN": "نقل لأسفل",
     "NOT_AVAILABLE": "غير متاح",
     "ADD_KEY": "إضافة مفتاح",
     "ADD_VALUE": "إضافة قيمة",
@@ -1210,6 +1210,7 @@
     "LIVE_STREAM_USE_PREFIX": "استخدام بادئة",
     "LIVE_STREAM_WITHOUT_EXTENSION": "بدون امتداد",
     "DISABLE_HLS_STREAMING": "إجبار MPEG-TS",
+    "PROXY_STREAM_FALLBACK": "وكيل بديل للبث",
     "FLUSSONIC_HLS_CATCHUP": "المشاهدة المؤجلة عبر Flussonic HLS",
     "FLUSSONIC_HLS_CATCHUP_MAX_DURATION_SECS": "أقصى نافذة لأرشيف Flussonic (ث)",
     "USER_AGENT_STREAM_INDEX": "إضافة فهرس البث إلى وكيل المستخدم",
@@ -1946,7 +1947,13 @@
     "RECORDING_RULE_DELETE_RETAIN": "حذف القاعدة والإبقاء على التسجيلات القادمة",
     "RECORDING_RULE_DELETE_CANCEL": "حذف القاعدة وإلغاء التسجيلات القادمة",
     "RECORDING_RULE_ACTION_ENABLE": "تمكين",
-    "RECORDING_RULE_ACTION_DISABLE": "تعطيل"
+    "RECORDING_RULE_ACTION_DISABLE": "تعطيل",
+    "ACCOUNTS": "الحسابات",
+    "ADD_ACCOUNT": "إضافة حساب",
+    "URL_ALIASES": "عناوين URL بديلة",
+    "URL_ALIAS": "عنوان URL",
+    "ADD_URL_ALIAS": "إضافة عنوان URL",
+    "REMOVE": "إزالة"
   },
   "MESSAGES": {
     "CLIPBOARD_NOT_SUPPORTED": "الحافظة غير مدعومة.\nمتصفحك أو السياق الحالي لا يسمح بالوصول إلى الحافظة.\nيرجى استخدام HTTPS أو localhost.",
@@ -2448,5 +2455,9 @@
     "TABLE_CONFIG_SCHEDULES": "الجداول الزمنية",
     "TABLE_RBAC_PERMISSION_MATRIX": "الأذونات",
     "TABLE_PLAYLIST_ACCOUNTS_CSV": "CSV للحسابات"
+  },
+  "INPUT_FORM": {
+    "ACCOUNTS": "حسابات الاشتراك لهذا الإدخال. الحساب الأول هو الحساب الرئيسي.",
+    "URL_ALIASES": "عناوين URL الأساسية البديلة للمزود. تُستخدم لكل الحسابات وتُجرَّب بالترتيب عند فشل عنوان."
   }
 }

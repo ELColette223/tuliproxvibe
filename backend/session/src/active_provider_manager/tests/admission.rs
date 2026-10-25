@@ -17,13 +17,14 @@ pub(in crate::active_provider_manager::tests) fn create_test_app_config_with_cap
             id: 2,
             name: "provider_2".intern(),
             url: "http://provider-2.example".to_string(),
-            username: Some("user2".to_string()),
+            username: Some("provider_2".to_string()),
             password: Some("pass2".to_string()),
             priority: 1,
             max_connections: 1,
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         3,
     )
@@ -56,7 +57,10 @@ async fn confirmed_playbacks_fill_higher_priority_provider_before_alias() {
         selected.push(provider.to_string());
     }
 
-    assert_eq!(selected, ["provider_1", "provider_1", "provider_2", "provider_2", "provider_2"]);
+    assert_eq!(
+        selected,
+        ["provider_1", "provider_1", "provider_1/provider_2", "provider_1/provider_2", "provider_1/provider_2"]
+    );
 }
 
 #[tokio::test]
@@ -86,7 +90,10 @@ async fn concurrent_proxy_requests_fill_exact_pool_capacity() -> Result<(), Box<
     }
     assert_eq!(handles.len(), 5);
     assert_eq!(handles.iter().filter(|h| h.allocation.get_provider_name().as_deref() == Some("provider_1")).count(), 2);
-    assert_eq!(handles.iter().filter(|h| h.allocation.get_provider_name().as_deref() == Some("provider_2")).count(), 3);
+    assert_eq!(
+        handles.iter().filter(|h| h.allocation.get_provider_name().as_deref() == Some("provider_1/provider_2")).count(),
+        3
+    );
     for handle in handles {
         manager.release_handle(&handle);
     }
@@ -392,7 +399,7 @@ async fn session_reservations_preserve_capacity_and_priority_order() {
             Some("session-owner-3"),
         )
         .expect("lower-priority provider should be used after preferred capacity is exhausted");
-    assert_eq!(fallback.allocation.get_provider_name().as_deref(), Some("provider_2"));
+    assert_eq!(fallback.allocation.get_provider_name().as_deref(), Some("provider_1/provider_2"));
 
     manager.release_connection(&SocketAddr::from(([127, 0, 0, 1], 43200)));
     manager.release_connection(&fallback_addr);
@@ -407,7 +414,7 @@ async fn session_reservations_preserve_capacity_and_priority_order() {
             Some("session-owner-4"),
         )
         .expect("idle reservation should protect one preferred-provider slot");
-    assert_eq!(foreign_after_release.allocation.get_provider_name().as_deref(), Some("provider_2"));
+    assert_eq!(foreign_after_release.allocation.get_provider_name().as_deref(), Some("provider_1/provider_2"));
 
     let reserved_owner_addr = SocketAddr::from(([127, 0, 0, 1], 43204));
     let reserved_owner = manager
@@ -477,7 +484,7 @@ async fn concurrent_same_family_playbacks_keep_independent_provider_reservations
     let manager = ActiveProviderManager::new(&app_cfg, &event_manager);
 
     let input_name = "provider_1".intern();
-    let provider_2 = "provider_2".intern();
+    let provider_2 = "provider_1/provider_2".intern();
     let Ok(first_addr) = "127.0.0.1:43121".parse() else {
         return;
     };
@@ -712,10 +719,16 @@ async fn test_higher_priority_user_preempts_first_inserted_low_priority_victim_o
     // The test then normalizes their created_at timestamps to an exact tie so the
     // selector must fall back to the final stable tie-break instead of clock order.
     let old_alloc = manager
-        .acquire_exact_connection_with_grace(&"provider_2".intern(), &old_low_addr, false, 20, ConnectionKind::Normal)
+        .acquire_exact_connection_with_grace(
+            &"provider_1/provider_2".intern(),
+            &old_low_addr,
+            false,
+            20,
+            ConnectionKind::Normal,
+        )
         .expect("old low-priority allocation should succeed");
     let old_token = old_alloc.cancel_token.clone().expect("old allocation should have cancel token");
-    assert_eq!(old_alloc.allocation.get_provider_name().as_deref(), Some("provider_2"));
+    assert_eq!(old_alloc.allocation.get_provider_name().as_deref(), Some("provider_1/provider_2"));
 
     let new_alloc = manager
         .acquire_exact_connection_with_grace(&"provider_1".intern(), &new_low_addr, false, 20, ConnectionKind::Normal)
@@ -757,7 +770,7 @@ async fn test_higher_priority_user_preempts_first_inserted_low_priority_victim_o
     let high_alloc = manager
         .acquire_connection(&input_name, &high_prio_addr, 0, ConnectionKind::Normal)
         .expect("higher-priority request should preempt the first-inserted low-priority victim on exact tie");
-    assert_eq!(high_alloc.allocation.get_provider_name().as_deref(), Some("provider_2"));
+    assert_eq!(high_alloc.allocation.get_provider_name().as_deref(), Some("provider_1/provider_2"));
 
     assert!(old_token.is_cancelled(), "first-inserted low-priority victim should be canceled first on exact tie");
     assert!(!new_token.is_cancelled(), "later allocation should remain active after the stable tie-break");

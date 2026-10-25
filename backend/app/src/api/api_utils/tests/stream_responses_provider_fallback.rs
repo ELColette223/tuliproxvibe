@@ -92,7 +92,7 @@ async fn resolve_streaming_strategy_honors_forced_provider_fallback_policy() {
     else {
         panic!("fallback-enabled request should allocate a provider")
     };
-    assert_eq!(fallback_provider.as_ref(), "provider_2");
+    assert_eq!(fallback_provider.as_ref(), "provider_1/user2");
     assert_eq!(fallback_url.as_ref(), "http://provider-2.example/movie/user2/pass2/1.mkv");
 
     app_state.active_provider.release_connection(&busy_addr);
@@ -172,7 +172,7 @@ async fn create_stream_response_details_preserves_stored_headers_when_fallback_o
     .await
     .unwrap_or_else(|err| panic!("create_stream_response_details should succeed: {err}"));
 
-    assert_eq!(details.provider_name.as_deref(), Some("provider_2"));
+    assert_eq!(details.provider_name.as_deref(), Some("provider_1/user2"));
     assert!(details.session_headers.is_none(), "fallback request should not pass pinned provider session headers");
     assert!(details.stream.is_none(), "test setup should fail to open the fallback provider stream");
 
@@ -349,6 +349,7 @@ async fn resolve_streaming_strategy_rewrites_opaque_m3u_token_after_alias_alloca
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         ..ConfigInput::default()
     });
@@ -390,7 +391,7 @@ async fn resolve_streaming_strategy_rewrites_opaque_m3u_token_after_alias_alloca
     let ProviderStreamState::Available(Some(provider), url) = strategy.provider_stream_state else {
         panic!("request should allocate provider B")
     };
-    assert_eq!(provider.as_ref(), "provider-b");
+    assert_eq!(provider.as_ref(), "provider-a/provider-b");
     assert_eq!(url.as_ref(), "http://stream.example/channel/segment.ts?token=provider-b-token");
 
     app_state.active_provider.release_connection(&busy_addr);

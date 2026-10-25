@@ -82,7 +82,9 @@ pub fn compare_alias_exp_date_with_order(
     .then_with(|| a.name.cmp(&b.name))
 }
 
-pub fn is_csv_file(url: &str) -> bool { url.to_lowercase().ends_with(CSV_EXTENSION) }
+pub fn is_csv_file(url: &str) -> bool {
+    url.to_lowercase().ends_with(CSV_EXTENSION)
+}
 
 fn build_m3u_url(base: &Url, username: Option<&str>, password: Option<&str>) -> Result<Url, url::ParseError> {
     let base_origin = base.origin().ascii_serialization();
@@ -224,9 +226,36 @@ fn csv_assign_config_input_column(
     Ok(())
 }
 
+/// Input-level values a CSV row may inherit when it carries no address of its own.
+///
+/// A row without `url` is normally skipped, because a provider account needs an address to be
+/// reachable. Once the input declares laterals that is no longer true: the account uses them,
+/// so the caller passes them here. Without defaults the historical skip is preserved.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CsvAccountDefaults<'a> {
+    pub input_url_aliases: Option<&'a [Arc<str>]>,
+    pub input_max_connections: u16,
+    pub input_priority: i16,
+}
+
+impl CsvAccountDefaults<'_> {
+    /// No inherited values: a row must carry its own URL, as before.
+    pub const fn none() -> Self {
+        Self { input_url_aliases: None, input_max_connections: 0, input_priority: 0 }
+    }
+}
+
 pub fn csv_read_inputs_from_reader(
     batch_input_type: InputType,
     reader: impl BufRead,
+) -> Result<Vec<ConfigInputAliasDto>, Error> {
+    csv_read_inputs_from_reader_with_defaults(batch_input_type, reader, CsvAccountDefaults::none())
+}
+
+pub fn csv_read_inputs_from_reader_with_defaults(
+    batch_input_type: InputType,
+    reader: impl BufRead,
+    defaults: CsvAccountDefaults<'_>,
 ) -> Result<Vec<ConfigInputAliasDto>, Error> {
     let input_type = match batch_input_type {
         InputType::M3uBatch | InputType::M3u => InputType::M3uBatch,
@@ -296,6 +325,18 @@ pub fn csv_read_inputs_from_reader(
         if invalid {
             continue;
         }
+        if config_input.url.is_empty() && defaults.input_url_aliases.is_some_and(|aliases| !aliases.is_empty()) {
+            // The account reaches the provider through the input's laterals.
+            config_input.url = String::new();
+            if config_input.max_connections == 0 {
+                config_input.max_connections = defaults.input_max_connections;
+            }
+            if config_input.priority == 0 {
+                config_input.priority = defaults.input_priority;
+            }
+            result.push(config_input);
+            continue;
+        }
         csv_assign_mandatory_fields(&mut config_input, input_type);
         if config_input.url.is_empty() {
             warn!("Skipping CSV line {}: missing or invalid url", line_idx + 1);
@@ -310,10 +351,22 @@ async fn csv_read_inputs_from_path(
     input_type: InputType,
     file_path: &Path,
 ) -> Result<(PathBuf, Vec<ConfigInputAliasDto>), Error> {
+    csv_read_inputs_from_path_with_defaults(input_type, file_path, CsvAccountDefaults::none()).await
+}
+
+async fn csv_read_inputs_from_path_with_defaults(
+    input_type: InputType,
+    file_path: &Path,
+    defaults: CsvAccountDefaults<'_>,
+) -> Result<(PathBuf, Vec<ConfigInputAliasDto>), Error> {
     match get_local_file_content(file_path).await {
         Ok(content) => Ok((
             file_path.to_path_buf(),
-            csv_read_inputs_from_reader(input_type, EnvResolvingReader::new(file_reader(Cursor::new(content))))?,
+            csv_read_inputs_from_reader_with_defaults(
+                input_type,
+                EnvResolvingReader::new(file_reader(Cursor::new(content))),
+                defaults,
+            )?,
         )),
         Err(err) => Err(err),
     }
@@ -323,8 +376,16 @@ pub async fn csv_read_inputs(
     input_type: InputType,
     file_uri: &str,
 ) -> Result<(PathBuf, Vec<ConfigInputAliasDto>), Error> {
+    csv_read_inputs_with_defaults(input_type, file_uri, CsvAccountDefaults::none()).await
+}
+
+pub async fn csv_read_inputs_with_defaults(
+    input_type: InputType,
+    file_uri: &str,
+    defaults: CsvAccountDefaults<'_>,
+) -> Result<(PathBuf, Vec<ConfigInputAliasDto>), Error> {
     let file_path = get_csv_file_path(file_uri)?;
-    csv_read_inputs_from_path(input_type, &file_path).await
+    csv_read_inputs_from_path_with_defaults(input_type, &file_path, defaults).await
 }
 
 // `get_csv_file_path` lives in `utils::file_utils`; re-exported by

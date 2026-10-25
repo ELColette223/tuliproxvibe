@@ -72,7 +72,7 @@ you constantly have to maintain.
 
 Use different upstream technologies without forcing every downstream player to understand them.
 
-- **Xtream Codes** — Live, VOD, Series, Catchup, EPG metadata, provider aliases, and CSV batch accounts
+- **Xtream Codes** — Live, VOD, Series, Catchup, EPG metadata, provider accounts with alternative URLs, and CSV batch accounts
 - **M3U/M3U8** — remote or local playlists with headers, credentials, EPG sources, and CSV batch inputs
 - **Stalker & Ministra** — full portal catalogs with MAC, credential or combined authentication, configurable MAG profiles,  
   `create_link` playback resolution, resumable refreshes, and per-alias configuration
@@ -172,7 +172,7 @@ Upstream providers are not always reliable. Tuliprox is designed to preserve usa
 - Persisted resolved IPs without overwriting source configuration
 - HTTP, HTTPS, and SOCKS5 outbound proxy support for VPN gateways, corporate proxies, or Gluetun
 - Effective public IPv4/IPv6 display in the Web UI to verify routing
-- Provider aliases and CSV batch configuration for larger account pools
+- Provider accounts with shared alternative URLs, and CSV batch configuration for larger account pools
 - **Per-cluster update quality guards** for Xtream, Stalker, and M3U inputs can reject suspicious Live/VOD/Series refreshes  
   and retain the last accepted data
 - Quality rejections are reported separately from technical failures

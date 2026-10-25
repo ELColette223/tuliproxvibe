@@ -1147,6 +1147,15 @@
 
 ## 🐛 Fixes
 
+- **Live MPEG-TS splices keep the player's clock continuous.** When a provider ends a body and the next request is
+  served from behind live edge, the reopened episode replayed already-sent content with a **PCR** travelling behind
+  the one already delivered, and dropping whole packets broke the continuity counters. Players derive their clock from
+  PCR, so it showed up as a time jump even though PES timestamps were monotonic. The reopening gate now also withholds
+  a PCR that is behind, strips an obsolete PCR from a packet whose picture is still new, and renumbers every emitted
+  packet's continuity counter into a gapless per-PID sequence. Measured on a 3-minute capture with 19 real reopens:
+  PCR regressions `11 → 0`, continuity-counter breaks `90 → 0`, PES PTS regressions `0`, with 2 709 of 3 046 PCRs kept
+  so the player keeps its reference clock.
+
 - **Stable shared MPEG-TS keying.** Shared live MPEG-TS origins are keyed by input identity and upstream stream ID
   (with a target/virtual-ID fallback) instead of the request URL, so two inputs with the same provider stream ID no
   longer collide and a reconnect lands on the origin the session already holds. An exhausted-permission session may
@@ -1659,6 +1668,12 @@
   episodes are unchanged: their properties carry no provider URL at that layer.
 
 ## ⚙️ New Settings
+
+- **source.yml (input `options.proxy_stream_fallback`)** (bool, default `false`): lets playback retry a failed
+  connection through the input's own `proxy`. The direct connection is always attempted first and stays the normal
+  path; the proxy is only an alternative egress for a transport failure (timeout, DNS, connection refused or a 5xx).
+  A missing channel (`404`) or a full account is never retried through the proxy, because the proxy only repeats the
+  panel's answer. Editable in the Web UI under Sources → input → **Main** → **Proxy**, next to the proxy credentials.
 
 - **source.yml (input `options.connection_limit_policy`)** (`strict` | `bypass_local_cap` | `rotate_on_full`, default
   `strict`): what happens when an input's local connection cap is reached. `strict` keeps today's behavior and rejects

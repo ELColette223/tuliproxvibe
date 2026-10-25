@@ -5,10 +5,15 @@ use crate::model::{
 };
 use std::{collections::HashSet, net::IpAddr};
 
-fn create_test_dto() -> ConfigInputDto { ConfigInputDto { name: "test_input".intern(), ..ConfigInputDto::default() } }
+fn create_test_dto() -> ConfigInputDto {
+    ConfigInputDto { name: "test_input".intern(), ..ConfigInputDto::default() }
+}
 
-fn prepare_dto(dto: &mut ConfigInputDto) -> Result<u16, TuliproxError> { dto.prepare(0, false, &HashSet::new(), None) }
+fn prepare_dto(dto: &mut ConfigInputDto) -> Result<u16, TuliproxError> {
+    dto.prepare(0, false, &HashSet::new(), None)
+}
 
+mod accounts;
 mod aliases;
 mod input;
 mod provider;

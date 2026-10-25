@@ -1,4 +1,4 @@
-use crate::model::config::{ConfigInput, ConfigInputAlias};
+use crate::model::config::ConfigInput;
 use shared::model::provider_saturation::{CapacityGroup, ProviderSlot};
 use std::{collections::HashMap, sync::Arc};
 
@@ -15,37 +15,52 @@ pub fn build_provider_slots(
         }
         let current = connections.get(&input.name).copied().unwrap_or(0);
         slots.push(ProviderSlot { name: input.name.clone(), max_connections: input.max_connections, current });
-        push_aliases(&mut slots, input.aliases.as_deref(), connections);
+        push_aliases(&mut slots, input, connections);
     }
     slots
 }
 
 impl CapacityGroup for ConfigInput {
-    fn name(&self) -> &Arc<str> { &self.name }
-    fn enabled(&self) -> bool { self.enabled }
-    fn alias_names(&self) -> impl Iterator<Item = &Arc<str>> {
-        self.aliases.iter().flatten().filter(|alias| alias.enabled).map(|alias| &alias.name)
+    fn name(&self) -> &Arc<str> {
+        &self.name
+    }
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+    /// The key the pool uses for this account.
+    ///
+    /// The account's own `name` is its username, and the same subscription may legitimately be
+    /// declared by more than one input. Only the qualified `<input>/<username>` is unique, so
+    /// that is what the capacity grouping keys on.
+    fn alias_names(&self) -> impl Iterator<Item = Arc<str>> {
+        self.aliases
+            .iter()
+            .flatten()
+            .filter(|alias| alias.enabled)
+            .map(|alias| alias.account_name(self.name.as_ref()))
     }
 }
 
 fn push_aliases(
     slots: &mut Vec<ProviderSlot<Arc<str>>>,
-    aliases: Option<&[ConfigInputAlias]>,
+    input: &ConfigInput,
     connections: &HashMap<Arc<str>, usize>,
 ) {
-    let Some(aliases) = aliases else { return };
+    let Some(aliases) = input.aliases.as_deref() else { return };
     for alias in aliases {
         if !alias.enabled {
             continue;
         }
-        let current = connections.get(&alias.name).copied().unwrap_or(0);
-        slots.push(ProviderSlot { name: alias.name.clone(), max_connections: alias.max_connections, current });
+        let name = alias.account_name(input.name.as_ref());
+        let current = connections.get(&name).copied().unwrap_or(0);
+        slots.push(ProviderSlot { name, max_connections: alias.max_connections, current });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::ConfigInputAlias;
     use shared::model::provider_saturation::{build_group_lookup, is_exhausted};
 
     fn input(name: &str, max: u16) -> Arc<ConfigInput> {
@@ -89,6 +104,7 @@ mod tests {
             exp_date: None,
             enabled: false,
             stalker: None,
+            ..Default::default()
         }]);
         // The disabled alias and the disabled input must not add spare capacity.
         let disabled_input =
@@ -99,5 +115,37 @@ mod tests {
         let slots = build_provider_slots(&inputs, &conns);
         let groups = build_group_lookup(&inputs);
         assert!(is_exhausted(slots, &groups));
+    }
+
+    /// The same subscription declared by two inputs yields two members, not one overwritten key.
+    ///
+    /// Both the slot names and the group keys are the pool's qualified `<input>/<username>`, so the
+    /// capacity of each input stays attributable to it.
+    #[test]
+    fn accounts_with_the_same_username_in_two_inputs_stay_separate() {
+        let make = |input_name: &'static str| {
+            Arc::new(ConfigInput {
+                name: Arc::from(input_name),
+                max_connections: 1,
+                enabled: true,
+                aliases: Some(vec![ConfigInputAlias {
+                    name: Arc::from("shared"),
+                    username: Some("shared".to_string()),
+                    enabled: true,
+                    max_connections: 2,
+                    ..Default::default()
+                }]),
+                ..ConfigInput::default()
+            })
+        };
+        let inputs = vec![make("one"), make("two")];
+
+        let slots = build_provider_slots(&inputs, &HashMap::new());
+        let groups = build_group_lookup(&inputs);
+
+        assert!(slots.iter().any(|slot| slot.name.as_ref() == "one/shared"));
+        assert!(slots.iter().any(|slot| slot.name.as_ref() == "two/shared"));
+        assert_eq!(groups.get("one/shared").map(Arc::as_ref), Some("one"));
+        assert_eq!(groups.get("two/shared").map(Arc::as_ref), Some("two"));
     }
 }

@@ -127,6 +127,13 @@ pub struct ConfigInputOptionsDto {
     /// Bulk-fetch EPG for live channels during playlist processing.
     #[serde(default, skip_serializing_if = "is_false")]
     pub stalker_bulk_epg: bool,
+    /// Retry a failed playback connection through the input's proxy.
+    ///
+    /// Playback always connects directly first; the proxy is only an alternative egress when the
+    /// direct connection fails for a transport reason (timeout, DNS, connection refused, 5xx).
+    /// Channel-missing and account-full answers are never retried through the proxy.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub proxy_stream_fallback: bool,
 }
 
 impl Default for ConfigInputOptionsDto {
@@ -159,6 +166,7 @@ impl Default for ConfigInputOptionsDto {
             probe_filter: None,
             t_probe_filter: None,
             stalker_bulk_epg: false,
+            proxy_stream_fallback: false,
         }
     }
 }
@@ -190,6 +198,7 @@ impl ConfigInputOptionsDto {
             && self.resolve_filter.as_ref().is_none_or(|s| s.trim().is_empty())
             && self.probe_filter.as_ref().is_none_or(|s| s.trim().is_empty())
             && !self.stalker_bulk_epg
+            && !self.proxy_stream_fallback
     }
 
     pub fn clean(&mut self) {
@@ -220,6 +229,7 @@ impl ConfigInputOptionsDto {
         self.probe_filter = None;
         self.t_probe_filter = None;
         self.stalker_bulk_epg = false;
+        self.proxy_stream_fallback = false;
     }
 }
 

@@ -17,7 +17,6 @@ use crate::{
     model::{ConfigInput, ProxyUserCredentials, StripConfig},
 };
 use axum::http::{header, HeaderMap, StatusCode};
-use http_body_util::BodyExt;
 use shared::model::{HlsStripMode, InputType, PlaylistItemType, UserConnectionPermission, XtreamCluster};
 use std::{sync::Arc, time::Duration};
 
@@ -110,7 +109,7 @@ async fn hls_account_binding_soft_expiry_retains_session_and_reacquires_on_autho
     .expect("authorized origin work can reacquire a detached binding");
 
     let binding = session.read().await.origin_account_binding.clone().expect("new binding is published atomically");
-    assert_eq!(binding.account_name.as_ref(), "account-a");
+    assert_eq!(binding.account_name.as_ref(), "overlap-input/account-user");
     assert!(matches!(binding.binding_mode, HlsOriginAccountBindingMode::Active));
     assert_eq!(prepared_origin.fetch_url, "http://account.example.com/live/account-user/account-pass/12345.m3u8");
     app_state.connection_manager.release_managed_provider_handle(prepared_origin.preacquired_origin_account_handle);
@@ -328,9 +327,16 @@ async fn hls_origin_account_rebind_failure_sets_backoff_without_changing_session
     assert!(session_guard.origin_account_rebind.next_rebind_allowed_at_ms.is_some());
 }
 
+/// Recording playback of VOD and series relays the provider body and never uses the configured
+/// proxy.
+///
+/// Playback egress is direct by design: a proxy adds a hop the provider does not see for a direct
+/// client, so a working channel could fail for reasons that belong to the proxy. The origin host
+/// does not resolve, and the proxy answers with the body: a request routed through the proxy would
+/// therefore succeed, which is exactly what must not happen.
 #[tokio::test]
-async fn recording_force_redirect_keeps_vod_and_series_on_the_provider_proxy() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn recording_force_redirect_relays_vod_and_series_without_the_provider_proxy(
+) -> Result<(), Box<dyn std::error::Error>> {
     for (output, cluster, item_type) in [
         (shared::model::TargetType::M3u, XtreamCluster::Video, PlaylistItemType::Video),
         (shared::model::TargetType::M3u, XtreamCluster::Series, PlaylistItemType::Series),
@@ -338,7 +344,7 @@ async fn recording_force_redirect_keeps_vod_and_series_on_the_provider_proxy() -
         (shared::model::TargetType::Xtream, XtreamCluster::Series, PlaylistItemType::Series),
     ] {
         // The proxy answers for an origin that cannot be resolved directly.
-        let (proxy_url, requests, proxy_task) = spawn_recording_header_origin().await;
+        let (proxy_url, proxy_requests, proxy_task) = spawn_recording_header_origin().await;
         let provider_url = format!(
             "http://recording-origin.invalid/{}/{}12345.mp4",
             cluster.as_stream_type(),
@@ -376,21 +382,29 @@ async fn recording_force_redirect_keeps_vod_and_series_on_the_provider_proxy() -
         let mut config = (*app_state.app_config.config.load_full()).clone();
         config.proxy = Some(crate::model::ProxyConfig { url: proxy_url, username: None, password: None });
         app_state.app_config.config.store(Arc::new(config));
-        let client = crate::utils::request::create_client(&app_state.app_config).build()?;
-        app_state.http_clients.default.store(Arc::new(client.clone()));
-        app_state.http_clients.no_redirect.store(Arc::new(client));
+        // Playback uses the proxy-free stream clients. The origin host does not resolve, so a correct
+        // implementation fails here; the proxy log is what proves the egress stayed direct.
+        let stream_client = tuliprox_core::utils::request::create_stream_client(
+            &app_state.app_config,
+            reqwest::redirect::Policy::limited(10),
+        )?;
+        let stream_no_redirect = tuliprox_core::utils::request::create_stream_client(
+            &app_state.app_config,
+            reqwest::redirect::Policy::none(),
+        )?;
+        app_state.http_clients.stream.store(Arc::new(stream_client));
+        app_state.http_clients.stream_no_redirect.store(Arc::new(stream_no_redirect));
         let mut item = test_m3u_hls_item(&input, 12345, "12345", &provider_url);
         item.item_type = item_type;
         cache_recording_test_item(&app_state, &target, item).await?;
         let router = recording_test_router(&app_state);
-        let recording =
-            recording_test_response(&router, &recording_test_url(&app_state, &target, &input, cluster)?).await?;
-        assert_eq!(
-            recording.status(),
-            StatusCode::OK,
-            "{cluster:?}: the recording endpoint must relay the provider body"
+        let _ = recording_test_response(&router, &recording_test_url(&app_state, &target, &input, cluster)?).await?;
+        // Playback must not have consulted the configured proxy at all.
+        let proxy_requests = proxy_requests.lock().map_err(|error| error.to_string())?.clone();
+        assert!(
+            proxy_requests.is_empty(),
+            "{cluster:?}: playback must never use the configured proxy: {proxy_requests:?}"
         );
-        assert_eq!(recording.into_body().collect().await?.to_bytes().as_ref(), b"segment-bytes");
         let ordinary_url = if output == shared::model::TargetType::M3u {
             format!(
                 "/{}/{}/hls-user/hls-pass/12345.mp4",
@@ -410,9 +424,8 @@ async fn recording_force_redirect_keeps_vod_and_series_on_the_provider_proxy() -
             ordinary.headers().get(header::LOCATION).ok_or("redirect location missing")?.to_str()?,
             provider_url
         );
-        let requests = requests.lock().map_err(|error| error.to_string())?.clone();
-        assert_eq!(requests.len(), 1, "{requests:?}");
-        assert!(requests[0].starts_with(&format!("get {provider_url} ")), "{requests:?}");
+        // Neither the relay nor the redirect may reach the configured proxy.
+        assert!(proxy_requests.is_empty(), "playback must never use the configured proxy: {proxy_requests:?}");
         proxy_task.abort();
     }
     Ok(())

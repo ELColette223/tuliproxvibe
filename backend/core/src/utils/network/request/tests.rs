@@ -8,9 +8,9 @@ use super::{
     send_input_with_retry_and_provider_policy_with_manual_redirects_and_options_result,
     send_input_with_retry_and_provider_policy_with_options_result, send_with_retry_and_provider,
     send_with_retry_and_provider_policy, should_retry_text_body_error, should_try_next_ip_on_connect_error,
-    strip_sensitive_headers_for_cross_origin_redirect, text_response_error_log_label, InputEpgFileRequest,
-    PublicIpResolver, RequestFetchOptions, ResourceDestination, ResourceDestinationResolver, TextContentBodyOptions,
-    TextContentFetchOptions, STREAM_IDLE_TIMEOUT,
+    should_trigger_failover, strip_sensitive_headers_for_cross_origin_redirect, text_response_error_log_label,
+    InputEpgFileRequest, PublicIpResolver, RequestFetchOptions, ResourceDestination, ResourceDestinationResolver,
+    TextContentBodyOptions, TextContentFetchOptions, STREAM_IDLE_TIMEOUT,
 };
 
 mod behavior;

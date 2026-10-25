@@ -203,7 +203,6 @@ fn test_options(
         stream_channel: None,
         connect_failure_stage: None,
         content_representation: mode,
-        proxy: None,
     })
 }
 
@@ -334,3 +333,5 @@ mod recovery;
 mod storage;
 mod streaming;
 mod transport;
+mod egress;
+mod reconnect;

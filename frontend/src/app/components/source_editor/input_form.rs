@@ -21,8 +21,8 @@ use self::{
 use crate::{
     app::{
         components::{
-            config::HasFormData, AliasItemForm, BlockId, BlockInstance, Card, EditMode, EpgSmartMatchForm,
-            EpgSourceItemForm, IconButton, Panel, ProviderItemForm, SourceEditorContext, TextButton,
+            config::HasFormData, AccountItemForm, BlockId, BlockInstance, Card, EditMode, EpgSmartMatchForm,
+            EpgSourceItemForm, IconButton, Panel, ProviderItemForm, SourceEditorContext, TextButton, UrlAliasList,
         },
         ConfigContext,
     },
@@ -33,10 +33,11 @@ use shared::{
     concat_string,
     error::TuliproxError,
     model::{
-        ConfigInputAliasDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto, ConfigInputUpdateQualityDto,
-        ConfigProviderDto, ConnectionLimitPolicy, EpgSmartMatchConfigDto, EpgSourceDto, FlussonicHlsCatchup,
-        InputFetchMethod, InputType, MediaServerInputConfigDto, MediaServerLibrarySelector, OnConnectErrorPolicy,
-        ProviderUrlSelectionPolicy, ProxyConfigDto, StagedInputType, StalkerDeviceProfileDto, StalkerInputConfigDto,
+        ConfigInputAccountDto, ConfigInputDto, ConfigInputOptionsDto, ConfigInputStagedDto,
+        ConfigInputUpdateQualityDto, ConfigProviderDto, ConnectionLimitPolicy, EpgSmartMatchConfigDto, EpgSourceDto,
+        FlussonicHlsCatchup, InputFetchMethod, InputType, MediaServerInputConfigDto, MediaServerLibrarySelector,
+        OnConnectErrorPolicy, ProviderUrlSelectionPolicy, ProxyConfigDto, StagedInputType, StalkerDeviceProfileDto,
+        StalkerInputConfigDto,
     },
     utils::{Internable, BATCH_SCHEME_PREFIX},
 };
@@ -62,7 +63,8 @@ const LABEL_PASSWORD: &str = "LABEL.PASSWORD";
 const LABEL_PERSIST: &str = "LABEL.PERSIST";
 const LABEL_ENABLED: &str = "LABEL.ENABLED";
 const LABEL_DISABLED: &str = "LABEL.DISABLED";
-const LABEL_ALIASES: &str = "LABEL.ALIASES";
+const LABEL_ACCOUNTS: &str = "LABEL.ACCOUNTS";
+const LABEL_URL_ALIASES: &str = "LABEL.URL_ALIASES";
 const LABEL_PRIORITY: &str = "LABEL.PRIORITY";
 const LABEL_MAX_CONNECTIONS: &str = "LABEL.MAX_CONNECTIONS";
 const LABEL_SEQUENTIAL_GROUP: &str = "LABEL.SEQUENTIAL_GROUP";
@@ -76,7 +78,7 @@ const LABEL_DNS_CONNECT_TRY_NEXT_IP: &str = "LABEL.DNS_CONNECT_TRY_NEXT_IP";
 const LABEL_DNS_CONNECT_ROTATE_PROVIDER_URL: &str = "LABEL.DNS_CONNECT_ROTATE_PROVIDER_URL";
 const LABEL_DNS_REFRESH_SECS: &str = "LABEL.DNS_REFRESH_SECS";
 const LABEL_ADD_EPG_SOURCE: &str = "LABEL.ADD_EPG_SOURCE";
-const LABEL_ADD_ALIAS: &str = "LABEL.ADD_ALIAS";
+const LABEL_ADD_ACCOUNT: &str = "LABEL.ADD_ACCOUNT";
 const LABEL_ADD_PROVIDER: &str = "LABEL.ADD_PROVIDER";
 const LABEL_PROVIDERS: &str = "LABEL.PROVIDER";
 const LABEL_SKIP: &str = "LABEL.SKIP";
@@ -86,6 +88,7 @@ const LABEL_SERIES: &str = "LABEL.SERIES";
 const LABEL_XTREAM_LIVE_STREAM_USE_PREFIX: &str = "LABEL.LIVE_STREAM_USE_PREFIX";
 const LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION: &str = "LABEL.LIVE_STREAM_WITHOUT_EXTENSION";
 const LABEL_DISABLE_HLS_STREAMING: &str = "LABEL.DISABLE_HLS_STREAMING";
+pub(super) const LABEL_PROXY_STREAM_FALLBACK: &str = "LABEL.PROXY_STREAM_FALLBACK";
 const LABEL_USER_AGENT_STREAM_INDEX: &str = "LABEL.USER_AGENT_STREAM_INDEX";
 pub(super) const LABEL_CONNECTION_LIMIT_POLICY: &str = "LABEL.CONNECTION_LIMIT_POLICY";
 pub(super) const LABEL_CONNECTION_LIMIT_POLICY_STRICT: &str = "LABEL.CONNECTION_LIMIT_POLICY_STRICT";
@@ -113,7 +116,6 @@ const LABEL_CACHE_DURATION: &str = "LABEL.CACHE_DURATION";
 const LABEL_MAIN: &str = "LABEL.MAIN_CONFIG";
 const LABEL_OPTIONS: &str = "LABEL.OPTIONS";
 const LABEL_EPG: &str = "LABEL.EPG";
-const LABEL_ALIAS: &str = "LABEL.ALIAS";
 const LABEL_TYPE: &str = "LABEL.TYPE";
 const LABEL_CLUSTER: &str = "LABEL.CLUSTER";
 const LABEL_MEDIA_SERVER: &str = "LABEL.MEDIA_SERVER";
@@ -259,7 +261,10 @@ enum InputFormPage {
     Options,
     Libraries,
     Epg,
-    Alias,
+    /// Subscription accounts of this input.
+    Accounts,
+    /// Alternative provider base URLs (laterals) shared by the accounts.
+    UrlAliases,
     Provider,
 }
 
@@ -269,7 +274,8 @@ impl InputFormPage {
     const OPTIONS: &str = "Options";
     const LIBRARIES: &str = "Libraries";
     const EPG: &str = "Epg";
-    const ALIAS: &str = "Alias";
+    const ACCOUNTS: &str = "Accounts";
+    const URL_ALIASES: &str = "UrlAliases";
     const PROVIDER: &str = "Provider";
 }
 
@@ -283,7 +289,8 @@ impl FromStr for InputFormPage {
             Self::OPTIONS => Ok(InputFormPage::Options),
             Self::LIBRARIES => Ok(InputFormPage::Libraries),
             Self::EPG => Ok(InputFormPage::Epg),
-            Self::ALIAS => Ok(InputFormPage::Alias),
+            Self::ACCOUNTS => Ok(InputFormPage::Accounts),
+            Self::URL_ALIASES => Ok(InputFormPage::UrlAliases),
             Self::PROVIDER => Ok(InputFormPage::Provider),
             _ => Err(TuliproxError::Config(format!("Unknown input form page: {s}"))),
         }
@@ -301,7 +308,8 @@ impl Display for InputFormPage {
                 InputFormPage::Options => Self::OPTIONS,
                 InputFormPage::Libraries => Self::LIBRARIES,
                 InputFormPage::Epg => Self::EPG,
-                InputFormPage::Alias => Self::ALIAS,
+                InputFormPage::Accounts => Self::ACCOUNTS,
+                InputFormPage::UrlAliases => Self::URL_ALIASES,
                 InputFormPage::Provider => Self::PROVIDER,
             }
         )
@@ -316,11 +324,38 @@ impl Internable for InputFormPage {
             Self::Options => Self::OPTIONS,
             Self::Libraries => Self::LIBRARIES,
             Self::Epg => Self::EPG,
-            Self::Alias => Self::ALIAS,
+            Self::Accounts => Self::ACCOUNTS,
+            Self::UrlAliases => Self::URL_ALIASES,
             Self::Provider => Self::PROVIDER,
         }
         .intern()
     }
+}
+
+/// Accounts the editor shows for an input.
+///
+/// A file on the new schema carries them directly. A file still on the legacy schema is
+/// rendered from its aliases, so opening the editor never presents an empty list to a user who
+/// has subscriptions configured.
+fn accounts_from_input(input: &ConfigInputDto) -> Vec<ConfigInputAccountDto> {
+    if let Some(accounts) = input.accounts.as_ref() {
+        return accounts.clone();
+    }
+    input
+        .aliases
+        .iter()
+        .flatten()
+        .map(|alias| ConfigInputAccountDto {
+            id: alias.id,
+            username: alias.username.as_deref().map_or_else(|| alias.name.clone(), Internable::intern),
+            password: alias.password.clone(),
+            priority: alias.priority,
+            max_connections: alias.max_connections,
+            exp_date: alias.exp_date,
+            enabled: alias.enabled,
+            stalker: alias.stalker.clone(),
+        })
+        .collect()
 }
 
 fn input_form_pages(input_type: shared::model::InputType) -> Vec<InputFormPage> {
@@ -332,7 +367,7 @@ fn input_form_pages(input_type: shared::model::InputType) -> Vec<InputFormPage> 
         pages.push(InputFormPage::Libraries);
     }
     if !input_type.is_library() && !input_type.is_staged() && !input_type.is_media_server() {
-        pages.push(InputFormPage::Alias);
+        pages.extend([InputFormPage::Accounts, InputFormPage::UrlAliases]);
     }
     if !input_type.is_library() && !input_type.is_media_server() {
         pages.push(InputFormPage::Options);
@@ -398,6 +433,7 @@ generate_form_reducer!(
       ResolveFilter => resolve_filter: Option<String>,
       ProbeFilter => probe_filter: Option<String>,
       StalkerBulkEpg => stalker_bulk_epg: bool,
+      ProxyStreamFallback => proxy_stream_fallback: bool,
     }
 );
 
@@ -460,7 +496,8 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
 
     // State for EPG sources, Aliases, Headers, and Providers
     let epg_sources_state = use_state(Vec::<EpgSourceDto>::new);
-    let aliases_state = use_state(Vec::<ConfigInputAliasDto>::new);
+    let accounts_state = use_state(Vec::<ConfigInputAccountDto>::new);
+    let url_aliases_state = use_state(Vec::<Arc<str>>::new);
     let headers_state = use_state(HashMap::<String, String>::new);
     let providers_state = use_state(Vec::<ConfigProviderDto>::new);
     let providers_dirty_state = use_state(|| false);
@@ -472,9 +509,9 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
 
     // State for showing item forms
     let show_epg_form_state = use_state(|| false);
-    let show_alias_form_state = use_state(|| false);
+    let show_account_form_state = use_state(|| false);
     let show_provider_form_state = use_state(|| false);
-    let edit_alias = use_state(|| None::<ConfigInputAliasDto>);
+    let edit_account = use_state(|| None::<ConfigInputAccountDto>);
     let edit_provider = use_state(|| None::<ConfigProviderDto>);
     let edit_epg_source = use_state(|| None::<EpgSourceDto>);
     {
@@ -482,7 +519,8 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
         let input_options_state = input_options_state.clone();
         let epg_sources_state = epg_sources_state.clone();
         let epg_smart_match_state = epg_smart_match_state.clone();
-        let aliases_state = aliases_state.clone();
+        let accounts_state = accounts_state.clone();
+        let url_aliases_state = url_aliases_state.clone();
         let headers_state = headers_state.clone();
         let providers_state = providers_state.clone();
         let providers_dirty_state = providers_dirty_state.clone();
@@ -517,8 +555,10 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                 // Load EPG smart match
                 epg_smart_match_state.set(input.epg.as_ref().and_then(|epg| epg.smart_match.clone()));
 
-                // Load aliases
-                aliases_state.set(input.aliases.clone().unwrap_or_default());
+                // Load accounts and their laterals. A file still on the legacy schema shows its
+                // aliases as accounts, so the editor never opens empty.
+                accounts_state.set(accounts_from_input(input));
+                url_aliases_state.set(input.url_aliases.clone().unwrap_or_default());
 
                 // Load providers:
                 // - Prefer explicit input-level providers.
@@ -550,7 +590,8 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                 headers_state.set(HashMap::new());
                 epg_sources_state.set(Vec::new());
                 epg_smart_match_state.set(None);
-                aliases_state.set(Vec::new());
+                accounts_state.set(Vec::new());
+                url_aliases_state.set(Vec::new());
                 providers_state.set(Vec::new());
                 providers_dirty_state.set(false);
                 stalker_config_state.set(StalkerInputConfigDto::default());
@@ -640,49 +681,48 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
         })
     };
 
-    let handle_add_alias_item = {
-        let aliases = aliases_state.clone();
-        let show_alias_form = show_alias_form_state.clone();
-        let edit_alias = edit_alias.clone();
-        Callback::from(move |alias: ConfigInputAliasDto| {
-            let mut items = (*aliases).clone();
-            if let Some(e) = edit_alias.as_ref() {
-                if let Some(pos) = items.iter().position(|x| x.name == e.name) {
+    let handle_add_account_item = {
+        let accounts = accounts_state.clone();
+        let show_account_form = show_account_form_state.clone();
+        let edit_account = edit_account.clone();
+        Callback::from(move |account: ConfigInputAccountDto| {
+            let mut items = (*accounts).clone();
+            // The account's identity is its username; editing replaces that entry.
+            let edited_username = edit_account.as_ref().map(|edited| edited.username.clone());
+            match edited_username.and_then(|username| items.iter().position(|item| item.username == username)) {
+                Some(pos) => {
                     if let Some(slot) = items.get_mut(pos) {
-                        *slot = alias;
+                        *slot = account;
                     }
-                } else {
-                    items.push(alias);
                 }
-                edit_alias.set(None);
-            } else {
-                items.push(alias);
+                None => items.push(account),
             }
-            aliases.set(items);
-            show_alias_form.set(false);
+            edit_account.set(None);
+            accounts.set(items);
+            show_account_form.set(false);
         })
     };
 
-    let handle_close_add_alias_item = {
-        let show_alias_form = show_alias_form_state.clone();
-        let edit_alias = edit_alias.clone();
+    let handle_close_add_account_item = {
+        let show_account_form = show_account_form_state.clone();
+        let edit_account = edit_account.clone();
         Callback::from(move |()| {
-            show_alias_form.set(false);
-            edit_alias.set(None);
+            show_account_form.set(false);
+            edit_account.set(None);
         })
     };
 
-    let handle_show_add_alias_item = {
-        let show_alias_form = show_alias_form_state.clone();
-        let edit_alias = edit_alias.clone();
+    let handle_show_add_account_item = {
+        let show_account_form = show_account_form_state.clone();
+        let edit_account = edit_account.clone();
         Callback::from(move |_| {
-            show_alias_form.set(true);
-            edit_alias.set(None);
+            show_account_form.set(true);
+            edit_account.set(None);
         })
     };
 
-    let handle_remove_alias_list_item = {
-        let alias_list = aliases_state.clone();
+    let handle_remove_account_list_item = {
+        let alias_list = accounts_state.clone();
         Callback::from(move |(idx, e): (String, MouseEvent)| {
             e.prevent_default();
             e.stop_propagation();
@@ -696,10 +736,10 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
         })
     };
 
-    let handle_edit_alias_list_item = {
-        let alias_list = aliases_state.clone();
-        let show_alias_form = show_alias_form_state.clone();
-        let edit_alias = edit_alias.clone();
+    let handle_edit_account_list_item = {
+        let alias_list = accounts_state.clone();
+        let show_account_form = show_account_form_state.clone();
+        let edit_account = edit_account.clone();
 
         Callback::from(move |(idx, e): (String, MouseEvent)| {
             e.prevent_default();
@@ -708,15 +748,15 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                 let items = (*alias_list).clone();
                 if index < items.len() {
                     let item = items.get(index).cloned();
-                    edit_alias.set(item);
-                    show_alias_form.set(true);
+                    edit_account.set(item);
+                    show_account_form.set(true);
                 }
             }
         })
     };
 
-    let handle_move_alias_up = {
-        let alias_list = aliases_state.clone();
+    let handle_move_account_up = {
+        let alias_list = accounts_state.clone();
         Callback::from(move |(idx, e): (String, MouseEvent)| {
             e.prevent_default();
             e.stop_propagation();
@@ -730,8 +770,8 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
         })
     };
 
-    let handle_move_alias_down = {
-        let alias_list = aliases_state.clone();
+    let handle_move_account_down = {
+        let alias_list = accounts_state.clone();
         Callback::from(move |(idx, e): (String, MouseEvent)| {
             e.prevent_default();
             e.stop_propagation();
@@ -886,7 +926,7 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
             <M3uInputForm state={input_form_state.clone()} allow_write={props.allow_write} />
         },
         shared::model::InputType::Xtream | shared::model::InputType::XtreamBatch => html! {
-            <XtreamInputForm state={input_form_state.clone()} providers={(*providers_state).clone()} allow_write={props.allow_write} />
+            <XtreamInputForm state={input_form_state.clone()} options_state={input_options_state.clone()} providers={(*providers_state).clone()} allow_write={props.allow_write} />
         },
         shared::model::InputType::Stalker | shared::model::InputType::StalkerBatch => html! {
             <StalkerInputForm state={input_form_state.clone()} config={stalker_config_state.clone()} allow_write={props.allow_write} />
@@ -915,76 +955,72 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
         }
     };
 
-    let render_alias = || {
-        let aliases = aliases_state.clone();
-        let show_alias_form = show_alias_form_state.clone();
-        let edit_alias = edit_alias.clone();
+    let render_accounts = || {
+        let accounts = accounts_state.clone();
+        let show_account_form = show_account_form_state.clone();
+        let edit_account = edit_account.clone();
+        let laterals = url_aliases_state.clone();
 
         html! {
              <Card class="tp__config-view__card">
-              if *show_alias_form {
-                    <AliasItemForm
+              if *show_account_form {
+                    <AccountItemForm
                         input_type={input_form_state.form.input_type}
                         stalker_auth_mode={stalker_config_state.auth_mode}
                         providers={(*providers_state).clone()}
                         proxy={input_form_state.form.proxy.clone()}
-                        initial={(*edit_alias).clone()}
-                        on_submit={handle_add_alias_item}
-                        on_cancel={handle_close_add_alias_item}
+                        account_url={laterals.first().map_or_else(String::new, |url| url.to_string())}
+                        initial={(*edit_account).clone()}
+                        on_submit={handle_add_account_item}
+                        on_cancel={handle_close_add_account_item}
                         readonly={!props.allow_write}
                     />
               } else {
-                  { config_field_child!(translate.t(LABEL_ALIASES), "INPUT_FORM.ALIASES", {
-                      let aliases_list = aliases.clone();
-                      let alias_count = aliases_list.len();
+                  { config_field_child!(translate.t(LABEL_ACCOUNTS), "INPUT_FORM.ACCOUNTS", {
+                      let account_list = accounts.clone();
+                      let account_count = account_list.len();
                       html! {
                         <div class="tp__form-list">
                             <div class="tp__form-list__items">
                             {
-                                for (*aliases_list).iter().enumerate().map(|(idx, alias)| {
+                                for (*account_list).iter().enumerate().map(|(idx, account)| {
                                     html! {
-                                        <div class="tp__form-list__item" key={format!("alias-{idx}")}>
+                                        <div class="tp__form-list__item" key={format!("account-{idx}")}>
                                             <div class="tp__form-list__item-toolbar">
                                                 if props.allow_write && idx > 0 {
                                                     <IconButton
                                                         class="tp__form-list__item-arrow-btn"
                                                         name={idx.to_string()}
                                                         icon="ArrowUp"
-                                                        onclick={handle_move_alias_up.clone()}
+                                                        onclick={handle_move_account_up.clone()}
                                                     />
-                                                } else if props.allow_write && alias_count > 2 {
+                                                } else if props.allow_write && account_count > 2 {
                                                     <span class="tp__form-list__item-placeholder-btn"/>
                                                 }
-                                                if props.allow_write && idx + 1 < alias_count {
+                                                if props.allow_write && idx + 1 < account_count {
                                                     <IconButton
                                                         class="tp__form-list__item-arrow-btn"
                                                         name={idx.to_string()}
                                                         icon="ArrowDown"
-                                                        onclick={handle_move_alias_down.clone()}
+                                                        onclick={handle_move_account_down.clone()}
                                                     />
-                                                } else if props.allow_write && alias_count > 2 {
+                                                } else if props.allow_write && account_count > 2 {
                                                     <span class="tp__form-list__item-placeholder-btn"/>
                                                 }
                                                 <IconButton
                                                 name={idx.to_string()}
                                                 icon="Edit"
-                                                onclick={handle_edit_alias_list_item.clone()}/>
+                                                onclick={handle_edit_account_list_item.clone()}/>
                                                 if props.allow_write {
                                                     <IconButton
                                                     name={idx.to_string()}
                                                     icon="Delete"
-                                                    onclick={handle_remove_alias_list_item.clone()}/>
+                                                    onclick={handle_remove_account_list_item.clone()}/>
                                                 }
                                             </div>
                                             <div class="tp__form-list__item-content">
-                                                <span class={if alias.enabled {""} else {"inactive"}}>
-                                                    {
-                                                        if alias.name.is_empty() {
-                                                            html! { alias.url.as_str() }
-                                                        } else {
-                                                            html! { <><strong>{alias.name.as_ref()}</strong>{" - "}{alias.url.as_str()}</> }
-                                                        }
-                                                    }
+                                                <span class={if account.enabled {""} else {"inactive"}}>
+                                                    <strong>{account.username.as_ref()}</strong>
                                                 </span>
                                             </div>
                                         </div>
@@ -996,10 +1032,10 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                                 <div class="tp__form-list__toolbar">
                                     <TextButton
                                         class="primary"
-                                        name="add_alias"
+                                        name="add_account"
                                         icon="Add"
-                                        title={translate.t(LABEL_ADD_ALIAS)}
-                                        onclick={handle_show_add_alias_item}
+                                        title={translate.t(LABEL_ADD_ACCOUNT)}
+                                        onclick={handle_show_add_account_item}
                                     />
                                 </div>
                             }
@@ -1008,6 +1044,21 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                   })}
               }
             </Card>
+        }
+    };
+
+    let render_url_aliases = || {
+        let laterals = url_aliases_state.clone();
+        let on_change = {
+            let laterals = laterals.clone();
+            Callback::from(move |urls: Vec<Arc<str>>| laterals.set(urls))
+        };
+        html! {
+            <UrlAliasList
+                urls={(*laterals).clone()}
+                readonly={!props.allow_write}
+                {on_change}
+            />
         }
     };
 
@@ -1263,7 +1314,8 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
         let headers_state = headers_state.clone();
         let epg_sources_state = epg_sources_state.clone();
         let epg_smart_match_state = epg_smart_match_state.clone();
-        let aliases_state = aliases_state.clone();
+        let accounts_state = accounts_state.clone();
+        let url_aliases_state = url_aliases_state.clone();
         let providers_state = providers_state.clone();
         let providers_dirty_state = providers_dirty_state.clone();
         let stalker_config_state = stalker_config_state.clone();
@@ -1303,9 +1355,13 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                 None
             };
 
-            // Handle Aliases
-            let aliases = (*aliases_state).clone();
-            input.aliases = if aliases.is_empty() { None } else { Some(aliases) };
+            // Handle accounts and laterals. The editor writes the new schema only: the legacy
+            // list is cleared so a save never produces a file with both.
+            let accounts = (*accounts_state).clone();
+            input.accounts = if accounts.is_empty() { None } else { Some(accounts) };
+            let laterals = (*url_aliases_state).clone();
+            input.url_aliases = if laterals.is_empty() { None } else { Some(laterals) };
+            input.aliases = None;
 
             // Handle Providers
             if *providers_dirty_state {
@@ -1363,9 +1419,14 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
                     </Panel>
                 })}
                 { html_if!(!library_input && !staged_input && !media_server_input, {
-                    <Panel value={InputFormPage::Alias.intern()} active={view_visible.intern()}>
-                    {render_alias()}
+                    <>
+                    <Panel value={InputFormPage::Accounts.intern()} active={view_visible.intern()}>
+                    {render_accounts()}
                     </Panel>
+                    <Panel value={InputFormPage::UrlAliases.intern()} active={view_visible.intern()}>
+                    {render_url_aliases()}
+                    </Panel>
+                    </>
                 })}
                 { html_if!(options_input, {
                  <>
@@ -1390,7 +1451,7 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
     };
 
     let button_disabled =
-        *show_alias_form_state || *show_epg_form_state || *show_provider_form_state || *show_smart_match_form_state;
+        *show_account_form_state || *show_epg_form_state || *show_provider_form_state || *show_smart_match_form_state;
 
     let render_sidebar = || {
         html! {
@@ -1403,7 +1464,14 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
             <IconButton class={format!("tp__app-sidebar-menu--{}{}", InputFormPage::Libraries, if *view_visible == InputFormPage::Libraries { " active" } else {""})}  icon="VideoConfig" hint={translate.t(LABEL_MEDIA_SERVER)} name={InputFormPage::Libraries.to_string()} onclick={&handle_menu_click}></IconButton>
             })}
             {html_if!(!library_input && !staged_input && !media_server_input, {
-            <IconButton class={format!("tp__app-sidebar-menu--{}{}", InputFormPage::Alias, if *view_visible == InputFormPage::Alias { " active" } else {""})}  icon="Alias" hint={translate.t(LABEL_ALIAS)} name={InputFormPage::Alias.to_string()} onclick={&handle_menu_click}></IconButton>
+            <>
+            <IconButton class={format!("tp__app-sidebar-menu--{}{}", InputFormPage::Accounts, if *view_visible == InputFormPage::Accounts { " active" } else {""})}
+                icon="User" hint={translate.t(LABEL_ACCOUNTS)} aria_label={Some(translate.t(LABEL_ACCOUNTS))}
+                name={InputFormPage::Accounts.to_string()} onclick={&handle_menu_click}></IconButton>
+            <IconButton class={format!("tp__app-sidebar-menu--{}{}", InputFormPage::UrlAliases, if *view_visible == InputFormPage::UrlAliases { " active" } else {""})}
+                icon="LinkRounded" hint={translate.t(LABEL_URL_ALIASES)} aria_label={Some(translate.t(LABEL_URL_ALIASES))}
+                name={InputFormPage::UrlAliases.to_string()} onclick={&handle_menu_click}></IconButton>
+            </>
             })}
             { html_if!(options_input, {
                 <>

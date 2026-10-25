@@ -235,7 +235,10 @@ impl MultiProviderLineup {
         ))];
         if let Some(aliases) = cfg_input.get_enabled_aliases() {
             for alias in aliases {
-                let alias_connection = get_or_create_provider_connection(provider_connections, &alias.name);
+                // The registry key is the qualified account name: two inputs may declare the
+                // same subscription, and a shared key would merge their connection counts.
+                let account_name = alias.account_name(cfg_input.name.as_ref());
+                let alias_connection = get_or_create_provider_connection(provider_connections, &account_name);
                 inputs.push(ProviderConfigWrapper::new(ProviderConfig::new_alias(
                     cfg_input,
                     alias,
@@ -536,12 +539,17 @@ impl ProviderLineupManager {
         mut observation: tuliprox_core::model::ProviderAccountObservation,
     ) -> Option<tuliprox_core::model::ProviderAccountObservation> {
         let snapshot = self.snapshot.load();
-        let identity_matches = Self::get_provider_config_by_name(&observation.name, &snapshot.providers)
-            .is_some_and(|(_, config)| config.account_identity() == observation.identity);
-        if !identity_matches {
+        let Some((_, config)) = Self::find_provider_by_qualified_name(&observation.name, &snapshot.providers) else {
+            return None;
+        };
+        if config.account_identity() != observation.identity {
             return None;
         }
-        let connection = self.provider_connections.get(&observation.name).map(|entry| Arc::clone(entry.value()))?;
+        // The registry is keyed by the account's qualified pool name, which may differ from the
+        // label an observation carries.
+        let account_name = config.name.clone();
+        drop(snapshot);
+        let connection = self.provider_connections.get(&account_name).map(|entry| Arc::clone(entry.value()))?;
         let mut state = connection.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(previous) = state.health_status.as_ref().filter(|old| old.identity == observation.identity) {
             observation.status = observation.status.or(previous.status);
@@ -575,23 +583,33 @@ impl ProviderLineupManager {
 
     /// True while exactly this observation still awaits persistence; renewals and newer
     /// observations replace or clear it.
+    /// Resolves the registry key of an account addressed by its label or qualified name.
+    ///
+    /// The registry is keyed `<input>/<username>`, while observations and probes may carry the
+    /// bare label. Resolving once here keeps every reader on the same key.
+    fn resolve_connection_key(&self, name: &Arc<str>) -> Option<Arc<str>> {
+        if self.provider_connections.contains_key(name) {
+            return Some(Arc::clone(name));
+        }
+        let snapshot = self.snapshot.load();
+        Self::find_provider_by_qualified_name(name, &snapshot.providers).map(|(_, config)| config.name.clone())
+    }
+
     pub fn is_observation_pending(&self, observation: &tuliprox_core::model::ProviderAccountObservation) -> bool {
-        self.provider_connections.get(&observation.name).map(|entry| Arc::clone(entry.value())).is_some_and(
-            |connection| {
-                connection
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .pending_health
-                    .as_ref()
-                    .is_some_and(|pending| pending.same_state(observation))
-            },
-        )
+        let Some(key) = self.resolve_connection_key(&observation.name) else { return false };
+        self.provider_connections.get(&key).map(|entry| Arc::clone(entry.value())).is_some_and(|connection| {
+            connection
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .pending_health
+                .as_ref()
+                .is_some_and(|pending| pending.same_state(observation))
+        })
     }
 
     pub fn acknowledge_account_observation(&self, observation: &tuliprox_core::model::ProviderAccountObservation) {
-        if let Some(connection) =
-            self.provider_connections.get(&observation.name).map(|entry| Arc::clone(entry.value()))
-        {
+        let Some(key) = self.resolve_connection_key(&observation.name) else { return };
+        if let Some(connection) = self.provider_connections.get(&key).map(|entry| Arc::clone(entry.value())) {
             let mut state = connection.write().unwrap_or_else(std::sync::PoisonError::into_inner);
             if state.pending_health.as_ref().is_some_and(|current| current.same_state(observation)) {
                 state.pending_health = None;
@@ -849,6 +867,52 @@ impl ProviderLineupManager {
 
     gen_provider_search!(get_provider_config_by_name, name, &Arc<str>);
 
+    /// Looks up an account by its qualified name, falling back to the bare label.
+    ///
+    /// Accounts are keyed `<input>/<username>`. State written before that key existed — HLS
+    /// bindings and account observations persisted by an older build — carries the bare label,
+    /// so the lookup accepts both instead of orphaning that state.
+    fn find_provider_by_qualified_name<'a>(
+        criteria: &Arc<str>,
+        providers: &'a Vec<ProviderLineup>,
+    ) -> Option<(&'a ProviderLineup, &'a ProviderConfigWrapper)> {
+        if let Some(found) = Self::get_provider_config_by_name(criteria, providers) {
+            return Some(found);
+        }
+        // State written before the qualified key existed (HLS bindings, observations) carries
+        // the bare label. Match the account part of the key, but only when exactly one account
+        // answers to it: guessing would bind a session to another input's subscription.
+        let wanted = criteria.rsplit_once('/').map_or(criteria.as_ref(), |(_input, account)| account);
+        let mut hit: Option<(&ProviderLineup, &ProviderConfigWrapper)> = None;
+        for lineup in providers {
+            let candidates: Vec<&ProviderConfigWrapper> = match lineup {
+                ProviderLineup::Single(single) => vec![&single.provider],
+                ProviderLineup::Multi(multi) => multi
+                    .providers
+                    .iter()
+                    .flat_map(|group| match group {
+                        ProviderPriorityGroup::SingleProviderGroup(single) => vec![single],
+                        ProviderPriorityGroup::MultiProviderGroup(_, configs) => configs.iter().collect(),
+                    })
+                    .collect(),
+            };
+            for candidate in candidates {
+                let matches = candidate.name.as_ref() == wanted
+                    || candidate.name.rsplit_once('/').is_some_and(|(_input, account)| account == wanted)
+                    // State persisted before the qualified key carries the account's own label,
+                    // which is the username in the new schema but may differ for old configs.
+                    || candidate.label().as_ref() == wanted;
+                if matches {
+                    if hit.is_some() {
+                        return None;
+                    }
+                    hit = Some((lineup, candidate));
+                }
+            }
+        }
+        hit
+    }
+
     fn log_allocation(allocation: &ProviderAllocation) {
         match allocation {
             ProviderAllocation::Exhausted => {}
@@ -872,7 +936,7 @@ impl ProviderLineupManager {
     ) -> ProviderAllocation {
         let snapshot = self.snapshot.load_full();
         let with_grace = allow_grace && self.grace_period_millis.load(Ordering::Acquire) > 0;
-        let allocation = match Self::get_provider_config_by_name(provider_name, &snapshot.providers) {
+        let allocation = match Self::find_provider_by_qualified_name(provider_name, &snapshot.providers) {
             None => ProviderAllocation::Exhausted,
             Some((_lineup, config)) => {
                 config.try_allocate(with_grace, self.grace_period_timeout_secs.load(Ordering::Acquire))
@@ -1031,7 +1095,7 @@ impl ProviderLineupManager {
 
     pub fn find_provider_config(&self, provider_name: &Arc<str>) -> Option<Arc<ProviderConfig>> {
         let snapshot = self.snapshot.load_full();
-        Self::get_provider_config_by_name(provider_name, &snapshot.providers).map(|(_, config)| config.config())
+        Self::find_provider_by_qualified_name(provider_name, &snapshot.providers).map(|(_, config)| config.config())
     }
 
     pub fn provider_names_for_input(&self, input_name: &Arc<str>) -> Vec<Arc<str>> {
@@ -1085,14 +1149,14 @@ impl ProviderLineupManager {
 
     pub fn provider_capacity(&self, provider_name: &Arc<str>) -> Option<(usize, usize)> {
         let snapshot = self.snapshot.load_full();
-        let (_, cfg) = Self::get_provider_config_by_name(provider_name, &snapshot.providers)?;
+        let (_, cfg) = Self::find_provider_by_qualified_name(provider_name, &snapshot.providers)?;
         let current = cfg.get_current_connections();
         Some((current, cfg.max_connections()))
     }
 
     pub fn is_over_limit(&self, provider_name: &Arc<str>) -> bool {
         let snapshot = self.snapshot.load_full();
-        if let Some((_, config)) = Self::get_provider_config_by_name(provider_name, &snapshot.providers) {
+        if let Some((_, config)) = Self::find_provider_by_qualified_name(provider_name, &snapshot.providers) {
             config.is_over_limit(self.grace_period_timeout_secs.load(Ordering::Relaxed))
         } else {
             false
@@ -1101,7 +1165,7 @@ impl ProviderLineupManager {
 
     pub fn is_exhausted(&self, provider_name: &Arc<str>) -> bool {
         let snapshot = self.snapshot.load_full();
-        if let Some((_, config)) = Self::get_provider_config_by_name(provider_name, &snapshot.providers) {
+        if let Some((_, config)) = Self::find_provider_by_qualified_name(provider_name, &snapshot.providers) {
             config.is_exhausted()
         } else {
             false
@@ -1110,13 +1174,13 @@ impl ProviderLineupManager {
 
     pub fn reservation_blocks_other_sessions(&self, provider_name: &Arc<str>) -> bool {
         let snapshot = self.snapshot.load();
-        Self::get_provider_config_by_name(provider_name, &snapshot.providers)
+        Self::find_provider_by_qualified_name(provider_name, &snapshot.providers)
             .is_none_or(|(_, config)| config.max_connections() > 0)
     }
 
     pub fn is_provider_for_input(&self, provider_name: &str, input_name: &str) -> bool {
         let snapshot = self.snapshot.load();
-        if let Some((lineup, _)) = Self::get_provider_config_by_name(&provider_name.into(), &snapshot.providers) {
+        if let Some((lineup, _)) = Self::find_provider_by_qualified_name(&provider_name.into(), &snapshot.providers) {
             match lineup {
                 ProviderLineup::Single(_) => return input_name == provider_name,
                 ProviderLineup::Multi(m) => return m.name.as_ref() == input_name,
@@ -1211,6 +1275,7 @@ mod tests {
             panel_api: None,
             provider_configs: None,
             cache_duration_seconds: 0,
+            url_aliases: Vec::new(),
             stalker: None,
         }
     }
@@ -1219,15 +1284,17 @@ mod tests {
     fn create_config_input_alias(id: u16, url: &str, priority: i16, max_connections: u16) -> ConfigInputAlias {
         ConfigInputAlias {
             id,
+            // The account label is the username, so the pool name is "<input>/alias_<id>".
             name: concat_string!("alias_", &id.to_string()).intern(),
             url: url.to_string(),
-            username: Some("alias_user".to_string()),
+            username: Some(concat_string!("alias_", &id.to_string())),
             password: Some("alias_pass".to_string()),
             priority,
             max_connections,
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }
     }
 
@@ -1240,7 +1307,8 @@ mod tests {
         input.exp_date = Some(1);
         let mut alias = create_config_input_alias(2, "http://alias.example", 1, 2);
         alias.exp_date = Some(i64::MAX);
-        let alias_name = alias.name.clone();
+        // The pool keys an account by "<input>/<username>"; the label is the username.
+        let alias_name = alias.account_name(input_name.as_ref());
         input.aliases = Some(vec![alias]);
 
         let events = Arc::new(EventManager::new());
@@ -1577,7 +1645,7 @@ mod tests {
             should_grace_period!(lineup, 2, 5);
 
             lineup.release(&"provider8_1".intern());
-            lineup.release(&"alias_2".intern());
+            lineup.release(&"provider8_1/alias_2".intern());
             lineup.release(&"provider8_1".intern());
 
             should_available!(lineup, 1, 5);

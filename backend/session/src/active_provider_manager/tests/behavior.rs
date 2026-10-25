@@ -138,7 +138,7 @@ async fn test_force_session_fallback_uses_different_provider_when_current_is_bus
     let fallback_provider = fallback_alloc.allocation.get_provider_name().expect("fallback provider expected");
 
     assert_ne!(fallback_provider.as_ref(), busy_provider.as_ref());
-    assert_eq!(fallback_provider.as_ref(), "provider_2");
+    assert_eq!(fallback_provider.as_ref(), "provider_1/provider_2");
 
     manager.release_connection(&client_1_addr);
     manager.release_connection(&client_2_addr);
@@ -166,7 +166,7 @@ async fn test_seek_reacquire_stays_on_same_provider_account_until_stop() {
         .acquire_connection(&input_name, &client_2_addr, default_user_priority(), ConnectionKind::Normal)
         .expect("client2 allocation");
     let second_provider = second_alloc.allocation.get_provider_name().expect("provider name expected");
-    assert_eq!(second_provider.as_ref(), "provider_2");
+    assert_eq!(second_provider.as_ref(), "provider_1/provider_2");
 
     // Simulate repeated seek/range reconnects for client1:
     // release old connection for the same client, then force exact pinned provider.
@@ -389,7 +389,7 @@ async fn live_hls_retries_with_unique_tokens_keep_one_provider_lease() -> Result
     let event_manager = Arc::new(EventManager::new());
     let manager = ActiveProviderManager::new(&app_cfg, &event_manager);
     let input = "provider_1".intern();
-    let alias = "provider_2".intern();
+    let alias = "provider_1/provider_2".intern();
     let mut original_tag = None;
     let mut previous_request: Option<(
         String,
@@ -642,7 +642,7 @@ async fn zero_provider_affinity_ttl_ends_affinity_with_reconnect_window() -> Res
     let manager = ActiveProviderManager::new(&app_cfg, &event_manager);
     manager.write_leases().set_affinity_ttl(crate::provider_leases::ProviderAffinityTtl(0));
     let input = "provider_1".intern();
-    let alias = "provider_2".intern();
+    let alias = "provider_1/provider_2".intern();
     live_hls_playback_on_alias_with_lapsed_lease(
         &manager,
         &input,
@@ -805,7 +805,9 @@ pub(in crate::active_provider_manager::tests) fn resident_set_kib() -> Option<u6
 }
 
 #[cfg(not(target_os = "linux"))]
-pub(in crate::active_provider_manager::tests) fn resident_set_kib() -> Option<u64> { None }
+pub(in crate::active_provider_manager::tests) fn resident_set_kib() -> Option<u64> {
+    None
+}
 
 pub(in crate::active_provider_manager::tests) struct LeaseWorkloadStats {
     pub(in crate::active_provider_manager::tests) ops: u64,
@@ -1025,7 +1027,7 @@ async fn reserved_owner_falls_back_to_alternate_provider_in_pool_when_reserved_i
     let manager = ActiveProviderManager::new(&app_cfg, &event_manager);
 
     let input_name = "provider_1".intern();
-    let provider_2 = "provider_2".intern();
+    let provider_2 = "provider_1/provider_2".intern();
     let addr_1: SocketAddr = "127.0.0.1:43201".parse().unwrap();
     let addr_2: SocketAddr = "127.0.0.1:43202".parse().unwrap();
     let owner_repeat = "session-owner-repeat";

@@ -107,6 +107,34 @@ pub fn create_client(cfg: &AppConfig) -> reqwest::ClientBuilder {
     create_client_with_redirect(cfg, Policy::limited(10))
 }
 
+/// Builds a streaming client that never uses a proxy.
+///
+/// Playback is a long-lived byte stream: routing it through an outbound proxy adds a hop the
+/// provider does not see for a direct client, hides the client's address from it, and makes a
+/// working channel depend on the proxy's own reachability. Streaming therefore connects
+/// directly, while discovery and playlist fetching keep honouring the configured proxies.
+pub fn create_stream_client(cfg: &AppConfig, redirect_policy: Policy) -> Result<reqwest::Client, TuliproxError> {
+    let config = cfg.config.load();
+    let mut builder = reqwest::Client::builder()
+        .redirect(redirect_policy)
+        .no_proxy()
+        .pool_idle_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(10)
+        .danger_accept_invalid_certs(config.accept_insecure_ssl_certificates)
+        .http1_only();
+    if let Some(rp_config) = config.reverse_proxy.as_ref() {
+        if rp_config.disabled_header.as_ref().is_some_and(|d| d.referer_header) {
+            builder = builder.referer(false);
+        }
+    }
+    if config.connect_timeout_secs > 0 {
+        builder = builder.connect_timeout(Duration::from_secs(u64::from(config.connect_timeout_secs)));
+    }
+    builder
+        .build()
+        .map_err(|err| TuliproxError::Config(format!("Failed to create streaming HTTP client: {err}")))
+}
+
 /// Dedicated discovery profile. Callers must propagate construction failure, never
 /// fall back to an unconfigured client. Builder access permits local CA/DNS fixtures.
 pub fn create_tmdb_client(cfg: &AppConfig) -> Result<reqwest::ClientBuilder, TuliproxError> {

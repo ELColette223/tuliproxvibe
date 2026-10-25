@@ -106,12 +106,20 @@ pub(super) async fn persist_observations(
     report
 }
 
+/// Finds the input that owns an account reported under `name`.
+///
+/// The pool keys accounts by `"<input>/<username>"`, so splitting on the last `/` recovers the
+/// owner. A bare name still matches the input itself and legacy alias labels, which keeps
+/// observations written before the key change resolvable.
 fn find_owner<'a>(sources: &'a SourcesConfig, name: &str) -> Option<&'a ConfigInput> {
+    let qualified_owner = name.rsplit_once('/').map(|(input, _account)| input);
     sources
         .inputs
         .iter()
         .find(|input| {
-            input.name.as_ref() == name || input.aliases.iter().flatten().any(|alias| alias.name.as_ref() == name)
+            input.name.as_ref() == name
+                || Some(input.name.as_ref()) == qualified_owner
+                || input.aliases.iter().flatten().any(|alias| alias.name.as_ref() == name)
         })
         .map(AsRef::as_ref)
 }
@@ -132,7 +140,11 @@ fn resolve_account<'a>(
     batch: Option<&str>,
 ) -> Option<ResolvedAccount<'a>> {
     let input = find_owner(sources, &observation.name)?;
-    let account = if input.name == observation.name {
+    // An account is addressed either by the input name (the root) or by a name that maps to an
+    // alias. The qualified pool key `<input>/<username>` is split back into its label here.
+    let account_label = observation.name.rsplit_once('/').map_or(observation.name.as_ref(), |(_input, label)| label);
+    let matches_root = input.name == observation.name || input.username.as_deref() == Some(account_label);
+    let account = if matches_root {
         ResolvedAccount {
             input,
             url: &input.url,
@@ -142,7 +154,11 @@ fn resolve_account<'a>(
             disabled: input.account_disabled,
         }
     } else {
-        let alias = input.aliases.iter().flatten().find(|alias| alias.name == observation.name)?;
+        let alias = input.aliases.iter().flatten().find(|alias| {
+            alias.name.as_ref() == observation.name.as_ref()
+                || alias.name.as_ref() == account_label
+                || alias.username.as_deref() == Some(account_label)
+        })?;
         ResolvedAccount {
             input,
             url: &alias.url,
@@ -359,6 +375,7 @@ alias;user2;pass2;http://provider;1;\n";
                     exp_date: None,
                     enabled: true,
                     stalker: None,
+                    ..crate::model::ConfigInputAlias::default()
                 }]);
             }
             next

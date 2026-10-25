@@ -22,7 +22,9 @@ pub struct FixtureInputPlan<'a> {
 }
 
 impl FixtureInputPlan<'_> {
-    const fn is_stalker(&self) -> bool { matches!(self.input_type, FixtureInputType::Stalker) }
+    const fn is_stalker(&self) -> bool {
+        matches!(self.input_type, FixtureInputType::Stalker)
+    }
 }
 
 /// Files owned by one isolated run. They are written below a unique temporary
@@ -80,7 +82,9 @@ impl FixturePaths {
 }
 
 #[must_use]
-pub const fn fixture_password() -> &'static str { FIXTURE_PASSWORD }
+pub const fn fixture_password() -> &'static str {
+    FIXTURE_PASSWORD
+}
 
 fn render_config(
     tuliprox_address: SocketAddr,
@@ -197,13 +201,34 @@ fn render_provider_pool(run_id: &str, origin_address: SocketAddr, policy: Option
             let _ = writeln!(rendered, "    priority: {priority}");
         }
         if !aliases.is_empty() {
-            rendered.push_str("    aliases:\n");
+            // The account selector lives in the URL, so the laterals carry the addresses and the
+            // accounts only vary the quota. Each account keeps its own URL entry so the scenario
+            // can still address it by `account=`.
+            let _ = writeln!(rendered, "    url_aliases:");
+            let _ = writeln!(
+                rendered,
+                "      - http://{origin_address}/catalog/input.m3u?run={run_id}&account={}",
+                root.name
+            );
             for alias in aliases {
                 let _ = writeln!(
                     rendered,
-                    "      - name: {}\n        url: http://{origin_address}/catalog/input.m3u?run={run_id}&account={}\n        max_connections: {}",
+                    "      - http://{origin_address}/catalog/input.m3u?run={run_id}&account={}",
+                    alias.name
+                );
+            }
+            let _ = writeln!(rendered, "    accounts:");
+            let _ = writeln!(
+                rendered,
+                "      - username: {}\n        password: testkit-password\n        max_connections: {}",
+                yaml_string(&root.name),
+                root.max_connections
+            );
+            for alias in aliases {
+                let _ = writeln!(
+                    rendered,
+                    "      - username: {}\n        password: testkit-password\n        max_connections: {}",
                     yaml_string(&alias.name),
-                    alias.name,
                     alias.max_connections
                 );
                 if let Some(priority) = alias.priority {
@@ -245,9 +270,13 @@ fn render_api_proxy(tuliprox_address: SocketAddr, policy: Option<&PolicyContract
     output
 }
 
-fn yaml_scalar(path: &Path) -> String { yaml_string(&path.to_string_lossy()) }
+fn yaml_scalar(path: &Path) -> String {
+    yaml_string(&path.to_string_lossy())
+}
 
-fn yaml_string(value: &str) -> String { format!("'{}'", value.replace('\'', "''")) }
+fn yaml_string(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
 
 /// Owns only the SUT process launched for this run and waits for its explicit readiness endpoint.
 pub struct IsolatedSut {

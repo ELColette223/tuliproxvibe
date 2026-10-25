@@ -228,6 +228,22 @@ impl From<&ConfigProviderDto> for ConfigProvider {
 }
 
 impl ConfigProvider {
+    /// A provider built from a runtime account's laterals rather than from a `provider:` block.
+    ///
+    /// An account's addresses are its own (shared with the input, optionally narrowed), so it
+    /// needs the rotation engine without a matching `provider:` declaration. The name is the
+    /// account name, which keeps log lines and cycle-exhaustion warnings attributable.
+    pub fn synthetic(name: Arc<str>, urls: Vec<Arc<str>>) -> Self {
+        Self {
+            name,
+            urls,
+            provider_url_selection_policy: ProviderUrlSelectionPolicy::default(),
+            current_url_index: AtomicUsize::new(0),
+            dns: None,
+            dns_cache: Arc::new(ProviderDnsCache::default()),
+        }
+    }
+
     /// Gets the current URL from the provider
     pub fn get_current_url(&self) -> Option<&Arc<str>> {
         let len = self.urls.len();
@@ -239,7 +255,9 @@ impl ConfigProvider {
     }
 
     /// Resets the current URL index to 0
-    pub fn reset_index(&self) { self.current_url_index.store(0, Ordering::Relaxed); }
+    pub fn reset_index(&self) {
+        self.current_url_index.store(0, Ordering::Relaxed);
+    }
 
     /// Gets the current URL index
     #[inline]
@@ -262,7 +280,9 @@ impl ConfigProvider {
         self.provider_url_selection_policy
     }
 
-    pub fn get_dns_config(&self) -> Option<&ProviderDnsConfig> { self.dns.as_ref() }
+    pub fn get_dns_config(&self) -> Option<&ProviderDnsConfig> {
+        self.dns.as_ref()
+    }
 
     pub fn dns_enabled_for_scheme(&self, scheme: &str) -> bool {
         self.dns.as_ref().is_some_and(|cfg| cfg.supports_scheme(scheme))
@@ -320,15 +340,21 @@ impl ConfigProvider {
         hostnames
     }
 
-    pub fn store_resolved(&self, host: &str, ips: Vec<IpAddr>) { self.dns_cache.store_resolved(host, ips); }
+    pub fn store_resolved(&self, host: &str, ips: Vec<IpAddr>) {
+        self.dns_cache.store_resolved(host, ips);
+    }
 
-    pub fn clear_resolved(&self, host: &str) { self.dns_cache.clear_resolved(host); }
+    pub fn clear_resolved(&self, host: &str) {
+        self.dns_cache.clear_resolved(host);
+    }
 
     pub fn mark_resolve_error(&self, host: &str, err: impl Into<String>) {
         self.dns_cache.mark_resolve_error(host, err);
     }
 
-    pub fn snapshot_resolved(&self) -> HashMap<String, Vec<IpAddr>> { self.dns_cache.snapshot_resolved() }
+    pub fn snapshot_resolved(&self) -> HashMap<String, Vec<IpAddr>> {
+        self.dns_cache.snapshot_resolved()
+    }
 
     pub fn snapshot_resolved_ordered(&self) -> IndexMap<String, Vec<IpAddr>> {
         let mut remaining = self.snapshot_resolved();
@@ -473,36 +499,49 @@ impl TryFrom<&SourcesConfigDto> for SourcesConfig {
     }
 }
 
-/// Rejects duplicate input and alias names.
+/// Rejects duplicate input and account names.
 ///
-/// Input names and alias names share one namespace: both name a member in `group_lookup`, and that map
-/// decides which input a member belongs to. A duplicate would silently resolve to whichever member was
-/// inserted last, so a request would run against another input's playlist, credentials, and limits.
-/// Such a configuration is a load error, and it must be reported while the sources are read - a reload
-/// that returns an error leaves the running configuration in place.
+/// A member is named by its qualified `<input>/<username>` key, which is what `group_lookup` and the
+/// provider pool use. The bare username is deliberately not the key: the same subscription is often
+/// declared by more than one input, and those accounts are distinct members with distinct limits.
+/// A duplicate would silently resolve to whichever member was inserted last, so a request would run
+/// against another input's playlist, credentials, and limits. Such a configuration is a load error,
+/// and it must be reported while the sources are read - a reload that returns an error leaves the
+/// running configuration in place.
 fn check_unique_member_names(inputs: &[ConfigInput]) -> Result<(), TuliproxError> {
-    let mut seen: HashMap<&str, &str> = HashMap::with_capacity(inputs.len());
+    let mut names: HashSet<Arc<str>> = HashSet::with_capacity(inputs.len());
     for input in inputs {
-        if seen.insert(input.name.as_ref(), "input").is_some() {
+        if !names.insert(input.name.clone()) {
             return Err(TuliproxError::ConfigSource(format!("input names should be unique: {}", input.name)));
         }
     }
+    let mut accounts: HashSet<Arc<str>> = HashSet::new();
     for input in inputs {
         for alias in input.aliases.iter().flatten() {
-            if let Some(owner) = seen.get(alias.name.as_ref()) {
+            // A label that repeats an input name is ambiguous for the lookups that still accept a
+            // bare name (`find_owner`, legacy observations), so it stays an error.
+            if names.contains(&alias.name) {
                 return Err(TuliproxError::ConfigSource(format!(
-                    "input alias names should be unique: '{}' of input '{}' already names an {owner}",
+                    "input alias names should be unique: '{}' of input '{}' already names an input",
                     alias.name, input.name
                 )));
             }
-            seen.insert(alias.name.as_ref(), "alias");
+            let account = alias.account_name(input.name.as_ref());
+            if !accounts.insert(account.clone()) {
+                return Err(TuliproxError::ConfigSource(format!(
+                    "input alias names should be unique: '{}' of input '{}' already names an alias",
+                    account, input.name
+                )));
+            }
         }
     }
     Ok(())
 }
 
 impl SourcesConfig {
-    pub fn get_source_at(&self, idx: usize) -> Option<&ConfigSource> { self.sources.get(idx) }
+    pub fn get_source_at(&self, idx: usize) -> Option<&ConfigSource> {
+        self.sources.get(idx)
+    }
 
     pub fn get_staged_input_for_provider(&self, provider_name: &Arc<str>) -> Option<&Arc<ConfigInput>> {
         self.inputs.iter().find(|input| {
@@ -641,28 +680,30 @@ mod tests {
         assert!(error.to_string().contains("input names should be unique"), "{error}");
     }
 
+    /// The same subscription may be declared by two inputs; the accounts are distinct members
+    /// because the pool keys them by `<input>/<username>`.
     #[test]
-    fn duplicate_alias_names_fail_the_config_load() {
+    fn the_same_username_in_two_inputs_loads() {
         let mut dto = sources_dto();
         dto.inputs[0].aliases = Some(vec![ConfigInputAliasDto {
-            name: "shared-alias".into(),
+            name: "shared-account".into(),
             url: "https://provider.example/alias.m3u".to_string(),
+            username: Some("shared-account".to_string()),
             ..ConfigInputAliasDto::default()
         }]);
         dto.inputs.push(ConfigInputDto {
             name: "second-input".into(),
             url: "https://second.example/playlist.m3u".to_string(),
             aliases: Some(vec![ConfigInputAliasDto {
-                name: "shared-alias".into(),
+                name: "shared-account".into(),
                 url: "https://second.example/alias.m3u".to_string(),
+                username: Some("shared-account".to_string()),
                 ..ConfigInputAliasDto::default()
             }]),
             ..ConfigInputDto::default()
         });
 
-        let error = SourcesConfig::try_from(&dto).expect_err("duplicate alias name must be rejected");
-
-        assert!(error.to_string().contains("input alias names should be unique"), "{error}");
+        SourcesConfig::try_from(&dto).expect("distinct inputs keep their same-named accounts apart");
     }
 
     #[test]

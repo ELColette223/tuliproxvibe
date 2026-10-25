@@ -65,6 +65,7 @@ pub fn InputOptions(props: &InputOptionsProps) -> Html {
                     || !options.xtream_live_stream_use_prefix
                     || options.xtream_live_stream_without_extension
                     || options.disable_hls_streaming
+                    || options.proxy_stream_fallback
                     || options.resolve_tmdb
                     || !options.resolve_background
                     || options.resolve_series
@@ -87,6 +88,7 @@ pub fn InputOptions(props: &InputOptionsProps) -> Html {
                         (options.xtream_live_stream_use_prefix, "LABEL.LIVE_STREAM_USE_PREFIX"),
                         (options.xtream_live_stream_without_extension, "LABEL.LIVE_STREAM_WITHOUT_EXTENSION"),
                         (options.disable_hls_streaming, "LABEL.DISABLE_HLS_STREAMING"),
+                        (options.proxy_stream_fallback, "LABEL.PROXY_STREAM_FALLBACK"),
                         (options.resolve_tmdb, "LABEL.RESOLVE_TMDB"),
                     ],
                     vec![

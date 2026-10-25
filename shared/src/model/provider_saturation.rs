@@ -13,27 +13,34 @@ pub struct ProviderSlot<Name> {
 pub trait CapacityGroup {
     fn name(&self) -> &Arc<str>;
     fn enabled(&self) -> bool;
-    /// Names of the enabled aliases; disabled ones cannot carry connections.
-    fn alias_names(&self) -> impl Iterator<Item = &Arc<str>>;
+    /// Keys of the enabled aliases; disabled ones cannot carry connections.
+    ///
+    /// Owned because an account is keyed by its qualified `<input>/<username>` name, which is
+    /// built on demand and is not stored on the account.
+    fn alias_names(&self) -> impl Iterator<Item = Arc<str>>;
 }
 
 impl<T: CapacityGroup> CapacityGroup for &T {
     fn name(&self) -> &Arc<str> { (**self).name() }
     fn enabled(&self) -> bool { (**self).enabled() }
-    fn alias_names(&self) -> impl Iterator<Item = &Arc<str>> { (**self).alias_names() }
+    fn alias_names(&self) -> impl Iterator<Item = Arc<str>> { (**self).alias_names() }
 }
 
 impl<T: CapacityGroup> CapacityGroup for Arc<T> {
     fn name(&self) -> &Arc<str> { (**self).name() }
     fn enabled(&self) -> bool { (**self).enabled() }
-    fn alias_names(&self) -> impl Iterator<Item = &Arc<str>> { (**self).alias_names() }
+    fn alias_names(&self) -> impl Iterator<Item = Arc<str>> { (**self).alias_names() }
 }
 
 impl CapacityGroup for ConfigInputDto {
     fn name(&self) -> &Arc<str> { &self.name }
     fn enabled(&self) -> bool { self.enabled }
-    fn alias_names(&self) -> impl Iterator<Item = &Arc<str>> {
-        self.aliases.iter().flatten().filter(|alias| alias.enabled).map(|alias| &alias.name)
+    fn alias_names(&self) -> impl Iterator<Item = Arc<str>> {
+        self.aliases
+            .iter()
+            .flatten()
+            .filter(|alias| alias.enabled)
+            .map(|alias| alias.name.clone())
     }
 }
 
@@ -52,7 +59,7 @@ where
         let main = input.name().clone();
         map.insert(main.clone(), main.clone());
         for alias in input.alias_names() {
-            map.insert(alias.clone(), main.clone());
+            map.insert(alias, main.clone());
         }
     }
     map
@@ -171,7 +178,7 @@ mod tests {
     impl CapacityGroup for Input {
         fn name(&self) -> &Arc<str> { &self.name }
         fn enabled(&self) -> bool { self.enabled }
-        fn alias_names(&self) -> impl Iterator<Item = &Arc<str>> { self.aliases.iter() }
+        fn alias_names(&self) -> impl Iterator<Item = Arc<str>> { self.aliases.iter().cloned() }
     }
 
     fn enabled_input(name: &'static str, aliases: Vec<Arc<str>>) -> Input {

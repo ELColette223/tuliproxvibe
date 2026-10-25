@@ -243,6 +243,14 @@ impl AppState {
         let clients = &self.http_clients;
         clients.default.store(Arc::new(create_http_client(&self.app_config)?));
         clients.no_redirect.store(Arc::new(create_http_client_no_redirect(&self.app_config)?));
+        clients.stream.store(Arc::new(tuliprox_core::utils::request::create_stream_client(
+            &self.app_config,
+            reqwest::redirect::Policy::limited(10),
+        )?));
+        clients.stream_no_redirect.store(Arc::new(tuliprox_core::utils::request::create_stream_client(
+            &self.app_config,
+            reqwest::redirect::Policy::none(),
+        )?));
         clients.public_no_redirect.store(Arc::new(create_public_http_client_no_redirect(&self.app_config)?));
         clients.resource_no_redirect.store(Arc::new(create_resource_http_client_no_redirect(&self.app_config)?));
         clients

@@ -69,13 +69,14 @@ pub(in crate::active_provider_manager::tests) fn create_test_app_config_with_dua
             id: 2,
             name: "provider_2".intern(),
             url: "http://provider-2.example".to_string(),
-            username: Some("user2".to_string()),
+            username: Some("provider_2".to_string()),
             password: Some("pass2".to_string()),
             priority: 1,
             max_connections: 1,
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         1,
     )
@@ -100,13 +101,14 @@ pub(in crate::active_provider_manager::tests) fn create_test_app_config_with_poo
             id: 2,
             name: "provider_2".intern(),
             url: "http://provider-2.example".to_string(),
-            username: Some("user2".to_string()),
+            username: Some("provider_2".to_string()),
             password: Some("pass2".to_string()),
             priority: 1,
             max_connections: alias_max,
             exp_date: None,
             enabled: true,
             stalker: None,
+            ..ConfigInputAlias::default()
         }]),
         primary_max,
     )
@@ -119,7 +121,7 @@ pub(in crate::active_provider_manager::tests) fn alias_pool(
 ) -> (ActiveProviderManager, Arc<str>, Arc<str>) {
     let app_cfg = create_test_app_config_with_pool(primary_max, alias_max);
     let manager = ActiveProviderManager::new(&app_cfg, &Arc::new(EventManager::new()));
-    (manager, "provider_1".intern(), "provider_2".intern())
+    (manager, "provider_1".intern(), "provider_1/provider_2".intern())
 }
 
 pub(in crate::active_provider_manager::tests) fn acquire_live_hls_from_lineup(
