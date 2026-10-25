@@ -203,6 +203,22 @@ impl ProviderStreamRequestFailure {
     pub(super) fn is_channel_missing(&self) -> bool {
         matches!(self, Self::ChannelMissing { .. })
     }
+
+    /// Whether this failure is a transport problem the proxy fallback may fix.
+    ///
+    /// A channel-missing or account-full answer is the panel`'`s decision about this login; a proxy
+    /// would only repeat it, so those never justify another egress. Redirect and content-encoding
+    /// answers are passed through unchanged for the same reason: they are the provider answering.
+    pub(super) fn is_proxy_fallback_candidate(&self) -> bool {
+        match self {
+            Self::ChannelMissing { .. } | Self::AccountFull { .. } | Self::HlsStatus { .. } => false,
+            Self::Status { status, provider_error_class, .. } => {
+                matches!(*provider_error_class, "timeout" | "connect" | "dns" | "io" | "service_unavailable")
+                    || status.is_server_error()
+                    || *status == StatusCode::REQUEST_TIMEOUT
+            }
+        }
+    }
 }
 
 pub(super) fn classify_provider_io_error(err: &std::io::Error) -> &'static str {

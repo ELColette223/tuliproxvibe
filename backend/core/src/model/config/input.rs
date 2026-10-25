@@ -54,7 +54,8 @@ create_bitset!(
     ProbeSeries,
     ProbeVod,
     ProbeLive,
-    StalkerBulkEpg
+    StalkerBulkEpg,
+    ProxyStreamFallback
 );
 
 #[derive(Debug, Clone)]
@@ -114,6 +115,7 @@ impl From<&ConfigInputOptionsDto> for ConfigInputOptions {
             (probe_vod, ProbeVod),
             (probe_live, ProbeLive),
             (stalker_bulk_epg, StalkerBulkEpg),
+            (proxy_stream_fallback, ProxyStreamFallback),
         );
 
         Self {

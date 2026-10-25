@@ -56,7 +56,8 @@ create_bitset!(
     RangeRequested,
     PublicDestinationRequired,
     HlsResource,
-    FlussonicAudioTracks
+    FlussonicAudioTracks,
+    ProxyStreamFallback
 );
 
 #[derive(Debug, Clone)]
@@ -84,6 +85,8 @@ pub struct ProviderStreamFactoryOptions {
     completion_token: Option<CancellationToken>,
     close_reason: Option<Arc<AtomicU8>>,
     account: Option<Arc<crate::model::ProviderConfig>>,
+    /// Egress alternative for playback, set only when the input opts into a proxy fallback.
+    stream_proxy: Option<crate::model::ProxyConfig>,
 }
 
 struct ProviderOpenGuard {

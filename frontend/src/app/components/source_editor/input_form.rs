@@ -88,6 +88,7 @@ const LABEL_SERIES: &str = "LABEL.SERIES";
 const LABEL_XTREAM_LIVE_STREAM_USE_PREFIX: &str = "LABEL.LIVE_STREAM_USE_PREFIX";
 const LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION: &str = "LABEL.LIVE_STREAM_WITHOUT_EXTENSION";
 const LABEL_DISABLE_HLS_STREAMING: &str = "LABEL.DISABLE_HLS_STREAMING";
+pub(super) const LABEL_PROXY_STREAM_FALLBACK: &str = "LABEL.PROXY_STREAM_FALLBACK";
 const LABEL_USER_AGENT_STREAM_INDEX: &str = "LABEL.USER_AGENT_STREAM_INDEX";
 pub(super) const LABEL_CONNECTION_LIMIT_POLICY: &str = "LABEL.CONNECTION_LIMIT_POLICY";
 pub(super) const LABEL_CONNECTION_LIMIT_POLICY_STRICT: &str = "LABEL.CONNECTION_LIMIT_POLICY_STRICT";
@@ -432,6 +433,7 @@ generate_form_reducer!(
       ResolveFilter => resolve_filter: Option<String>,
       ProbeFilter => probe_filter: Option<String>,
       StalkerBulkEpg => stalker_bulk_epg: bool,
+      ProxyStreamFallback => proxy_stream_fallback: bool,
     }
 );
 
@@ -924,7 +926,7 @@ pub fn ConfigInputView(props: &ConfigInputViewProps) -> Html {
             <M3uInputForm state={input_form_state.clone()} allow_write={props.allow_write} />
         },
         shared::model::InputType::Xtream | shared::model::InputType::XtreamBatch => html! {
-            <XtreamInputForm state={input_form_state.clone()} providers={(*providers_state).clone()} allow_write={props.allow_write} />
+            <XtreamInputForm state={input_form_state.clone()} options_state={input_options_state.clone()} providers={(*providers_state).clone()} allow_write={props.allow_write} />
         },
         shared::model::InputType::Stalker | shared::model::InputType::StalkerBatch => html! {
             <StalkerInputForm state={input_form_state.clone()} config={stalker_config_state.clone()} allow_write={props.allow_write} />

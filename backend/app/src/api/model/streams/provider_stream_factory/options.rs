@@ -148,6 +148,7 @@ impl ProviderStreamFactoryOptions {
             completion_token: None,
             close_reason: None,
             account: None,
+            stream_proxy: None,
         }
     }
 
@@ -182,6 +183,24 @@ impl ProviderStreamFactoryOptions {
     pub fn apply_input_options(&mut self, input: &crate::model::ConfigInput) {
         if input.has_flag(crate::model::ConfigInputFlags::FlussonicHlsAudioTracks) {
             self.flags.set(ProviderStreamFactoryFlags::FlussonicAudioTracks);
+        }
+        // Opt-in egress alternative: playback still tries the direct connection first, and only a
+        // transport failure may fall back to this proxy.
+        if input.has_flag(crate::model::ConfigInputFlags::ProxyStreamFallback) {
+            if let Some(proxy) = input.proxy.clone() {
+                self.flags.set(ProviderStreamFactoryFlags::ProxyStreamFallback);
+                self.stream_proxy = Some(proxy);
+            }
+        }
+    }
+
+    /// Whether playback may retry through an input proxy after a direct transport failure.
+    #[inline]
+    pub(super) fn proxy_stream_fallback(&self) -> Option<&crate::model::ProxyConfig> {
+        if self.flags.contains(ProviderStreamFactoryFlags::ProxyStreamFallback) {
+            self.stream_proxy.as_ref()
+        } else {
+            None
         }
     }
 

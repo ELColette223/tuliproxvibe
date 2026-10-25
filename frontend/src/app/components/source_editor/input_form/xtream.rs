@@ -1,6 +1,9 @@
-use super::{common::CommonInputForm, ConfigInputFormAction, ConfigInputFormState, LABEL_RESOLVE};
+use super::{
+    common::CommonInputForm, ConfigInputFormAction, ConfigInputFormState, ConfigInputOptionsDtoFormState,
+    ConfigInputOptionsFormAction, LABEL_PROXY_STREAM_FALLBACK, LABEL_RESOLVE,
+};
 use crate::{
-    app::components::{input::Input, Card, TitledCard, ToolAction},
+    app::components::{input::Input, Card, FieldLabel, TitledCard, ToggleSwitch, ToolAction},
     config_field, config_field_optional, config_field_optional_hide,
     hooks::use_service_context,
     i18n::use_translation,
@@ -14,6 +17,8 @@ use yew::{
 #[derive(Properties, Clone)]
 pub(super) struct XtreamInputFormProps {
     pub state: UseReducerHandle<ConfigInputFormState>,
+    /// Proxy streaming fallback is an input option, edited next to the proxy it falls back to.
+    pub options_state: UseReducerHandle<ConfigInputOptionsDtoFormState>,
     pub providers: Vec<ConfigProviderDto>,
     pub allow_write: bool,
 }
@@ -103,6 +108,38 @@ pub(super) fn XtreamInputForm(props: &XtreamInputFormProps) -> Html {
         }
     };
 
+    let options_state = props.options_state.clone();
+    let fallback_enabled = options_state.form.proxy_stream_fallback;
+    let fallback_toggle = {
+        let options_state = options_state.clone();
+        let label = translate.t(LABEL_PROXY_STREAM_FALLBACK);
+        if props.allow_write {
+            html! {
+                <div class="tp__form-field tp__form-field__bool">
+                    <ToggleSwitch
+                        value={options_state.form.proxy_stream_fallback}
+                        readonly={false}
+                        on_change={Callback::from(move |value: bool| {
+                            options_state.dispatch(ConfigInputOptionsFormAction::ProxyStreamFallback(value));
+                        })}
+                    />
+                    <FieldLabel
+                        label={label}
+                        field_id={"proxy_stream_fallback".to_string()}
+                        hint_key={Some("CONFIG_INPUT_OPTIONS.PROXY_STREAM_FALLBACK".to_string())}
+                    />
+                </div>
+            }
+        } else {
+            html! {
+                <div class="tp__form-field tp__form-field__bool">
+                    <ToggleSwitch value={fallback_enabled} readonly={true} on_change={Callback::from(|_| {})} />
+                    <FieldLabel label={label} field_id={"proxy_stream_fallback".to_string()} />
+                </div>
+            }
+        }
+    };
+
     let proxy = state.form.proxy.clone().unwrap_or_default();
     let has_proxy = !proxy.is_empty();
     let proxy_form = if !has_proxy && !props.allow_write {
@@ -143,6 +180,7 @@ pub(super) fn XtreamInputForm(props: &XtreamInputFormProps) -> Html {
                         <Input label={translate.t("LABEL.PASSWORD")} name="proxy_password" hidden={true}
                             value={proxy.password.unwrap_or_default()} on_change={on_proxy_password} />
                     </div>
+                    {fallback_toggle}
                 </TitledCard>
             </Card>
         }
@@ -155,6 +193,7 @@ pub(super) fn XtreamInputForm(props: &XtreamInputFormProps) -> Html {
                         { config_field_optional!(proxy, translate.t("LABEL.USERNAME"), username) }
                         { config_field_optional_hide!(proxy, translate.t("LABEL.PASSWORD"), password) }
                     </div>
+                    {fallback_toggle}
                 </TitledCard>
             </Card>
         }

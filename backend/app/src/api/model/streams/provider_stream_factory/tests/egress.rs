@@ -95,6 +95,70 @@ fn account_full_stays_distinct_from_a_missing_channel() {
     assert!(!failure.is_channel_missing());
 }
 
+/// Only transport-shaped failures justify a second egress.
+#[test]
+fn only_transport_failures_are_proxy_fallback_candidates() {
+    let transport = [
+        ProviderStreamRequestFailure::Status {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            provider_error_class: "timeout",
+            serve_channel_unavailable: true,
+        },
+        ProviderStreamRequestFailure::Status {
+            status: StatusCode::BAD_GATEWAY,
+            provider_error_class: "connect",
+            serve_channel_unavailable: true,
+        },
+        ProviderStreamRequestFailure::Status {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            provider_error_class: "http_5xx",
+            serve_channel_unavailable: true,
+        },
+        ProviderStreamRequestFailure::Status {
+            status: StatusCode::REQUEST_TIMEOUT,
+            provider_error_class: "http_other",
+            serve_channel_unavailable: true,
+        },
+    ];
+    for failure in transport {
+        assert!(
+            failure.is_proxy_fallback_candidate(),
+            "{} / {} must be retried through the proxy",
+            failure.status(),
+            failure.provider_error_class()
+        );
+    }
+
+    let provider_answers = [
+        ProviderStreamRequestFailure::ChannelMissing {
+            status: StatusCode::NOT_FOUND,
+            provider_error_class: "http_4xx",
+        },
+        ProviderStreamRequestFailure::AccountFull {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            provider_error_class: "account_full",
+        },
+        ProviderStreamRequestFailure::Status {
+            status: StatusCode::UNAUTHORIZED,
+            provider_error_class: "http_4xx",
+            serve_channel_unavailable: true,
+        },
+        ProviderStreamRequestFailure::Status {
+            status: StatusCode::FORBIDDEN,
+            provider_error_class: "http_4xx",
+            serve_channel_unavailable: true,
+        },
+    ];
+    for failure in provider_answers {
+        assert!(
+            !failure.is_proxy_fallback_candidate(),
+            "{} / {} is the provider's answer; a proxy would only repeat it",
+            failure.status(),
+            failure.provider_error_class()
+        );
+    }
+}
+
 fn proxy_configured_app_config() -> Arc<AppConfig> {
     let mut config = Config::default();
     config.proxy = Some(tuliprox_core::model::ProxyConfig {

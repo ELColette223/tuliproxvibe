@@ -480,6 +480,70 @@ pub(super) async fn get_provider_stream(
     client: &reqwest::Client,
     stream_options: &ProviderStreamFactoryOptions,
 ) -> Result<Option<ProviderStreamFactoryResponse>, ProviderStreamRequestFailure> {
+    match get_provider_stream_direct(ctx, client, stream_options).await {
+        Err(failure) if failure.is_proxy_fallback_candidate() => {
+            // The direct connection could not reach the provider. When this input opts in, give a
+            // configured proxy one chance as an alternative egress. Playback still tried direct
+            // first, so an ordinary stream never depends on the proxy.
+            match proxy_stream_client(ctx, stream_options) {
+                Some(proxy_client) => {
+                    warn!(
+                        "Direct playback failed ({}); retrying once through the input proxy: {}",
+                        failure.provider_error_class(),
+                        sanitize_sensitive_info(stream_options.get_log_url().as_ref())
+                    );
+                    match get_provider_stream_direct(ctx, &proxy_client, stream_options).await {
+                        // Do not cancel here: this failure is final, and the caller owns the flag.
+                        Err(proxy_failure) => {
+                            stream_options.cancel_reconnect();
+                            Err(proxy_failure)
+                        }
+                        opened => opened,
+                    }
+                }
+                None => {
+                    stream_options.cancel_reconnect();
+                    Err(failure)
+                }
+            }
+        }
+        Err(failure) => {
+            stream_options.cancel_reconnect();
+            Err(failure)
+        }
+        opened => opened,
+    }
+}
+
+/// Builds the proxy-egress streaming client for this input, when the input opted into it.
+fn proxy_stream_client(
+    ctx: &ProviderStreamCtx,
+    stream_options: &ProviderStreamFactoryOptions,
+) -> Option<reqwest::Client> {
+    let proxy = stream_options.proxy_stream_fallback()?;
+    match crate::utils::request::create_input_http_client_with_redirect(
+        &ctx.app_config,
+        ctx.http_clients.stream.load().as_ref(),
+        Some(proxy),
+        reqwest::redirect::Policy::limited(10),
+    ) {
+        Ok(client) => Some(client),
+        Err(err) => {
+            warn!(
+                "Cannot build the proxy fallback client; keeping the direct connection: {}",
+                sanitize_sensitive_info(&err.to_string())
+            );
+            None
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+async fn get_provider_stream_direct(
+    ctx: &ProviderStreamCtx,
+    client: &reqwest::Client,
+    stream_options: &ProviderStreamFactoryOptions,
+) -> Result<Option<ProviderStreamFactoryResponse>, ProviderStreamRequestFailure> {
     let log_url = stream_options.get_log_url();
     debug_if_enabled!("stream provider {}", sanitize_sensitive_info(log_url.as_ref()));
     let start = Instant::now();
@@ -580,7 +644,8 @@ pub(super) async fn get_provider_stream(
         debug_if_enabled!("Reconnecting stream {}", sanitize_sensitive_info(stream_options.get_log_url().as_ref()));
     }
     debug_if_enabled!("Stopped reconnecting stream {}", sanitize_sensitive_info(stream_options.get_log_url().as_ref()));
-    stream_options.cancel_reconnect();
+    // The caller decides whether this failure is final: `get_provider_stream` may still retry the
+    // same options through the input proxy, which requires the reconnect signal to stay open.
     Err(ProviderStreamRequestFailure::Status {
         status: StatusCode::SERVICE_UNAVAILABLE,
         provider_error_class: "service_unavailable",

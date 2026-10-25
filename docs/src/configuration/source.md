@@ -222,10 +222,14 @@ for that input. The same proxy is used for playlist import, automatic XMLTV, acc
 metadata, and remote probes. Input aliases inherit the parent proxy. Remove the input-level block to resume using the
 global proxy.
 
-> **Playback is never proxied.** Live and VOD streams (MPEG-TS and HLS, including HLS manifests and segments) always
-> connect directly to the provider. A proxy adds a hop the provider does not see for a direct client, hides the client's
-> address, and makes a working channel depend on the proxy's own reachability. Configure the proxy for what needs it —
-> playlist fetching and discovery — and expect streaming to egress from this host.
+> **Playback connects directly.** Live and VOD streams (MPEG-TS and HLS, including HLS manifests and segments) always
+> try a direct connection to the provider first. A proxy adds a hop the provider does not see for a direct client, hides
+> the client's address, and makes a working channel depend on the proxy's own reachability. Configure the proxy for what
+> needs it — playlist fetching and discovery — and expect streaming to egress from this host.
+>
+> The one exception is opt-in: with `options.proxy_stream_fallback: true`, a playback connection that fails for a
+> transport reason (timeout, DNS, connection refused or a 5xx) is retried once through this input's proxy. The direct
+> attempt always happens first, and a missing channel (`404`) or a full account is never retried through the proxy.
 
 Proxy credentials must be either both present or both omitted. Supported schemes are `http://`, `https://`, `socks5://`,
 and `socks5h://`; invalid URLs or unsupported schemes make the source configuration fail validation instead of falling
@@ -298,6 +302,7 @@ specific provider.
 | `xtream_live_stream_without_extension`     | Bool     | `false` | Strips `.ts` from generated stream URLs.                                                                                                                                                                                               |
 | `xtream_live_stream_use_prefix`            | Bool     | `true`  | Injects the `/live/` prefix into URLs.                                                                                                                                                                                                 |
 | `disable_hls_streaming`                    | Bool     | `false` | Rewrites live `.m3u8` requests to `.ts` and bypasses Tuliprox HLS handling.                                                                                                                                                            |
+| `proxy_stream_fallback`                    | Bool     | `false` | Playback connects directly first. When enabled, a transport failure (timeout, DNS, connection refused, 5xx) is retried once through this input's `proxy`. A missing channel (404) or a full account is never retried through it.        |
 | `flussonic_hls_catchup`                    | String   | `native`| M3U Flussonic HLS catch-up mode: `native` or `bounded_archive`. See below.                                                                                                                                                             |
 | `flussonic_hls_catchup_max_duration_secs`  | Int      | `14400` | Maximum origin window in seconds for generated `bounded_archive` sources (1–604800). Longer player ranges are capped; explicit sources and native streams are unaffected.                                                              |
 | `user_agent_stream_index`                  | Bool     | `false` | Appends a process-local stream index to upstream `User-Agent` requests (e.g. `VLC/3.0 42`), keeping it stable for the session.                                                                                                         |

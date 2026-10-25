@@ -237,6 +237,31 @@ fn disable_hls_streaming_round_trips() -> Result<(), serde_json::Error> {
 }
 
 #[test]
+fn proxy_stream_fallback_defaults_off_and_is_omitted_when_disabled() -> Result<(), serde_json::Error> {
+    let options: ConfigInputOptionsDto = serde_json::from_str("{}")?;
+    assert!(!options.proxy_stream_fallback, "streaming must stay direct unless the input opts in");
+
+    let json = serde_json::to_string(&ConfigInputOptionsDto::default())?;
+    assert!(!json.contains("proxy_stream_fallback"), "a disabled fallback must not be persisted: {json}");
+    Ok(())
+}
+
+#[test]
+fn proxy_stream_fallback_keeps_options_non_empty_cleans_and_round_trips() -> Result<(), serde_json::Error> {
+    let mut options = ConfigInputOptionsDto { proxy_stream_fallback: true, ..ConfigInputOptionsDto::default() };
+
+    assert!(!options.is_empty(), "an enabled fallback must survive the editor's options pruning");
+    let json = serde_json::to_string(&options)?;
+    let restored: ConfigInputOptionsDto = serde_json::from_str(&json)?;
+    assert!(restored.proxy_stream_fallback);
+
+    options.clean();
+    assert!(!options.proxy_stream_fallback);
+    assert!(options.is_empty());
+    Ok(())
+}
+
+#[test]
 fn flussonic_hls_audio_tracks_round_trips_defaults_off_and_cleans() -> Result<(), serde_json::Error> {
     assert!(!ConfigInputOptionsDto::default().flussonic_hls_audio_tracks);
     let mut options = ConfigInputOptionsDto { flussonic_hls_audio_tracks: true, ..ConfigInputOptionsDto::default() };
