@@ -233,10 +233,14 @@ async fn provider_stream_request(
     ctx: &ProviderStreamCtx,
     request_client: &reqwest::Client,
     stream_options: &ProviderStreamFactoryOptions,
+    force_manual_redirects: bool,
 ) -> Result<Option<ProviderStreamFactoryResponse>, ProviderStreamRequestFailure> {
     // Playback connects directly: a configured proxy must never sit between the provider and the
     // stream, so redirects are handled manually only when the destination policy requires it.
-    let use_manual_redirects = stream_options.requires_public_destination()
+    // The proxy fallback sets `force_manual_redirects` because `reqwest` drops
+    // `Proxy-Authorization` on an internally followed redirect (the proxy then answers 407).
+    let use_manual_redirects = force_manual_redirects
+        || stream_options.requires_public_destination()
         || provider_headers_require_manual_redirects(stream_options.get_headers());
     if log_enabled!(log::Level::Debug) {
         let diagnostics =
@@ -480,7 +484,7 @@ pub(super) async fn get_provider_stream(
     client: &reqwest::Client,
     stream_options: &ProviderStreamFactoryOptions,
 ) -> Result<Option<ProviderStreamFactoryResponse>, ProviderStreamRequestFailure> {
-    match get_provider_stream_direct(ctx, client, stream_options).await {
+    match get_provider_stream_direct(ctx, client, stream_options, false).await {
         Err(failure) if failure.is_proxy_fallback_candidate() => {
             // The direct connection could not reach the provider. When this input opts in, give a
             // configured proxy one chance as an alternative egress. Playback still tried direct
@@ -492,7 +496,11 @@ pub(super) async fn get_provider_stream(
                         failure.provider_error_class(),
                         sanitize_sensitive_info(stream_options.get_log_url().as_ref())
                     );
-                    match get_provider_stream_direct(ctx, &proxy_client, stream_options).await {
+                    // Proxy egress always walks redirects itself: `reqwest` drops
+                    // `Proxy-Authorization` when it follows a redirect internally, so the second
+                    // hop is rejected by the proxy with 407. One request per hop keeps the
+                    // credential on every request.
+                    match get_provider_stream_direct(ctx, &proxy_client, stream_options, true).await {
                         // Do not cancel here: this failure is final, and the caller owns the flag.
                         Err(proxy_failure) => {
                             stream_options.cancel_reconnect();
@@ -516,6 +524,8 @@ pub(super) async fn get_provider_stream(
 }
 
 /// Builds the proxy-egress streaming client for this input, when the input opted into it.
+///
+/// The client never follows redirects itself: see the `407` note in [`get_provider_stream`].
 fn proxy_stream_client(
     ctx: &ProviderStreamCtx,
     stream_options: &ProviderStreamFactoryOptions,
@@ -523,9 +533,9 @@ fn proxy_stream_client(
     let proxy = stream_options.proxy_stream_fallback()?;
     match crate::utils::request::create_input_http_client_with_redirect(
         &ctx.app_config,
-        ctx.http_clients.stream.load().as_ref(),
+        ctx.http_clients.stream_no_redirect.load().as_ref(),
         Some(proxy),
-        reqwest::redirect::Policy::limited(10),
+        reqwest::redirect::Policy::none(),
     ) {
         Ok(client) => Some(client),
         Err(err) => {
@@ -543,6 +553,7 @@ async fn get_provider_stream_direct(
     ctx: &ProviderStreamCtx,
     client: &reqwest::Client,
     stream_options: &ProviderStreamFactoryOptions,
+    force_manual_redirects: bool,
 ) -> Result<Option<ProviderStreamFactoryResponse>, ProviderStreamRequestFailure> {
     let log_url = stream_options.get_log_url();
     debug_if_enabled!("stream provider {}", sanitize_sensitive_info(log_url.as_ref()));
@@ -551,7 +562,7 @@ async fn get_provider_stream_direct(
 
     let handle_cancel = stream_options.get_cancel_token();
     while stream_options.should_continue() {
-        let request_future = provider_stream_request(ctx, client, stream_options);
+        let request_future = provider_stream_request(ctx, client, stream_options, force_manual_redirects);
         let request_res = if let Some(ref cancel) = handle_cancel {
             tokio::select! {
                 biased;
