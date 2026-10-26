@@ -62,6 +62,7 @@ impl LiveHlsOriginEntry {
             username: user_info.as_ref().map(|info| info.username.clone()),
             password: user_info.map(|info| info.password),
             proxy: None,
+            proxy_stream_fallback: false,
             method: InputFetchMethod::GET,
             headers: HashMap::new(),
         }

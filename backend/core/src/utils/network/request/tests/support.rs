@@ -260,6 +260,7 @@ pub(in crate::utils::network::request::tests) fn test_input_source(
         username: None,
         password: None,
         proxy: None,
+        proxy_stream_fallback: false,
         method: InputFetchMethod::GET,
         headers: HashMap::new(),
     }

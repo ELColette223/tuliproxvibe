@@ -137,10 +137,13 @@ pub(in crate::api::endpoints::hls_api) async fn download_legacy_hls_manifest(
     let body_options = request::TextContentBodyOptions::hls_manifest(MAX_HLS_MANIFEST_BYTES, deadline);
     let options = request::TextContentFetchOptions::new(fetch_options, body_options);
 
-    if app_state.should_use_manual_redirects() {
+    // A manifest is playback: it connects directly unless the input opted into its proxy.
+    let egress = super::super::egress::HlsPlaybackEgress::for_input(app_state, Some(input));
+
+    if app_state.should_use_manual_redirects() || egress.manual_redirects {
         request::download_text_content_with_manual_redirects_and_headers_and_options(
             &app_state.app_config,
-            &app_state.http_clients.no_redirect.load(),
+            &egress.no_redirect_client,
             input,
             Some(headers),
             false,
@@ -151,7 +154,7 @@ pub(in crate::api::endpoints::hls_api) async fn download_legacy_hls_manifest(
     } else {
         request::download_text_content_with_headers_and_options(
             &app_state.app_config,
-            &app_state.http_clients.default.load(),
+            &egress.client,
             input,
             Some(headers),
             false,

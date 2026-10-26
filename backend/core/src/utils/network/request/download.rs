@@ -288,6 +288,7 @@ pub async fn get_remote_content_as_file_with_options(
         username: input.username.clone(),
         password: input.password.clone(),
         proxy: input.proxy.clone(),
+        proxy_stream_fallback: input.has_flag(crate::model::ConfigInputFlags::ProxyStreamFallback),
         method: input.method,
         headers: input.headers.clone(),
     };

@@ -134,6 +134,7 @@ pub async fn parse_xmltv_for_web_ui_from_url(
             username: None,
             password: None,
             proxy: None,
+            proxy_stream_fallback: false,
             method: InputFetchMethod::GET,
             headers: HashMap::default(),
         };

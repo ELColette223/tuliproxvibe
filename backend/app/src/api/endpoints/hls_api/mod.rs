@@ -109,6 +109,7 @@ pub(super) struct HlsProxyResourcePathParams {
 }
 
 mod catchup;
+mod egress;
 mod manifest;
 mod origin_account_runtime;
 mod origin_refresh_request;

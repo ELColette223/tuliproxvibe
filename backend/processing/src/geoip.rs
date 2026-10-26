@@ -41,6 +41,7 @@ pub async fn update_geoip_db(
                 username: None,
                 password: None,
                 proxy: None,
+                proxy_stream_fallback: false,
                 method: InputFetchMethod::GET,
                 headers: HashMap::default(),
             };

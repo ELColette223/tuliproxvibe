@@ -944,6 +944,7 @@ fn build_xtream_login_input_source(
         username: Some(request.username.clone()),
         password: Some(request.password.clone()),
         proxy: request.proxy.as_ref().map(crate::model::ProxyConfig::from),
+        proxy_stream_fallback: false,
         method: InputFetchMethod::GET,
         headers: HashMap::new(),
     })
