@@ -159,6 +159,63 @@ fn only_transport_failures_are_proxy_fallback_candidates() {
     }
 }
 
+/// The proxy fallback must actually egress through the proxy.
+///
+/// The manual-redirect branch once ignored the client it was handed and used the shared
+/// no-redirect one, so the fallback silently connected directly. A proxy that records every
+/// request proves the egress: if the stream went around it, the recorder stays empty.
+#[tokio::test]
+async fn proxy_fallback_client_egresses_through_the_proxy() {
+    let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy_listener.local_addr().unwrap();
+    let origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin_addr = origin_listener.local_addr().unwrap();
+
+    // Minimal HTTP proxy: it must see the request, and it answers on the origin's behalf so the
+    // test does not depend on a real origin.
+    let proxy_seen = tokio::spawn(async move {
+        let Ok(Ok((mut socket, _))) = tokio::time::timeout(Duration::from_secs(2), proxy_listener.accept()).await
+        else {
+            return false;
+        };
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        while let Ok(read) = socket.read(&mut chunk).await {
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let _ = socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").await;
+        true
+    });
+    // The origin must NOT be reached by the fallback.
+    let origin_reached = tokio::spawn(async move {
+        tokio::time::timeout(Duration::from_secs(2), origin_listener.accept()).await.is_ok()
+    });
+
+    let proxy = tuliprox_core::model::ProxyConfig {
+        url: format!("http://{proxy_addr}"),
+        username: None,
+        password: None,
+    };
+    let client = tuliprox_core::utils::request::create_input_http_client_with_redirect(
+        &proxy_configured_app_config(),
+        &reqwest::Client::new(),
+        Some(&proxy),
+        reqwest::redirect::Policy::none(),
+    )
+    .expect("proxy client builds");
+
+    let response = client.get(format!("http://{origin_addr}/live/1.ts")).send().await;
+    assert!(response.is_ok(), "the proxy must answer the request: {response:?}");
+    assert!(proxy_seen.await.expect("proxy task"), "the request must reach the proxy");
+    assert!(!origin_reached.await.expect("origin task"), "the request must not bypass the proxy");
+}
+
 fn proxy_configured_app_config() -> Arc<AppConfig> {
     let mut config = Config::default();
     config.proxy = Some(tuliprox_core::model::ProxyConfig {

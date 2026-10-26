@@ -252,8 +252,16 @@ async fn provider_stream_request(
         );
     }
     let response_result = if use_manual_redirects {
+        // The manual loop must run on a client that does not follow redirects itself, and that
+        // client must carry the egress of this attempt. A shared no-redirect client silently
+        // dropped the input proxy on the fallback path: the request went direct, the provider
+        // refused the destination, and the proxy never saw the request.
+        // `force_manual_redirects` comes from the proxy fallback, whose client is already built
+        // with `Policy::none()`; otherwise the shared no-redirect client is the direct one.
         let client_no_redirect = if stream_options.requires_public_destination() {
             ctx.http_clients.public_no_redirect.load().as_ref().clone()
+        } else if force_manual_redirects {
+            request_client.clone()
         } else {
             ctx.http_clients.stream_no_redirect.load().as_ref().clone()
         };
@@ -562,7 +570,8 @@ async fn get_provider_stream_direct(
 
     let handle_cancel = stream_options.get_cancel_token();
     while stream_options.should_continue() {
-        let request_future = provider_stream_request(ctx, client, stream_options, force_manual_redirects);
+        let request_future =
+            provider_stream_request(ctx, client, stream_options, force_manual_redirects);
         let request_res = if let Some(ref cancel) = handle_cancel {
             tokio::select! {
                 biased;
