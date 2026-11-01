@@ -55,7 +55,8 @@ create_bitset!(
     ProbeVod,
     ProbeLive,
     StalkerBulkEpg,
-    ProxyStreamFallback
+    ProxyStreamFallback,
+    ProxyStreamFirst
 );
 
 #[derive(Debug, Clone)]
@@ -116,7 +117,13 @@ impl From<&ConfigInputOptionsDto> for ConfigInputOptions {
             (probe_live, ProbeLive),
             (stalker_bulk_epg, StalkerBulkEpg),
             (proxy_stream_fallback, ProxyStreamFallback),
+            (proxy_stream_first, ProxyStreamFirst),
         );
+        // The two playback egress modes are mutually exclusive; a hand-edited config with both
+        // enabled resolves to proxy-first.
+        if flags.contains(ConfigInputFlags::ProxyStreamFirst) {
+            flags.unset(ConfigInputFlags::ProxyStreamFallback);
+        }
 
         Self {
             flags,

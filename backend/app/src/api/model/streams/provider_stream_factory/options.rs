@@ -113,6 +113,9 @@ impl ProviderStreamFactoryOptions {
         }
         if stream_options.response_mode == StreamResponseMode::HlsResource {
             flags.set(ProviderStreamFactoryFlags::HlsResource);
+            if stream_options.hls_manifest_used_proxy {
+                flags.set(ProviderStreamFactoryFlags::HlsManifestProxyEgress);
+            }
         }
         if *share_stream {
             flags.set(ProviderStreamFactoryFlags::ShareStream);
@@ -184,20 +187,28 @@ impl ProviderStreamFactoryOptions {
         if input.has_flag(crate::model::ConfigInputFlags::FlussonicHlsAudioTracks) {
             self.flags.set(ProviderStreamFactoryFlags::FlussonicAudioTracks);
         }
-        // Opt-in egress alternative: playback still tries the direct connection first, and only a
-        // transport failure may fall back to this proxy.
-        if input.has_flag(crate::model::ConfigInputFlags::ProxyStreamFallback) {
+        // Opt-in egress alternatives. Fallback keeps the direct connection first; first makes the
+        // proxy the preferred egress. The config layer guarantees they are mutually exclusive.
+        if input.has_flag(crate::model::ConfigInputFlags::ProxyStreamFallback)
+            || input.has_flag(crate::model::ConfigInputFlags::ProxyStreamFirst)
+        {
             if let Some(proxy) = input.proxy.clone() {
-                self.flags.set(ProviderStreamFactoryFlags::ProxyStreamFallback);
+                if input.has_flag(crate::model::ConfigInputFlags::ProxyStreamFirst) {
+                    self.flags.set(ProviderStreamFactoryFlags::ProxyStreamFirst);
+                } else {
+                    self.flags.set(ProviderStreamFactoryFlags::ProxyStreamFallback);
+                }
                 self.stream_proxy = Some(proxy);
             }
         }
     }
 
-    /// Whether playback may retry through an input proxy after a direct transport failure.
+    /// The input proxy used for playback egress, in either opt-in mode (fallback or first).
     #[inline]
-    pub(super) fn proxy_stream_fallback(&self) -> Option<&crate::model::ProxyConfig> {
-        if self.flags.contains(ProviderStreamFactoryFlags::ProxyStreamFallback) {
+    pub(super) fn playback_proxy(&self) -> Option<&crate::model::ProxyConfig> {
+        if self.flags.contains(ProviderStreamFactoryFlags::ProxyStreamFallback)
+            || self.flags.contains(ProviderStreamFactoryFlags::ProxyStreamFirst)
+        {
             self.stream_proxy.as_ref()
         } else {
             None

@@ -11,6 +11,7 @@ fn test_provider_stream_factory_options_propagate_buffer_max_bytes() {
         buffer_max_bytes: 4096,
         pipe_provider_stream: false,
         response_mode: StreamResponseMode::Stream,
+        hls_manifest_used_proxy: false,
     };
     let req_headers = HeaderMap::new();
     let options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
@@ -46,6 +47,7 @@ fn test_shared_streams_do_not_use_provider_buffer_wrapper() {
         buffer_max_bytes: 0,
         pipe_provider_stream: false,
         response_mode: StreamResponseMode::Stream,
+        hls_manifest_used_proxy: false,
     };
 
     let shared_options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
@@ -84,6 +86,7 @@ fn test_provider_stream_factory_options_builds_connect_failed_stream_info_from_h
         buffer_max_bytes: 0,
         pipe_provider_stream: false,
         response_mode: StreamResponseMode::Stream,
+        hls_manifest_used_proxy: false,
     };
 
     let options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {

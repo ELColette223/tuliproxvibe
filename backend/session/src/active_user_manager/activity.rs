@@ -25,6 +25,7 @@ impl ActiveUserManager {
             provider: params.provider.intern(),
             stream_url: params.stream_url.intern(),
             shared_stream_key: None,
+            hls_manifest_used_proxy: false,
             provider_session_headers: HashMap::new(),
             provider_session_headers_host: None,
             provider_session_cookies: Arc::default(),

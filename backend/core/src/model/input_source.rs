@@ -20,6 +20,8 @@ pub struct InputSource {
     ///
     /// Discovery always honours `proxy`; playback connects directly unless the input opts in.
     pub proxy_stream_fallback: bool,
+    /// Whether playback connects through the proxy first, falling back to direct.
+    pub proxy_stream_first: bool,
     pub method: InputFetchMethod,
     pub headers: HashMap<String, String>,
 }
@@ -38,6 +40,7 @@ impl InputSource {
             password: self.password.clone(),
             proxy: self.proxy.clone(),
             proxy_stream_fallback: self.proxy_stream_fallback,
+            proxy_stream_first: self.proxy_stream_first,
             method: self.method,
             headers: self.headers.clone(),
         }
@@ -60,6 +63,7 @@ impl From<&ConfigInput> for InputSource {
             password: input.password.clone(),
             proxy: input.proxy.clone(),
             proxy_stream_fallback: input.has_flag(crate::model::ConfigInputFlags::ProxyStreamFallback),
+            proxy_stream_first: input.has_flag(crate::model::ConfigInputFlags::ProxyStreamFirst),
             method: input.method,
             headers: input.headers.clone(),
         }

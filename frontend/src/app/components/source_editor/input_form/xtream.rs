@@ -1,6 +1,6 @@
 use super::{
     common::CommonInputForm, ConfigInputFormAction, ConfigInputFormState, ConfigInputOptionsDtoFormState,
-    ConfigInputOptionsFormAction, LABEL_PROXY_STREAM_FALLBACK, LABEL_RESOLVE,
+    ConfigInputOptionsFormAction, LABEL_PROXY_STREAM_FALLBACK, LABEL_PROXY_STREAM_FIRST, LABEL_RESOLVE,
 };
 use crate::{
     app::components::{input::Input, Card, FieldLabel, TitledCard, ToggleSwitch, ToolAction},
@@ -120,7 +120,11 @@ pub(super) fn XtreamInputForm(props: &XtreamInputFormProps) -> Html {
                         value={options_state.form.proxy_stream_fallback}
                         readonly={false}
                         on_change={Callback::from(move |value: bool| {
+                            // The two egress modes are mutually exclusive; enabling one clears the other.
                             options_state.dispatch(ConfigInputOptionsFormAction::ProxyStreamFallback(value));
+                            if value {
+                                options_state.dispatch(ConfigInputOptionsFormAction::ProxyStreamFirst(false));
+                            }
                         })}
                     />
                     <FieldLabel
@@ -135,6 +139,42 @@ pub(super) fn XtreamInputForm(props: &XtreamInputFormProps) -> Html {
                 <div class="tp__form-field tp__form-field__bool">
                     <ToggleSwitch value={fallback_enabled} readonly={true} on_change={Callback::from(|_| {})} />
                     <FieldLabel label={label} field_id={"proxy_stream_fallback".to_string()} />
+                </div>
+            }
+        }
+    };
+
+    let options_state = props.options_state.clone();
+    let first_enabled = options_state.form.proxy_stream_first;
+    let first_toggle = {
+        let options_state = options_state.clone();
+        let label = translate.t(LABEL_PROXY_STREAM_FIRST);
+        if props.allow_write {
+            html! {
+                <div class="tp__form-field tp__form-field__bool">
+                    <ToggleSwitch
+                        value={options_state.form.proxy_stream_first}
+                        readonly={false}
+                        on_change={Callback::from(move |value: bool| {
+                            // The two egress modes are mutually exclusive; enabling one clears the other.
+                            options_state.dispatch(ConfigInputOptionsFormAction::ProxyStreamFirst(value));
+                            if value {
+                                options_state.dispatch(ConfigInputOptionsFormAction::ProxyStreamFallback(false));
+                            }
+                        })}
+                    />
+                    <FieldLabel
+                        label={label}
+                        field_id={"proxy_stream_first".to_string()}
+                        hint_key={Some("CONFIG_INPUT_OPTIONS.PROXY_STREAM_FIRST".to_string())}
+                    />
+                </div>
+            }
+        } else {
+            html! {
+                <div class="tp__form-field tp__form-field__bool">
+                    <ToggleSwitch value={first_enabled} readonly={true} on_change={Callback::from(|_| {})} />
+                    <FieldLabel label={label} field_id={"proxy_stream_first".to_string()} />
                 </div>
             }
         }
@@ -181,6 +221,7 @@ pub(super) fn XtreamInputForm(props: &XtreamInputFormProps) -> Html {
                             value={proxy.password.unwrap_or_default()} on_change={on_proxy_password} />
                     </div>
                     {fallback_toggle}
+                    {first_toggle}
                 </TitledCard>
             </Card>
         }
@@ -194,6 +235,7 @@ pub(super) fn XtreamInputForm(props: &XtreamInputFormProps) -> Html {
                         { config_field_optional_hide!(proxy, translate.t("LABEL.PASSWORD"), password) }
                     </div>
                     {fallback_toggle}
+                    {first_toggle}
                 </TitledCard>
             </Card>
         }

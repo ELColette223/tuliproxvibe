@@ -88,6 +88,7 @@ mod bandwidth;
 mod encrypted_media;
 mod entry_identity;
 mod headers;
+mod hls_proxy_fallback;
 mod late_custom_response;
 mod lease_lifecycle;
 mod manifest_entry_freshness;

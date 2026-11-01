@@ -14,6 +14,7 @@ fn session_headers_are_forwarded_to_provider_requests() {
         buffer_max_bytes: 0,
         pipe_provider_stream: false,
         response_mode: StreamResponseMode::Stream,
+        hls_manifest_used_proxy: false,
     };
 
     let options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {

@@ -6,6 +6,28 @@ use std::{
 };
 
 impl ActiveUserManager {
+    /// Records whether a legacy HLS manifest needed the input proxy for this binding.
+    /// A late direct response must not erase a proxy decision made by a concurrent request;
+    /// changing provider clears the decision instead.
+    pub async fn set_hls_manifest_proxy_egress(
+        &self,
+        username: &str,
+        token: &str,
+        identity: SessionIdentity,
+        used_proxy: bool,
+    ) -> bool {
+        let mut users = self.write_connections().await;
+        let Some(session) = users
+            .by_key
+            .get_mut(username)
+            .and_then(|data| data.sessions.iter_mut().find(|session| session.token == token && session.identity() == identity))
+        else {
+            return false;
+        };
+        session.hls_manifest_used_proxy |= used_proxy;
+        true
+    }
+
     /// Provider session headers valid for `target_url` now, for the session object and account
     /// binding of `identity` in any lifecycle state: a manifest refresh may revive an expired
     /// reservation.

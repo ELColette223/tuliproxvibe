@@ -119,6 +119,7 @@ fn only_transport_failures_are_proxy_fallback_candidates() {
             provider_error_class: "http_other",
             serve_channel_unavailable: true,
         },
+        ProviderStreamRequestFailure::HlsStatus { status: StatusCode::BAD_GATEWAY, headers: Vec::new() },
     ];
     for failure in transport {
         assert!(
@@ -129,11 +130,22 @@ fn only_transport_failures_are_proxy_fallback_candidates() {
         );
     }
 
-    let provider_answers = [
+    // A 404 must be retried on the other egress: this panel answers a firewalled client with 404.
+    let firewall_block_404 = [
         ProviderStreamRequestFailure::ChannelMissing {
             status: StatusCode::NOT_FOUND,
             provider_error_class: "http_4xx",
         },
+        ProviderStreamRequestFailure::HlsStatus { status: StatusCode::NOT_FOUND, headers: Vec::new() },
+    ];
+    for failure in firewall_block_404 {
+        assert!(
+            failure.is_proxy_fallback_candidate(),
+            "a 404 may be a firewall block and must reach the other egress",
+        );
+    }
+
+    let provider_answers = [
         ProviderStreamRequestFailure::AccountFull {
             status: StatusCode::TOO_MANY_REQUESTS,
             provider_error_class: "account_full",
@@ -148,6 +160,8 @@ fn only_transport_failures_are_proxy_fallback_candidates() {
             provider_error_class: "http_4xx",
             serve_channel_unavailable: true,
         },
+        ProviderStreamRequestFailure::HlsStatus { status: StatusCode::UNAUTHORIZED, headers: Vec::new() },
+        ProviderStreamRequestFailure::HlsStatus { status: StatusCode::SERVICE_UNAVAILABLE, headers: Vec::new() },
     ];
     for failure in provider_answers {
         assert!(
@@ -214,6 +228,268 @@ async fn proxy_fallback_client_egresses_through_the_proxy() {
     assert!(response.is_ok(), "the proxy must answer the request: {response:?}");
     assert!(proxy_seen.await.expect("proxy task"), "the request must reach the proxy");
     assert!(!origin_reached.await.expect("origin task"), "the request must not bypass the proxy");
+}
+
+#[tokio::test]
+async fn hls_segment_uses_manifest_proxy_egress_without_retrying_direct() {
+    let origin = TcpListener::bind("127.0.0.1:0").await.expect("bind origin");
+    let origin_addr = origin.local_addr().expect("origin addr");
+    let proxy = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
+    let proxy_addr = proxy.local_addr().expect("proxy addr");
+    let requests = tokio::spawn(async move {
+        let mut requests = Vec::new();
+        for hop in 0..2 {
+            let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), proxy.accept())
+                .await
+                .expect("proxy sees both hops")
+                .expect("proxy accepts request");
+            let request = read_http_request(&mut socket).await;
+            assert!(request.to_ascii_lowercase().contains("proxy-authorization: basic "), "hop {hop} authenticates");
+            requests.push(request.lines().next().unwrap_or_default().to_string());
+            let response = if hop == 0 {
+                b"HTTP/1.1 302 Found\r\nLocation: http://cdn.example.invalid/hls/segment.ts\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+            } else {
+                b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nContent-Length: 4\r\nConnection: close\r\n\r\nmedia".to_vec()
+            };
+            socket.write_all(&response).await.expect("proxy answers");
+        }
+        requests
+    });
+    let url = Url::parse(&format!("http://{origin_addr}/hls/segment.ts")).expect("origin URL");
+    let headers = HeaderMap::new();
+    let stream_options = StreamOptions {
+        stream_retry: true,
+        buffer_enabled: false,
+        buffer_size: 0,
+        buffer_max_bytes: 0,
+        pipe_provider_stream: false,
+        response_mode: StreamResponseMode::HlsResource,
+        hls_manifest_used_proxy: true,
+    };
+    let mut options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
+        addr: "127.0.0.1:8080".parse().expect("addr"),
+        item_type: PlaylistItemType::LiveHls,
+        share_stream: false,
+        stream_options: &stream_options,
+        stream_url: &url,
+        req_headers: &headers,
+        input_headers: None,
+        session_headers: None,
+        disabled_headers: None,
+        default_user_agent: None,
+        username: None,
+        client_ip: None,
+        stream_channel: None,
+        connect_failure_stage: None,
+        content_representation: ProviderContentRepresentationMode::Identity,
+    });
+    options.flags.set(ProviderStreamFactoryFlags::ProxyStreamFallback);
+    options.stream_proxy = Some(tuliprox_core::model::ProxyConfig {
+        url: format!("http://{proxy_addr}"),
+        username: Some("test-user".to_string()),
+        password: Some("test-pass".to_string()),
+    });
+    let app = proxy_configured_app_config();
+    let event_manager = Arc::new(crate::api::model::EventManager::new());
+    let active_provider = Arc::new(crate::api::model::ActiveProviderManager::new(&app, &event_manager));
+    let geoip = Arc::new(ArcSwapOption::<crate::repository::GeoIp>::default());
+    let config = app.config.load();
+    let active_users = Arc::new(crate::api::model::ActiveUserManager::new(&config, &geoip, &event_manager));
+    drop(config);
+    let shared_stream_manager = Arc::new(crate::api::model::SharedStreamManager::new(Arc::clone(&active_provider)));
+    let connection_manager = Arc::new(crate::api::model::ConnectionManager::new(
+        &active_users,
+        &active_provider,
+        &shared_stream_manager,
+        &event_manager,
+        None,
+    ));
+    let ctx = tuliprox_session::stream_ctx::ProviderStreamCtx {
+        active_provider,
+        app_config: app,
+        connection_manager,
+        http_clients: Arc::new(tuliprox_core::model::HttpClients::default()),
+    };
+    let response = super::request::get_provider_stream(&ctx, &reqwest::Client::new(), &options)
+        .await
+        .expect("proxied segment opens")
+        .expect("segment response");
+    assert_eq!(response.info.as_ref().map(|(_, status, _, _)| *status), Some(StatusCode::OK));
+    let requests = requests.await.expect("proxy task");
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].contains("/hls/segment.ts"));
+    assert!(requests[1].contains("cdn.example.invalid/hls/segment.ts"));
+    assert!(tokio::time::timeout(Duration::from_millis(250), origin.accept()).await.is_err(), "direct origin is untouched");
+}
+
+#[tokio::test]
+async fn hls_segment_404_retries_the_proxy_before_staying_an_error() {
+    let origin = TcpListener::bind("127.0.0.1:0").await.expect("bind origin");
+    let origin_addr = origin.local_addr().expect("origin addr");
+    let direct = tokio::spawn(async move {
+        let (mut socket, _) = origin.accept().await.expect("accept origin");
+        let _ = read_http_request(&mut socket).await;
+        socket.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("answer 404");
+    });
+    let proxy = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
+    let proxy_addr = proxy.local_addr().expect("proxy addr");
+    let proxied = tokio::spawn(async move {
+        let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), proxy.accept())
+            .await
+            .expect("the 404 reaches the proxy")
+            .expect("proxy accepts");
+        let _ = read_http_request(&mut socket).await;
+        socket.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("proxy repeats the 404");
+    });
+    let url = Url::parse(&format!("http://{origin_addr}/hls/segment.ts")).expect("URL");
+    let headers = HeaderMap::new();
+    let stream_options = StreamOptions {
+        stream_retry: false,
+        buffer_enabled: false,
+        buffer_size: 0,
+        buffer_max_bytes: 0,
+        pipe_provider_stream: true,
+        response_mode: StreamResponseMode::HlsResource,
+        hls_manifest_used_proxy: false,
+    };
+    let mut options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
+        addr: "127.0.0.1:8080".parse().expect("addr"),
+        item_type: PlaylistItemType::LiveHls,
+        share_stream: false,
+        stream_options: &stream_options,
+        stream_url: &url,
+        req_headers: &headers,
+        input_headers: None,
+        session_headers: None,
+        disabled_headers: None,
+        default_user_agent: None,
+        username: None,
+        client_ip: None,
+        stream_channel: None,
+        connect_failure_stage: None,
+        content_representation: ProviderContentRepresentationMode::Identity,
+    });
+    options.flags.set(ProviderStreamFactoryFlags::ProxyStreamFallback);
+    options.stream_proxy = Some(tuliprox_core::model::ProxyConfig {
+        url: format!("http://{proxy_addr}"),
+        username: None,
+        password: None,
+    });
+    let app = proxy_configured_app_config();
+    let event_manager = Arc::new(crate::api::model::EventManager::new());
+    let active_provider = Arc::new(crate::api::model::ActiveProviderManager::new(&app, &event_manager));
+    let geoip = Arc::new(ArcSwapOption::<crate::repository::GeoIp>::default());
+    let config = app.config.load();
+    let active_users = Arc::new(crate::api::model::ActiveUserManager::new(&config, &geoip, &event_manager));
+    drop(config);
+    let shared_stream_manager = Arc::new(crate::api::model::SharedStreamManager::new(Arc::clone(&active_provider)));
+    let connection_manager = Arc::new(crate::api::model::ConnectionManager::new(
+        &active_users,
+        &active_provider,
+        &shared_stream_manager,
+        &event_manager,
+        None,
+    ));
+    let ctx = tuliprox_session::stream_ctx::ProviderStreamCtx {
+        active_provider,
+        app_config: app,
+        connection_manager,
+        http_clients: Arc::new(tuliprox_core::model::HttpClients::default()),
+    };
+    let failure = match super::request::get_provider_stream(&ctx, &reqwest::Client::new(), &options).await {
+        Err(failure) => failure,
+        Ok(_) => panic!("a 404 on both egresses must remain an error"),
+    };
+    assert!(matches!(failure, ProviderStreamRequestFailure::HlsStatus { status: StatusCode::NOT_FOUND, .. }));
+    direct.await.expect("origin task");
+    proxied.await.expect("proxy task");
+}
+
+#[tokio::test]
+async fn proxy_first_stream_opens_through_the_proxy_without_touching_direct() {
+    let origin = TcpListener::bind("127.0.0.1:0").await.expect("bind origin");
+    let origin_addr = origin.local_addr().expect("origin addr");
+    let proxy = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
+    let proxy_addr = proxy.local_addr().expect("proxy addr");
+    let proxied = tokio::spawn(async move {
+        let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), proxy.accept())
+            .await
+            .expect("the proxy receives the stream open")
+            .expect("proxy accepts");
+        let _ = read_http_request(&mut socket).await;
+        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nContent-Length: 4\r\nConnection: close\r\n\r\nmedia")
+            .await
+            .expect("proxy answers media");
+    });
+    let url = Url::parse(&format!("http://{origin_addr}/live/1.ts")).expect("URL");
+    let headers = HeaderMap::new();
+    let stream_options = StreamOptions {
+        stream_retry: false,
+        buffer_enabled: false,
+        buffer_size: 0,
+        buffer_max_bytes: 0,
+        pipe_provider_stream: false,
+        response_mode: StreamResponseMode::HlsResource,
+        hls_manifest_used_proxy: false,
+    };
+    let mut options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
+        addr: "127.0.0.1:8080".parse().expect("addr"),
+        item_type: PlaylistItemType::LiveHls,
+        share_stream: false,
+        stream_options: &stream_options,
+        stream_url: &url,
+        req_headers: &headers,
+        input_headers: None,
+        session_headers: None,
+        disabled_headers: None,
+        default_user_agent: None,
+        username: None,
+        client_ip: None,
+        stream_channel: None,
+        connect_failure_stage: None,
+        content_representation: ProviderContentRepresentationMode::Identity,
+    });
+    options.flags.set(ProviderStreamFactoryFlags::ProxyStreamFirst);
+    options.stream_proxy = Some(tuliprox_core::model::ProxyConfig {
+        url: format!("http://{proxy_addr}"),
+        username: None,
+        password: None,
+    });
+    let app = proxy_configured_app_config();
+    let event_manager = Arc::new(crate::api::model::EventManager::new());
+    let active_provider = Arc::new(crate::api::model::ActiveProviderManager::new(&app, &event_manager));
+    let geoip = Arc::new(ArcSwapOption::<crate::repository::GeoIp>::default());
+    let config = app.config.load();
+    let active_users = Arc::new(crate::api::model::ActiveUserManager::new(&config, &geoip, &event_manager));
+    drop(config);
+    let shared_stream_manager = Arc::new(crate::api::model::SharedStreamManager::new(Arc::clone(&active_provider)));
+    let connection_manager = Arc::new(crate::api::model::ConnectionManager::new(
+        &active_users,
+        &active_provider,
+        &shared_stream_manager,
+        &event_manager,
+        None,
+    ));
+    let ctx = tuliprox_session::stream_ctx::ProviderStreamCtx {
+        active_provider,
+        app_config: app,
+        connection_manager,
+        http_clients: Arc::new(tuliprox_core::model::HttpClients::default()),
+    };
+    let response = super::request::get_provider_stream(&ctx, &reqwest::Client::new(), &options)
+        .await
+        .expect("proxy-first stream opens")
+        .expect("stream response");
+    assert_eq!(response.info.as_ref().map(|(_, status, _, _)| *status), Some(StatusCode::OK));
+    proxied.await.expect("proxy task");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), origin.accept()).await.is_err(),
+        "proxy-first never touches the direct origin"
+    );
 }
 
 fn proxy_configured_app_config() -> Arc<AppConfig> {

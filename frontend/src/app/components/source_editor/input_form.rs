@@ -89,6 +89,7 @@ const LABEL_XTREAM_LIVE_STREAM_USE_PREFIX: &str = "LABEL.LIVE_STREAM_USE_PREFIX"
 const LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION: &str = "LABEL.LIVE_STREAM_WITHOUT_EXTENSION";
 const LABEL_DISABLE_HLS_STREAMING: &str = "LABEL.DISABLE_HLS_STREAMING";
 pub(super) const LABEL_PROXY_STREAM_FALLBACK: &str = "LABEL.PROXY_STREAM_FALLBACK";
+pub(super) const LABEL_PROXY_STREAM_FIRST: &str = "LABEL.PROXY_STREAM_FIRST";
 const LABEL_USER_AGENT_STREAM_INDEX: &str = "LABEL.USER_AGENT_STREAM_INDEX";
 pub(super) const LABEL_CONNECTION_LIMIT_POLICY: &str = "LABEL.CONNECTION_LIMIT_POLICY";
 pub(super) const LABEL_CONNECTION_LIMIT_POLICY_STRICT: &str = "LABEL.CONNECTION_LIMIT_POLICY_STRICT";
@@ -434,6 +435,7 @@ generate_form_reducer!(
       ProbeFilter => probe_filter: Option<String>,
       StalkerBulkEpg => stalker_bulk_epg: bool,
       ProxyStreamFallback => proxy_stream_fallback: bool,
+      ProxyStreamFirst => proxy_stream_first: bool,
     }
 );
 

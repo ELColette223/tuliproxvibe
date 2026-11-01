@@ -119,6 +119,9 @@ pub struct UserSession {
     pub provider: Arc<str>,
     pub stream_url: Arc<str>,
     pub shared_stream_key: Option<Arc<str>>,
+    /// Set only after this HLS session fetched its manifest through the input proxy.
+    /// Segments must keep the same egress while this provider binding remains current.
+    pub hls_manifest_used_proxy: bool,
     pub provider_session_headers: HashMap<String, String>,
     /// Origin (`scheme://host:port`) whose response set `provider_session_headers`; `None` when unknown.
     pub provider_session_headers_host: Option<String>,

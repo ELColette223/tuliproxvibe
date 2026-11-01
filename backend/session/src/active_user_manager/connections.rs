@@ -103,6 +103,7 @@ impl UserSession {
 
     pub(super) fn switch_provider(&mut self, provider: Arc<str>) {
         self.provider = provider;
+        self.hls_manifest_used_proxy = false;
         self.binding_generation = self.binding_generation.wrapping_add(1);
         self.change_signal.signal();
         self.provider_session_headers.clear();

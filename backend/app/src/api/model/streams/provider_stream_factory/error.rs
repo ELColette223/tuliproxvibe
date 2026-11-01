@@ -204,18 +204,27 @@ impl ProviderStreamRequestFailure {
         matches!(self, Self::ChannelMissing { .. })
     }
 
-    /// Whether this failure is a transport problem the proxy fallback may fix.
+    /// Whether this failure may be worth one attempt on the other egress.
     ///
-    /// A channel-missing or account-full answer is the panel`'`s decision about this login; a proxy
-    /// would only repeat it, so those never justify another egress. Redirect and content-encoding
-    /// answers are passed through unchanged for the same reason: they are the provider answering.
+    /// A 404 is eligible because some panels answer a firewalled client with 404; the other egress
+    /// proves whether the channel is really absent for this login. An account-full answer is the
+    /// panel's decision about this login and another route would only repeat it, as would an
+    /// authentication failure. A finite HLS resource keeps its upstream status, but a 404 or 5xx
+    /// can still be retried on the other egress before it reaches the player.
     pub(super) fn is_proxy_fallback_candidate(&self) -> bool {
         match self {
-            Self::ChannelMissing { .. } | Self::AccountFull { .. } | Self::HlsStatus { .. } => false,
+            Self::AccountFull { .. } => false,
+            Self::ChannelMissing { .. } => true,
+            Self::HlsStatus { status, .. } => {
+                !is_account_full_status(*status)
+                    && (*status == StatusCode::NOT_FOUND
+                        || status.is_server_error()
+                        || *status == StatusCode::REQUEST_TIMEOUT)
+            },
             Self::Status { status, provider_error_class, .. } => {
                 matches!(*provider_error_class, "timeout" | "connect" | "dns" | "io" | "service_unavailable")
-                    || status.is_server_error()
-                    || *status == StatusCode::REQUEST_TIMEOUT
+                    || (!is_account_full_status(*status)
+                        && (status.is_server_error() || *status == StatusCode::REQUEST_TIMEOUT))
             }
         }
     }

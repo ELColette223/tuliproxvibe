@@ -142,6 +142,7 @@ async fn resolve(app_config: &Arc<AppConfig>, client: &reqwest::Client, template
         password: None,
         proxy: None,
         proxy_stream_fallback: false,
+        proxy_stream_first: false,
         method: InputFetchMethod::GET,
         headers: HashMap::default(),
     };

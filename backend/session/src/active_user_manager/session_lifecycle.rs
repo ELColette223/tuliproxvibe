@@ -69,6 +69,7 @@ impl Default for UserSession {
             provider: Arc::from(""),
             stream_url: Arc::from(""),
             shared_stream_key: None,
+            hls_manifest_used_proxy: false,
             provider_session_headers: HashMap::new(),
             provider_session_headers_host: None,
             provider_session_cookies: Arc::default(),

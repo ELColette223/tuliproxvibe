@@ -21,6 +21,9 @@ pub struct StreamOptions {
     pub pipe_provider_stream: bool,
     /// Finite HLS objects retain their upstream errors instead of serving a TS fallback.
     pub response_mode: StreamResponseMode,
+    /// The session manifest succeeded only via this input's proxy. Child HLS resources must
+    /// keep that egress, rather than spending their short admission lease retrying direct.
+    pub hls_manifest_used_proxy: bool,
 }
 
 /// Constructs a `StreamOptions` object based on the application's reverse proxy configuration.
@@ -56,5 +59,13 @@ pub fn get_stream_options(app_config: &AppConfig, response_mode: StreamResponseM
             },
         );
     let pipe_provider_stream = !stream_retry && !buffer_enabled;
-    StreamOptions { stream_retry, buffer_enabled, buffer_size, buffer_max_bytes, pipe_provider_stream, response_mode }
+    StreamOptions {
+        stream_retry,
+        buffer_enabled,
+        buffer_size,
+        buffer_max_bytes,
+        pipe_provider_stream,
+        response_mode,
+        hls_manifest_used_proxy: false,
+    }
 }

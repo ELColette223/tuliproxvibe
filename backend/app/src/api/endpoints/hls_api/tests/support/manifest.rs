@@ -381,6 +381,7 @@ pub(in crate::api::endpoints::hls_api::tests) fn legacy_manifest_test_input(
         password: None,
         proxy: None,
         proxy_stream_fallback: false,
+        proxy_stream_first: false,
         method: shared::model::InputFetchMethod::GET,
         headers: HashMap::from([("Accept-Encoding".to_string(), "gzip".to_string())]),
     }

@@ -57,6 +57,7 @@ fn test_provider_stream_factory_options_range_logic() {
         buffer_max_bytes: 0,
         pipe_provider_stream: false,
         response_mode: StreamResponseMode::Stream,
+        hls_manifest_used_proxy: false,
     };
     let disabled_headers = None;
 

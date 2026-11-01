@@ -1,7 +1,7 @@
 use super::{
     append_user_session_provider_headers, build_hls_manifest_request_headers, build_hls_origin_resolution,
     build_hls_origin_source_for_playback, create_hls_cache_entry_master_playlist_response,
-    download_legacy_hls_manifest, ensure_hls_manifest_extension, hls_cache_enabled_for_user,
+    download_legacy_hls_manifest_with_egress, ensure_hls_manifest_extension, hls_cache_enabled_for_user,
     hls_custom_video_manifest_response, hls_entry_user_session_token, hls_media_playlist_wrap_enabled,
     hls_panel_provisioning_or_status_response, hls_playback_kind, hls_response, m3u_archive_epg_reference_ts,
     m3u_catchup_epg_reference_from_session_token, normalize_xtream_live_hls_url, release_prepared_hls_manifest_session,
@@ -427,8 +427,8 @@ pub(in crate::api) async fn handle_hls_stream_request(
     app_state.connection_manager.release_provider_handle(provider_handle);
 
     let input_source = InputSource::from(input).with_url(request_url);
-    let download_result = match download_legacy_hls_manifest(app_state, &input_source, &headers).await {
-        Ok((content, response_url, response_headers)) => match classify_hls_playlist(&content) {
+    let download_result = match download_legacy_hls_manifest_with_egress(app_state, &input_source, &headers).await {
+        Ok((content, response_url, response_headers, used_proxy)) => match classify_hls_playlist(&content) {
             // A refresh keeps its session on a malformed body; the player retries the playlist.
             HlsPlaylistKind::Invalid if stage != HlsRequestStage::Entry => {
                 warn!("Upstream HLS refresh returned no playlist for virtual_id={virtual_id}; keeping session");
@@ -441,12 +441,15 @@ pub(in crate::api) async fn handle_hls_stream_request(
             HlsPlaylistKind::Invalid => {
                 Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "upstream response is not an HLS playlist"))
             }
-            playlist_kind => Ok((content, response_url, response_headers, playlist_kind)),
+            playlist_kind => Ok((content, response_url, response_headers, playlist_kind, used_proxy)),
         },
         Err(err) => Err(err),
     };
     match download_result {
-        Ok((content, response_url, response_headers, playlist_kind)) => {
+        Ok((content, response_url, response_headers, playlist_kind, used_proxy)) => {
+            if let (Some(token), Some(identity)) = (session_token.as_deref(), session_identity) {
+                app_state.active_users.set_hls_manifest_proxy_egress(&user.username, token, identity, used_proxy).await;
+            }
             let encrypt_secret = app_state.get_encrypt_secret();
             let base_url = server_info.get_base_url();
             let rewrite_hls_props = RewriteHlsProps {

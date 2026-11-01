@@ -370,7 +370,7 @@
       "XTREAM_LIVE_STREAM_USE_PREFIX": "Si es verdadero, añade el prefijo /live/ a los enlaces de stream de Xtream (por defecto verdadero).",
       "XTREAM_LIVE_STREAM_WITHOUT_EXTENSION": "Si es verdadero, elimina la extensión .ts de los enlaces de stream de Xtream (por defecto falso).",
       "DISABLE_HLS_STREAMING": "Sustituye las solicitudes .m3u8 en directo de Xtream por .ts. Actívelo solo cuando el proveedor admita endpoints MPEG-TS; esto no transcodifica HLS.",
-      "PROXY_STREAM_FALLBACK": "La reproducción siempre conecta directamente primero. Si se activa y la conexión directa falla por un motivo de transporte (tiempo de espera, DNS, conexión rechazada o un 5xx), Tuliprox reintenta el mismo stream una vez a través del proxy de esta entrada. Un canal inexistente (404) o una cuenta llena nunca se reintentan por el proxy.",
+      "PROXY_STREAM_FALLBACK": "La reproducción conecta primero de forma directa. Si se activa y la conexión directa falla por un motivo de transporte (tiempo de espera, DNS, conexión rechazada o 5xx) o el panel responde 404 (algunos firewalls informan el bloqueo de un cliente como 404), Tuliprox reintenta el mismo stream una vez a través del proxy de esta entrada. Las respuestas de cuenta llena o autenticación nunca se reintentan por el proxy.",
       "FLUSSONIC_HLS_CATCHUP": "native mantiene el comportamiento de catch-up nativo del proveedor (predeterminado). bounded_archive genera una fuente de archivo fija para las entradas M3U en directo con catchup=\"fs\" y una URL /CANAL/mono.m3u8 cuando no existe catchup-source. La URL en directo y el token no cambian.",
       "FLUSSONIC_HLS_CATCHUP_MAX_DURATION_SECS": "Ventana máxima de reproducción del archivo solicitada al proveedor en el modo bounded_archive. Predeterminado: 14400 segundos (4 horas). Rango permitido: 1–604800 segundos. Las solicitudes más largas del reproductor se acortan a esta ventana desde la hora de inicio elegida; las más cortas conservan su duración. Solo se aplica a las fuentes de archivo HLS de Flussonic generadas automáticamente. Las fuentes catchup explícitas, el modo native y los streams TS no se ven afectados. Actualiza la lista de reproducción después de cambiar este valor.",
       "USER_AGENT_STREAM_INDEX": "Añade al User-Agent configurado un índice numérico local del proceso. El índice se mantiene estable durante una sesión de reproducción a través de manifiestos, segmentos, saltos, reconexiones y cambios de proveedor.",
@@ -380,7 +380,8 @@
       "XTREAM_SKIP_VOD": "Si es verdadero, se omite la sección VOD del proveedor Xtream durante la actualización.",
       "CONNECTION_LIMIT_POLICY": "Elige como se comporta esta fuente cuando un inicio de sesion alcanza su limite de conexiones. Estas dos opciones son mutuamente excluyentes: activar una desactiva la otra.",
       "CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP": "Ignora el limite local de max_connections y sigue intentando el mismo inicio de sesion. No se puede combinar con la rotacion automatica.",
-      "CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL": "Cuando el inicio de sesion actual esta lleno, cambia inmediatamente a otro alias disponible. No se puede combinar con omitir el limite local."
+      "CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL": "Cuando el inicio de sesion actual esta lleno, cambia inmediatamente a otro alias disponible. No se puede combinar con omitir el limite local.",
+      "PROXY_STREAM_FIRST": "La reproducción conecta primero a través del proxy de esta entrada. Solo cuando el proxy no alcanza al proveedor (tiempo de espera, DNS, conexión rechazada, 5xx o un 404 con el que este panel bloquea clientes), Tuliprox reintenta el mismo stream una vez de forma directa. Las respuestas de cuenta llena o autenticación nunca se reintentan por otra vía."
     },
     "CONFIG_TARGET": {
       "ENABLED": "Si está deshabilitado, se omite el procesamiento de esta salida de destino.",
@@ -1953,7 +1954,8 @@
     "URL_ALIASES": "URL alternativas",
     "URL_ALIAS": "URL",
     "ADD_URL_ALIAS": "Agregar URL",
-    "REMOVE": "Eliminar"
+    "REMOVE": "Eliminar",
+    "PROXY_STREAM_FIRST": "Proxy primero para streaming"
   },
   "MESSAGES": {
     "CLIPBOARD_NOT_SUPPORTED": "Portapapeles no compatible.\nSu navegador o el contexto actual no permite el acceso al portapapeles.\nUtilice HTTPS o localhost.",

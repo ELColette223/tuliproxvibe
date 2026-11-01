@@ -57,7 +57,9 @@ create_bitset!(
     PublicDestinationRequired,
     HlsResource,
     FlussonicAudioTracks,
-    ProxyStreamFallback
+    ProxyStreamFallback,
+    ProxyStreamFirst,
+    HlsManifestProxyEgress
 );
 
 #[derive(Debug, Clone)]

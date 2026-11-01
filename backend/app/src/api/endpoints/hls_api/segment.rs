@@ -49,8 +49,9 @@ pub(super) use fallback::{
 };
 #[allow(unused_imports, reason = "Retains the existing module interface in production and test builds.")]
 pub(super) use legacy::{
-    build_hls_manifest_request_headers, download_legacy_hls_manifest, ensure_hls_manifest_extension,
-    normalize_xtream_live_hls_url, release_prepared_hls_manifest_session, terminate_failed_hls_manifest_session,
+    build_hls_manifest_request_headers, download_legacy_hls_manifest, download_legacy_hls_manifest_with_egress,
+    ensure_hls_manifest_extension, normalize_xtream_live_hls_url, release_prepared_hls_manifest_session,
+    terminate_failed_hls_manifest_session,
 };
 #[allow(unused_imports, reason = "Retains the existing module interface in production and test builds.")]
 pub(super) use registration::{

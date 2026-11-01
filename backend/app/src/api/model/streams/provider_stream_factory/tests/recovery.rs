@@ -12,6 +12,7 @@ fn test_provider_stream_factory_options_keeps_initial_retry_for_live_adaptive_st
         buffer_max_bytes: 0,
         pipe_provider_stream: false,
         response_mode: StreamResponseMode::Stream,
+        hls_manifest_used_proxy: false,
     };
 
     let hls_options = ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {

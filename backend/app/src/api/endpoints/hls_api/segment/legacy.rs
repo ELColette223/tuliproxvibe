@@ -7,6 +7,7 @@ use crate::{
     utils::{content_coding::OutboundContentCodingPolicy, request},
 };
 use axum::http::HeaderMap;
+use log::warn;
 use shared::{defaults::HLS_EXT, utils::replace_url_extension};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tuliprox_core::model::{PlaybackRequestId, PlaybackRequestOutcome, ProviderBindingTag};
@@ -131,19 +132,78 @@ pub(in crate::api::endpoints::hls_api) async fn download_legacy_hls_manifest(
     input: &InputSource,
     headers: &HeaderMap,
 ) -> Result<(String, String, HeaderMap), std::io::Error> {
+    download_legacy_hls_manifest_with_egress(app_state, input, headers).await.map(|(content, url, headers, _)| (content, url, headers))
+}
+
+/// Returns whether the successful origin request used the input proxy, so the session's child
+/// resources can use the same egress without repeating an already failed direct connection.
+pub(in crate::api::endpoints::hls_api) async fn download_legacy_hls_manifest_with_egress(
+    app_state: &Arc<AppState>,
+    input: &InputSource,
+    headers: &HeaderMap,
+) -> Result<(String, String, HeaderMap, bool), std::io::Error> {
     let deadline = Duration::from_millis(app_state.hls.proxy.origin_manifest_timeout_ms().max(1));
     let fetch_options = request::RequestFetchOptions::with_attempt_idle_timeout(deadline)
         .with_content_coding(OutboundContentCodingPolicy::Identity);
     let body_options = request::TextContentBodyOptions::hls_manifest(MAX_HLS_MANIFEST_BYTES, deadline);
     let options = request::TextContentFetchOptions::new(fetch_options, body_options);
 
-    // A manifest is playback: it connects directly unless the input opted into its proxy.
-    let egress = super::super::egress::HlsPlaybackEgress::for_input(app_state, Some(input));
+    // Proxy-first inputs open the manifest through the proxy; only an eligible failure falls
+    // back to the direct connection, and a panel answer on the proxy is final.
+    if input.proxy_stream_first {
+        if let Some(client) = super::super::egress::hls_proxy_client(app_state, input) {
+            return match request::download_text_content_with_manual_redirects_and_headers_and_options(
+            &app_state.app_config,
+            &client,
+            input,
+            Some(headers),
+            false,
+            MAX_MANUAL_REDIRECTS,
+            options,
+        )
+        .await
+        {
+                Err(err) if super::super::egress::hls_proxy_fallback_candidate(&err) => {
+                    warn!("Proxy manifest failed ({}); retrying once directly", crate::utils::sanitize_sensitive_info(&err.to_string()));
+                    download_legacy_hls_manifest_direct(app_state, input, headers, options)
+                        .await
+                        .map(|(content, url, headers)| (content, url, headers, false))
+                }
+                result => result.map(|(content, url, headers)| (content, url, headers, true)),
+            };
+        }
+    }
 
-    if app_state.should_use_manual_redirects() || egress.manual_redirects {
+    let direct = download_legacy_hls_manifest_direct(app_state, input, headers, options).await;
+    match direct {
+        Err(err) if super::super::egress::hls_proxy_fallback_candidate(&err) => {
+            let Some(client) = super::super::egress::hls_proxy_client(app_state, input) else { return Err(err) };
+            request::download_text_content_with_manual_redirects_and_headers_and_options(
+                &app_state.app_config,
+                &client,
+                input,
+                Some(headers),
+                false,
+                MAX_MANUAL_REDIRECTS,
+                options,
+            )
+            .await
+            .map(|(content, url, headers)| (content, url, headers, true))
+        }
+        result => result.map(|(content, url, headers)| (content, url, headers, false)),
+    }
+}
+
+async fn download_legacy_hls_manifest_direct(
+    app_state: &Arc<AppState>,
+    input: &InputSource,
+    headers: &HeaderMap,
+    options: request::TextContentFetchOptions,
+) -> Result<(String, String, HeaderMap), std::io::Error> {
+    if app_state.should_use_manual_redirects() {
         request::download_text_content_with_manual_redirects_and_headers_and_options(
             &app_state.app_config,
-            &egress.no_redirect_client,
+            &app_state.http_clients.stream_no_redirect.load(),
             input,
             Some(headers),
             false,
@@ -154,7 +214,7 @@ pub(in crate::api::endpoints::hls_api) async fn download_legacy_hls_manifest(
     } else {
         request::download_text_content_with_headers_and_options(
             &app_state.app_config,
-            &egress.client,
+            &app_state.http_clients.stream.load(),
             input,
             Some(headers),
             false,

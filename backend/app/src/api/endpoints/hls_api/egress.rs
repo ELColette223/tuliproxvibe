@@ -1,62 +1,56 @@
-//! Playback egress for HLS origin traffic.
+//! Optional input-proxy egress for HLS playback.
 //!
-//! HLS manifests and segments are playback, exactly like MPEG-TS bodies, so they connect directly
-//! by default. An input may opt into using its own proxy when a direct connection cannot reach the
-//! provider, mirroring `options.proxy_stream_fallback` on the MPEG-TS path.
-//!
-//! `reqwest` drops `Proxy-Authorization` when it follows a redirect internally, so a proxied
-//! pair is built with `Policy::none()` on both sides and the caller walks redirects one request
-//! per hop.
+//! The normal playback path stays direct. A failed direct request can use the input's proxy when
+//! the input explicitly enables `proxy_stream_fallback`. The proxy client never follows redirects
+//! internally because reqwest drops proxy credentials on an automatic cross-origin redirect.
 
 use crate::{api::model::AppState, model::InputSource};
 use log::warn;
 use std::sync::Arc;
 
-/// The clients one HLS playback request must use for its origin hop.
-pub(in crate::api::endpoints::hls_api) struct HlsPlaybackEgress {
-    /// Client allowed to follow redirects itself.
-    pub client: reqwest::Client,
-    /// Client that never follows redirects, for callers that walk the redirect chain.
-    pub no_redirect_client: reqwest::Client,
-    /// Whether the caller must walk redirects itself.
-    pub manual_redirects: bool,
+pub(in crate::api::endpoints::hls_api) fn hls_proxy_client(
+    app_state: &Arc<AppState>,
+    input: &InputSource,
+) -> Option<reqwest::Client> {
+    let proxy = input
+        .proxy
+        .as_ref()
+        .filter(|_| input.proxy_stream_fallback || input.proxy_stream_first)?;
+    match crate::utils::request::create_input_http_client_with_redirect(
+        &app_state.app_config,
+        app_state.http_clients.stream_no_redirect.load().as_ref(),
+        Some(proxy),
+        reqwest::redirect::Policy::none(),
+    ) {
+        Ok(client) => Some(client),
+        Err(err) => {
+            warn!("Cannot build the HLS proxy fallback client: {}", crate::utils::sanitize_sensitive_info(&err.to_string()));
+            None
+        }
+    }
 }
 
-impl HlsPlaybackEgress {
-    /// Resolves the egress for `input`, using the input proxy only when the input opted in.
-    ///
-    /// Inputs that did not opt in get the shared direct clients unchanged, so default HLS
-    /// playback behaviour is untouched.
-    pub(in crate::api::endpoints::hls_api) fn for_input(
-        app_state: &Arc<AppState>,
-        input: Option<&InputSource>,
-    ) -> Self {
-        let proxy = input
-            .filter(|input| input.proxy_stream_fallback)
-            .and_then(|input| input.proxy.as_ref());
-        if let Some(proxy) = proxy {
-            let build = |policy| {
-                crate::utils::request::create_input_http_client_with_redirect(
-                    &app_state.app_config,
-                    app_state.http_clients.stream_no_redirect.load().as_ref(),
-                    Some(proxy),
-                    policy,
-                )
-            };
-            match (build(reqwest::redirect::Policy::none()), build(reqwest::redirect::Policy::limited(10))) {
-                (Ok(no_redirect_client), Ok(client)) => {
-                    return Self { client, no_redirect_client, manual_redirects: true };
-                }
-                (Err(err), _) | (_, Err(err)) => warn!(
-                    "Cannot build the HLS proxy fallback client; keeping the direct connection: {}",
-                    crate::utils::sanitize_sensitive_info(&err.to_string())
-                ),
-            }
-        }
-        Self {
-            client: app_state.http_clients.stream.load().as_ref().clone(),
-            no_redirect_client: app_state.http_clients.stream_no_redirect.load().as_ref().clone(),
-            manual_redirects: false,
-        }
+pub(in crate::api::endpoints::hls_api) fn hls_proxy_fallback_candidate(err: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+
+    let message = err.to_string();
+    if let Some(rest) = message.strip_prefix("Request failed (") {
+        let status = rest.split([' ', ')']).next().and_then(|token| token.parse::<u16>().ok());
+        // 404 is eligible because this panel answers a firewalled client with 404; the other
+        // egress proves whether the resource is really absent. 503 stays excluded: this panel
+        // uses it for a full account, and switching egress cannot add capacity.
+        return matches!(status, Some(404 | 408 | 500..=502 | 504..=508 | 510..=599));
+    }
+    match err.kind() {
+        ErrorKind::TimedOut
+        | ErrorKind::ConnectionRefused
+        | ErrorKind::ConnectionReset
+        | ErrorKind::ConnectionAborted
+        | ErrorKind::NotConnected
+        | ErrorKind::AddrNotAvailable => true,
+        // The request engine uses Other for transport errors, but so do invalid redirects,
+        // content decoding and decoded-body limits. Only its request-level error labels qualify.
+        ErrorKind::Other => message.starts_with("Request error:") || message == "All attempts and providers exhausted",
+        _ => false,
     }
 }

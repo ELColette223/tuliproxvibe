@@ -916,7 +916,8 @@ pub(super) async fn force_stream_response(
     } else {
         Some(app_state.active_users.acquire_playback_transition(&ctx.user.username, &user_session.token).await)
     };
-    let stream_options = get_stream_options(&app_state.app_config, response_mode);
+    let mut stream_options = get_stream_options(&app_state.app_config, response_mode);
+    stream_options.hls_manifest_used_proxy = hls_resource && user_session.hls_manifest_used_proxy;
     let share_stream = false;
     let connection_permission = UserConnectionPermission::Allowed;
     let item_type = stream_channel.item_type;

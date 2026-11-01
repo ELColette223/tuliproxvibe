@@ -119,6 +119,37 @@ async fn update_session_provider_headers_returns_false_for_missing_user_or_token
 }
 
 #[tokio::test]
+async fn hls_manifest_proxy_egress_is_scoped_to_the_session_and_account() {
+    let manager = provider_header_test_manager();
+    let mut user = ProxyUserCredentials::default();
+    user.username = "hls-egress-viewer".to_string();
+    create_provider_header_session(&manager, &user, "http://entry.example/live.m3u8").await;
+    let initial = manager.get_and_update_user_session(&user.username, "tok-host").await.expect("session exists");
+    assert!(!initial.hls_manifest_used_proxy);
+    let identity = initial.identity();
+
+    assert!(manager.set_hls_manifest_proxy_egress(&user.username, "tok-host", identity, true).await);
+    assert!(manager.set_hls_manifest_proxy_egress(&user.username, "tok-host", identity, false).await);
+    assert!(
+        manager.get_and_update_user_session(&user.username, "tok-host").await.expect("session exists").hls_manifest_used_proxy,
+        "an older direct completion cannot clear a concurrently established proxy decision"
+    );
+    create_provider_header_session(&manager, &user, "http://cdn.example/variant.m3u8").await;
+    let refreshed = manager.get_and_update_user_session(&user.username, "tok-host").await.expect("session exists");
+    assert!(refreshed.hls_manifest_used_proxy, "a child manifest keeps the same session egress");
+
+    manager.update_session_provider_binding(
+        &user.username,
+        "tok-host",
+        "provider-b".intern(),
+        "http://other.example/live.m3u8".intern(),
+    ).await;
+    assert!(!manager.set_hls_manifest_proxy_egress(&user.username, "tok-host", identity, true).await);
+    let switched = manager.get_and_update_user_session(&user.username, "tok-host").await.expect("session exists");
+    assert!(!switched.hls_manifest_used_proxy, "a different provider cannot inherit the proxy decision");
+}
+
+#[tokio::test]
 async fn create_user_session_clears_provider_headers_when_provider_or_stream_url_changes() {
     let config = Config::default();
     let geoip = Arc::new(ArcSwapOption::<GeoIp>::default());

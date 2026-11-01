@@ -437,9 +437,14 @@ async fn provider_stream_request(
                 sanitize_sensitive_info(&err.to_string()),
                 sanitize_sensitive_info(&diagnostics)
             );
-            // HLS resources must keep the upstream status; rotating them would replace a
-            // retryable upstream error with a synthesized channel-unavailable body.
-            if !stream_options.flags.contains(ProviderStreamFactoryFlags::HlsResource) {
+            // Finite HLS objects must retain a provider HTTP status even when the retry engine
+            // reports it as an I/O error. Otherwise a real 404 becomes a synthetic transport 503
+            // and could incorrectly trigger the optional proxy fallback.
+            if stream_options.flags.contains(ProviderStreamFactoryFlags::HlsResource) {
+                if let Some(status) = status_from_io_error(&err) {
+                    return Err(ProviderStreamRequestFailure::HlsStatus { status, headers: Vec::new() });
+                }
+            } else {
                 if let Some(status) = account_full_status_from_io_error(&err) {
                     debug!("Account-full status recovered from transport error: {status}");
                     return Err(ProviderStreamRequestFailure::AccountFull {
@@ -492,6 +497,45 @@ pub(super) async fn get_provider_stream(
     client: &reqwest::Client,
     stream_options: &ProviderStreamFactoryOptions,
 ) -> Result<Option<ProviderStreamFactoryResponse>, ProviderStreamRequestFailure> {
+    // Proxy-first inputs open playback through the proxy and only fall back to direct when the
+    // proxy cannot reach the provider; a panel answer on the proxy is final for this login.
+    // Public-only destinations keep their resolver-backed direct client: that mode does not
+    // support the input proxy.
+    if stream_options.flags.contains(ProviderStreamFactoryFlags::ProxyStreamFirst)
+        && !stream_options.requires_public_destination()
+    {
+        if let Some(proxy_client) = proxy_stream_client(ctx, stream_options) {
+            return match get_provider_stream_direct(ctx, &proxy_client, stream_options, true).await {
+                Err(failure) if failure.is_proxy_fallback_candidate() => {
+                    warn!(
+                        "Proxy playback failed ({}); retrying once directly: {}",
+                        failure.provider_error_class(),
+                        sanitize_sensitive_info(stream_options.get_log_url().as_ref())
+                    );
+                    match get_provider_stream_direct(ctx, client, stream_options, false).await {
+                        Err(direct_failure) => {
+                            stream_options.cancel_reconnect();
+                            Err(direct_failure)
+                        }
+                        opened => opened,
+                    }
+                }
+                result => result,
+            };
+        }
+    }
+    if stream_options.flags.contains(ProviderStreamFactoryFlags::HlsManifestProxyEgress)
+        && !stream_options.requires_public_destination()
+    {
+        // A manifest for this exact HLS session already proved the direct route could not reach
+        // the provider. Child media is pinned to that account and must use the same egress before
+        // its finite starting lease expires; never try this for another session or account.
+        // Public-only destinations retain their resolver-backed direct client; that mode does
+        // not support the input proxy and must never claim to have selected proxy egress.
+        if let Some(proxy_client) = proxy_stream_client(ctx, stream_options) {
+            return get_provider_stream_direct(ctx, &proxy_client, stream_options, true).await;
+        }
+    }
     match get_provider_stream_direct(ctx, client, stream_options, false).await {
         Err(failure) if failure.is_proxy_fallback_candidate() => {
             // The direct connection could not reach the provider. When this input opts in, give a
@@ -533,12 +577,14 @@ pub(super) async fn get_provider_stream(
 
 /// Builds the proxy-egress streaming client for this input, when the input opted into it.
 ///
-/// The client never follows redirects itself: see the `407` note in [`get_provider_stream`].
+/// The client never follows redirects itself: `reqwest` drops `Proxy-Authorization` when it
+/// follows a redirect internally, so the second hop is rejected by the proxy with 407. One
+/// request per hop keeps the credential on every request.
 fn proxy_stream_client(
     ctx: &ProviderStreamCtx,
     stream_options: &ProviderStreamFactoryOptions,
 ) -> Option<reqwest::Client> {
-    let proxy = stream_options.proxy_stream_fallback()?;
+    let proxy = stream_options.playback_proxy()?;
     match crate::utils::request::create_input_http_client_with_redirect(
         &ctx.app_config,
         ctx.http_clients.stream_no_redirect.load().as_ref(),

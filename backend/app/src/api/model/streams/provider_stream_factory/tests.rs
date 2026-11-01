@@ -186,6 +186,7 @@ fn test_options(
         buffer_max_bytes: 0,
         pipe_provider_stream: false,
         response_mode: StreamResponseMode::Stream,
+        hls_manifest_used_proxy: false,
     };
     ProviderStreamFactoryOptions::new(&ProviderStreamFactoryParams {
         addr: "127.0.0.1:8080".parse().unwrap(),

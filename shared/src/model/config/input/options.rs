@@ -129,11 +129,17 @@ pub struct ConfigInputOptionsDto {
     pub stalker_bulk_epg: bool,
     /// Retry a failed playback connection through the input's proxy.
     ///
-    /// Playback always connects directly first; the proxy is only an alternative egress when the
-    /// direct connection fails for a transport reason (timeout, DNS, connection refused, 5xx).
-    /// Channel-missing and account-full answers are never retried through the proxy.
+    /// Playback connects directly first; the proxy is the alternative egress when the direct
+    /// connection fails for a transport reason (timeout, DNS, connection refused, 5xx) or the
+    /// panel answers 404 (some firewalls report a blocked client as 404). Account-full and
+    /// authentication answers are never retried on another egress.
     #[serde(default, skip_serializing_if = "is_false")]
     pub proxy_stream_fallback: bool,
+    /// Connect playback through the input's proxy first, falling back to direct.
+    ///
+    /// Mutually exclusive with `proxy_stream_fallback`; enabling this clears it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub proxy_stream_first: bool,
 }
 
 impl Default for ConfigInputOptionsDto {
@@ -167,6 +173,7 @@ impl Default for ConfigInputOptionsDto {
             t_probe_filter: None,
             stalker_bulk_epg: false,
             proxy_stream_fallback: false,
+            proxy_stream_first: false,
         }
     }
 }
@@ -199,6 +206,7 @@ impl ConfigInputOptionsDto {
             && self.probe_filter.as_ref().is_none_or(|s| s.trim().is_empty())
             && !self.stalker_bulk_epg
             && !self.proxy_stream_fallback
+            && !self.proxy_stream_first
     }
 
     pub fn clean(&mut self) {
@@ -230,6 +238,7 @@ impl ConfigInputOptionsDto {
         self.t_probe_filter = None;
         self.stalker_bulk_epg = false;
         self.proxy_stream_fallback = false;
+        self.proxy_stream_first = false;
     }
 }
 
