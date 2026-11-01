@@ -4,12 +4,13 @@ use super::{
     LABEL_CONNECTION_LIMIT_POLICY, LABEL_CONNECTION_LIMIT_POLICY_BYPASS_LOCAL_CAP,
     LABEL_CONNECTION_LIMIT_POLICY_ROTATE_ON_FULL, LABEL_DISABLE_HLS_STREAMING, LABEL_ENABLED, LABEL_EXP_DATE,
     LABEL_FETCH_METHOD, LABEL_FLUSSONIC_HLS_AUDIO_TRACKS, LABEL_HEADERS, LABEL_LIVE, LABEL_LIVE_STREAMS,
-    LABEL_MAX_CONNECTIONS, LABEL_METADATA, LABEL_NAME, LABEL_PASSWORD, LABEL_PERSIST, LABEL_PRIORITY, LABEL_PROBE,
-    LABEL_PROBE_DELAY_SEC, LABEL_PROBE_FILTER, LABEL_PROBE_LIVE, LABEL_PROBE_LIVE_INTERVAL_HOURS, LABEL_PROBE_SERIES,
-    LABEL_PROBE_VOD, LABEL_RESOLVE, LABEL_RESOLVE_BACKGROUND, LABEL_RESOLVE_DELAY_SEC, LABEL_RESOLVE_FILTER,
-    LABEL_RESOLVE_SERIES, LABEL_RESOLVE_TMDB, LABEL_RESOLVE_VOD, LABEL_SEQUENTIAL_GROUP, LABEL_SERIES, LABEL_SKIP,
-    LABEL_UPDATE_QUALITY, LABEL_URL, LABEL_USERNAME, LABEL_USER_AGENT_STREAM_INDEX, LABEL_VOD,
-    LABEL_XTREAM_LIVE_STREAM_USE_PREFIX, LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION,
+    LABEL_MAX_CONNECTIONS, LABEL_METADATA, LABEL_NAME, LABEL_PASSWORD, LABEL_PERSIST, LABEL_PLAYBACK_PROVIDER,
+    LABEL_PRIORITY, LABEL_PROBE, LABEL_PROBE_DELAY_SEC, LABEL_PROBE_FILTER, LABEL_PROBE_LIVE,
+    LABEL_PROBE_LIVE_INTERVAL_HOURS, LABEL_PROBE_SERIES, LABEL_PROBE_VOD, LABEL_RESOLVE, LABEL_RESOLVE_BACKGROUND,
+    LABEL_RESOLVE_DELAY_SEC, LABEL_RESOLVE_FILTER, LABEL_RESOLVE_SERIES, LABEL_RESOLVE_TMDB, LABEL_RESOLVE_VOD,
+    LABEL_SEQUENTIAL_GROUP, LABEL_SERIES, LABEL_SKIP, LABEL_UPDATE_QUALITY, LABEL_URL, LABEL_USERNAME,
+    LABEL_USER_AGENT_STREAM_INDEX, LABEL_VOD, LABEL_XTREAM_LIVE_STREAM_USE_PREFIX,
+    LABEL_XTREAM_LIVE_STREAM_WITHOUT_EXTENSION,
 };
 use crate::{
     app::components::{
@@ -112,6 +113,7 @@ pub(super) fn CommonInputForm(props: &CommonInputFormProps) -> Html {
                         { config_field_custom!(translate.t(LABEL_FETCH_METHOD), state.form.method.to_string()) }
                         { config_field_optional!(state.form, translate.t(LABEL_PERSIST), persist, Some(input_persist_hint_key(props.staged_persist).to_string())) }
                     </div>
+                    { config_field_optional!(state.form, translate.t(LABEL_PLAYBACK_PROVIDER), playback_provider, Some("INPUT_FORM.PLAYBACK_PROVIDER".to_string())) }
                 }
                 {props.extra.clone()}
             </Card>
@@ -170,6 +172,9 @@ pub(super) fn CommonInputForm(props: &CommonInputFormProps) -> Html {
                     <div class="tp__form-field tp__form-field__text">
                        { edit_field_text_option!(state, translate.t(LABEL_PERSIST), persist, ConfigInputFormAction::Persist, false, Some(input_persist_hint_key(props.staged_persist).to_string())) }
                     </div>
+                </div>
+                <div class="tp__form-field tp__form-field__text">
+                    { edit_field_text_option!(state, translate.t(LABEL_PLAYBACK_PROVIDER), playback_provider, ConfigInputFormAction::PlaybackProvider, false, Some("INPUT_FORM.PLAYBACK_PROVIDER".to_string())) }
                 </div>
             }
             {props.extra.clone()}

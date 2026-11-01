@@ -104,7 +104,7 @@ fn cancel_services(app_state: &Arc<AppState>, changes: &UpdateChanges) {
         return;
     }
     if changes.flags.contains(UpdateChangesFlags::Downloads) {
-        app_state.recordings.request_worker_restart();
+        app_state.recording.queue.request_worker_restart();
     }
     let cancel_tokens = app_state.cancel_tokens.load();
 
@@ -182,7 +182,7 @@ fn start_services(app_state: &Arc<AppState>, changes: &UpdateChanges) {
             let app_state = Arc::clone(app_state);
             tokio::spawn(async move {
                 for _ in 0..50 {
-                    if !app_state.recordings.workers_running().await {
+                    if !app_state.recording.queue.workers_running().await {
                         break;
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -207,7 +207,7 @@ impl AppState {
         let old_storage_dir = current_config.storage_dir.clone();
         drop(current_config);
         let changes = self.detect_changes_for_config(&config);
-        let config_log_level = config.log.as_ref().and_then(|log| log.log_level.clone());
+        let log_dto = config.log.as_ref().map(shared::model::LogConfigDto::from);
         config.update_runtime();
 
         let use_geoip = config.is_geoip_enabled();
@@ -215,7 +215,7 @@ impl AppState {
 
         self.active_users.update_config(&config);
         self.app_config.set_config(config)?;
-        reload_logger(config_log_level.as_deref());
+        reload_logger(log_dto.as_ref());
         self.active_provider.update_config(&self.app_config);
         self.hls.proxy.update_config(&self.app_config).await;
         self.update_config().await?;

@@ -1,12 +1,41 @@
 use crate::utils::CONSTANTS;
-use deunicode::deunicode_with_tofu_cow;
+use deunicode::{deunicode, deunicode_with_tofu_cow};
 use std::{borrow::Cow, sync::Arc};
 
 /// Cleans a playlist title by removing common IPTV prefixes (e.g., "[US]", "┃DE┃").
 pub fn clean_playlist_title(title: &str) -> String { CONSTANTS.re_clean_title.replace(title, "").trim().to_string() }
 
 pub trait Capitalize {
+    /// Uppercases the first character and lowercases the remainder of the whole string.
     fn capitalize(&self) -> String;
+
+    /// Uppercases the first character of every whitespace-separated word and lowercases the remainder of each word.
+    ///
+    /// Only `char::is_whitespace` separates words, so `"spider-man"` and `"o'neill"` each form a single word.
+    fn title_case(&self) -> String;
+
+    /// Like [`Capitalize::title_case`], but words that match an entry in `acronyms` (ASCII case-insensitively) keep
+    /// the spelling of that entry instead of being title-cased.
+    fn title_case_with_acronyms(&self, acronyms: &[&str]) -> String;
+}
+
+fn push_title_word(result: &mut String, word: &mut String, acronyms: &[&str]) {
+    if word.is_empty() {
+        return;
+    }
+    if let Some(acronym) = acronyms.iter().find(|acronym| acronym.eq_ignore_ascii_case(word)) {
+        result.push_str(acronym);
+    } else {
+        // Lowercase the whole word before uppercasing its first character, so contextual mappings such as the
+        // final Greek sigma (`Σ` -> `ς`) apply.
+        let lowered = word.to_lowercase();
+        let mut chars = lowered.chars();
+        if let Some(first) = chars.next() {
+            result.extend(first.to_uppercase());
+            result.push_str(chars.as_str());
+        }
+    }
+    word.clear();
 }
 
 // Implement the Capitalize trait for &str
@@ -17,6 +46,24 @@ impl<T: AsRef<str>> Capitalize for T {
         let first = chars.next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default();
         let rest = chars.as_str().to_lowercase();
         first + &rest
+    }
+
+    fn title_case(&self) -> String { self.title_case_with_acronyms(&[]) }
+
+    fn title_case_with_acronyms(&self, acronyms: &[&str]) -> String {
+        let s = self.as_ref();
+        let mut result = String::with_capacity(s.len());
+        let mut word = String::new();
+        for c in s.chars() {
+            if c.is_whitespace() {
+                push_title_word(&mut result, &mut word, acronyms);
+                result.push(c);
+            } else {
+                word.push(c);
+            }
+        }
+        push_title_word(&mut result, &mut word, acronyms);
+        result
     }
 }
 
@@ -34,6 +81,87 @@ pub fn generate_random_string(length: usize) -> String {
     let mut rng = fastrand::Rng::new();
     let random_string: String = (0..length).map(|_| rng.alphanumeric()).collect();
     random_string
+}
+
+/// Generates a random string of `length` chars picked from `charset`.
+/// Returns an empty string when `charset` is empty.
+pub fn generate_random_string_from(charset: &[char], length: usize) -> String {
+    if charset.is_empty() {
+        return String::new();
+    }
+    let mut rng = fastrand::Rng::new();
+    (0..length).map(|_| charset[rng.usize(..charset.len())]).collect()
+}
+
+const CHARSET_EXTRA_ALLOWED: &str = "!._~-";
+
+fn is_allowed_charset_char(c: char) -> bool { c.is_ascii_alphanumeric() || CHARSET_EXTRA_ALLOWED.contains(c) }
+
+fn check_charset_char(c: char) -> Result<char, String> {
+    if is_allowed_charset_char(c) {
+        Ok(c)
+    } else {
+        Err(format!("character {c:?} is not allowed (allowed: ASCII letters, digits and ! . _ ~ -)"))
+    }
+}
+
+/// Expands a charset expression into its chars.
+/// Literal chars and ranges `X-Y` are supported; `\-` and `\\` escape literals.
+/// Only ASCII alphanumerics and `! . _ ~ -` are accepted.
+pub fn expand_charset_expression(expr: &str) -> Result<Vec<char>, String> {
+    // (char, escaped)
+    let mut tokens = Vec::new();
+    let mut iter = expr.chars();
+    while let Some(c) = iter.next() {
+        if c == '\\' {
+            match iter.next() {
+                Some(escaped) => tokens.push((escaped, true)),
+                None => return Err("dangling escape '\\' at end of expression".to_string()),
+            }
+        } else {
+            tokens.push((c, false));
+        }
+    }
+
+    let mut result = Vec::new();
+    let mut idx = 0;
+    while idx < tokens.len() {
+        let (c, escaped) = tokens[idx];
+        if !escaped && c == '-' {
+            return Err("unescaped '-' must be between two chars to form a range, use '\\-' for a literal".to_string());
+        }
+        if tokens.get(idx + 1).is_some_and(|&(sep, sep_escaped)| sep == '-' && !sep_escaped) {
+            let Some(&(end, _)) = tokens.get(idx + 2) else {
+                return Err(format!("range starting at {c:?} has no end char"));
+            };
+            let (start, end) = (check_charset_char(c)?, check_charset_char(end)?);
+            if start > end {
+                return Err(format!("invalid range {start}-{end}: start is greater than end"));
+            }
+            for value in start..=end {
+                result.push(check_charset_char(value)?);
+            }
+            idx += 3;
+        } else {
+            result.push(check_charset_char(c)?);
+            idx += 1;
+        }
+    }
+    Ok(result)
+}
+
+/// Builds the effective charset: expanded `chars` minus `exclude`, de-duplicated.
+pub fn build_charset(chars: &str, exclude: &str) -> Result<Vec<char>, String> {
+    let mut charset: Vec<char> = Vec::new();
+    for c in expand_charset_expression(chars)? {
+        if !exclude.contains(c) && !charset.contains(&c) {
+            charset.push(c);
+        }
+    }
+    if charset.is_empty() {
+        return Err("resulting charset is empty".to_string());
+    }
+    Ok(charset)
 }
 
 // compare 2 small vecs without HashSet
@@ -135,6 +263,51 @@ pub fn humanize_snake_case(s: &str) -> String {
 }
 
 pub fn deunicode_string(s: &str) -> Cow<'_, str> { deunicode_with_tofu_cow(s, "[?]") }
+
+/// Converts text into a lowercase, URL- and filename-safe slug.
+///
+/// Transliterates Unicode characters to ASCII (via `deunicode`), converts to lowercase,
+/// replaces sequences of non-alphanumeric characters with a single hyphen (`-`), and strips
+/// leading and trailing hyphens.
+pub fn slugify(s: &str) -> String {
+    let ascii = deunicode(s);
+    let mut slug = String::with_capacity(ascii.len());
+    let mut prev_is_dash = true;
+    for c in ascii.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+            prev_is_dash = false;
+        } else if !prev_is_dash {
+            slug.push('-');
+            prev_is_dash = true;
+        }
+    }
+    if prev_is_dash && !slug.is_empty() {
+        slug.pop();
+    }
+    slug
+}
+
+/// Collapses consecutive whitespace characters into a single space and trims edges.
+pub fn normalize_spaces(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut prev_is_space = true;
+    for c in s.chars() {
+        if c.is_whitespace() {
+            if !prev_is_space {
+                result.push(' ');
+                prev_is_space = true;
+            }
+        } else {
+            result.push(c);
+            prev_is_space = false;
+        }
+    }
+    if prev_is_space && !result.is_empty() {
+        result.pop();
+    }
+    result
+}
 
 /// Percent-encodes every byte outside the RFC 3986 unreserved set
 /// (`A-Z a-z 0-9 - . _ ~`), e.g. `:` -> `%3A`, `ü` -> `%C3%BC`. Suitable for
@@ -299,8 +472,8 @@ macro_rules! concat_string {
 #[cfg(test)]
 mod test {
     use super::{
-        clean_playlist_title, generate_random_string, natural_cmp, percent_encode_unreserved, quality_rank,
-        sanitize_filename_chars,
+        clean_playlist_title, generate_random_string, natural_cmp, normalize_spaces, percent_encode_unreserved,
+        quality_rank, sanitize_filename_chars, slugify,
     };
     use crate as shared; // allow path-based macro call in tests
     use crate::utils::Capitalize;
@@ -338,6 +511,46 @@ mod test {
     #[test]
     fn test_capitalize() {
         assert_eq!("hELLO".capitalize(), "Hello");
+        assert_eq!("us: tnt hd".capitalize(), "Us: tnt hd");
+        assert_eq!("".capitalize(), "");
+    }
+
+    #[test]
+    fn test_title_case() {
+        assert_eq!("us: tnt hd".title_case(), "Us: Tnt Hd");
+        assert_eq!("HELLO WORLD".title_case(), "Hello World");
+        assert_eq!("  spaced   words ".title_case(), "  Spaced   Words ");
+        assert_eq!("spider-man".title_case(), "Spider-man");
+        assert_eq!("".title_case(), "");
+        assert_eq!("über straße".title_case(), "Über Straße");
+        assert_eq!("ΟΔΟΣ ΤΕΛΟΣ".title_case(), "Οδος Τελος");
+    }
+
+    #[test]
+    fn test_title_case_with_acronyms() {
+        assert_eq!("example channel name hd".title_case_with_acronyms(&["HD", "FHD", "UK"]), "Example Channel Name HD");
+        assert_eq!("uk fhd sports".title_case_with_acronyms(&["UK", "FHD"]), "UK FHD Sports");
+        assert_eq!("plain title".title_case_with_acronyms(&[]), "Plain Title");
+    }
+
+    #[test]
+    fn test_slugify() {
+        assert_eq!(slugify("Österreich: ORF 1 HD!"), "osterreich-orf-1-hd");
+        assert_eq!(slugify("  Sky   Sport   1   HD  "), "sky-sport-1-hd");
+        assert_eq!(slugify("Live Sports | Sky Premier HD"), "live-sports-sky-premier-hd");
+        assert_eq!(slugify("---"), "");
+        assert_eq!(slugify(""), "");
+        assert_eq!(slugify("a---b"), "a-b");
+        assert_eq!(slugify("Spider-Man: Far From Home"), "spider-man-far-from-home");
+    }
+
+    #[test]
+    fn test_normalize_spaces() {
+        assert_eq!(normalize_spaces("  Sky   Sport   1   HD  "), "Sky Sport 1 HD");
+        assert_eq!(normalize_spaces("no_spaces"), "no_spaces");
+        assert_eq!(normalize_spaces("   "), "");
+        assert_eq!(normalize_spaces(""), "");
+        assert_eq!(normalize_spaces("hello \t\n world"), "hello world");
     }
 
     #[test]
@@ -402,5 +615,69 @@ mod test {
         assert_eq!(percent_encode_unreserved("Europe/Berlin"), "Europe%2FBerlin");
         assert_eq!(percent_encode_unreserved("en_US.utf8"), "en_US.utf8");
         assert_eq!(percent_encode_unreserved("Grüße 1.ts"), "Gr%C3%BC%C3%9Fe%201.ts");
+    }
+}
+
+#[cfg(test)]
+mod charset_tests {
+    use super::*;
+
+    fn expand(expr: &str) -> String { expand_charset_expression(expr).unwrap().into_iter().collect() }
+
+    #[test]
+    fn expands_ranges_and_literals() {
+        assert_eq!(expand("A-C0-2"), "ABC012");
+        assert_eq!(expand("abx"), "abx");
+        assert_eq!(expand("a-c!_"), "abc!_");
+    }
+
+    #[test]
+    fn escapes_produce_literals() {
+        assert_eq!(expand("a\\-z"), "a-z");
+        assert_eq!(expand("\\-.\\-"), "-.-");
+    }
+
+    #[test]
+    fn rejects_bad_ranges() {
+        assert!(expand_charset_expression("z-a").is_err());
+        assert!(expand_charset_expression("-a").is_err());
+        assert!(expand_charset_expression("a-").is_err());
+        assert!(expand_charset_expression("a\\").is_err());
+    }
+
+    #[test]
+    fn rejects_disallowed_chars_naming_them() {
+        for bad in [" ", "\t", "?", "/", "#", "%", "&", ":", "@", "+", "=", ",", ";", "*", "(", "$", "\"", "ä", "\\\\"]
+        {
+            let err = expand_charset_expression(&format!("a{bad}")).unwrap_err();
+            assert!(err.contains("not allowed"), "{bad:?}: {err}");
+        }
+        let err = expand_charset_expression("a?").unwrap_err();
+        assert!(err.contains("'?'"), "{err}");
+        // range spanning disallowed chars
+        assert!(expand_charset_expression("!-9").is_err());
+    }
+
+    #[test]
+    fn exclude_removes_and_dedups() {
+        let cs: String = build_charset("A-C", "B").unwrap().into_iter().collect();
+        assert_eq!(cs, "AC");
+        let cs: String = build_charset("aab", "").unwrap().into_iter().collect();
+        assert_eq!(cs, "ab");
+    }
+
+    #[test]
+    fn empty_effective_charset_is_error() {
+        assert!(build_charset("ab", "ab").is_err());
+        assert!(build_charset("", "").is_err());
+    }
+
+    #[test]
+    fn generator_respects_length_and_charset() {
+        let cs = build_charset("A-C", "").unwrap();
+        let value = generate_random_string_from(&cs, 40);
+        assert_eq!(value.len(), 40);
+        assert!(value.chars().all(|c| cs.contains(&c)));
+        assert_eq!(generate_random_string_from(&[], 5), "");
     }
 }

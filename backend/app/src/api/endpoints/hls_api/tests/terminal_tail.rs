@@ -4,9 +4,9 @@ use super::{
     get_status, media_uri_count, normal_manifest, path_has_extension, prepare_pending_test_hls_access_lease,
     proxy_session_id_from_variant_uri, regression_origin_manifest, response_body, single_variant_master_playlist,
     spawn_test_binary_origin, spawn_test_encrypted_hls_origin, store_test_sources_with_target, terminal_test_asset,
-    test_app_state_with_hls_proxy_and_inputs, test_app_state_with_inputs, test_fingerprint, test_hls_access_context,
-    test_hls_entry_stream_context, test_m3u_hls_item, test_m3u_hls_share_target, try_test_hls_cached_manifest_response,
-    TestBinaryOriginResponse, TestSegmentOrigin, AES_TEST_KEY_BYTES, AES_TEST_MANIFEST, AES_TEST_PLAINTEXT_SEGMENT,
+    test_app_state_with_hls_proxy_and_inputs, test_fingerprint, test_hls_access_context, test_hls_entry_stream_context,
+    test_m3u_hls_item, test_m3u_hls_share_target, try_test_hls_cached_manifest_response, TestBinaryOriginResponse,
+    TestSegmentOrigin, AES_TEST_KEY_BYTES, AES_TEST_MANIFEST, AES_TEST_PLAINTEXT_SEGMENT,
 };
 use crate::{
     api::model::{
@@ -444,6 +444,9 @@ pub(in crate::api::endpoints::hls_api::tests) async fn stale_origin_fixture() ->
         .expect("activated pinned-origin lease");
     let initial_visible_tail =
         lease.last_manifest_snapshot.as_ref().expect("initial lease manifest snapshot").last_proxy_seq;
+    // This fixture models active media playback. Manifest publication itself no
+    // longer supplies the authorized-media activity that keeps playback active.
+    session.write().await.mark_authorized_media_access(now_ms);
     let (initial_progress_generation, initial_origin_epoch, initial_progress_at_ms) = {
         let session = session.read().await;
         assert_eq!(session.origin_seq_highwater, Some(105));
@@ -694,6 +697,10 @@ pub(in crate::api::endpoints::hls_api::tests) async fn prepare_terminal_cutover_
     (asset_buffer, asset)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "One encrypted playback fixture includes real delivery, elapsed media time and prepared terminal bytes."
+)]
 pub(in crate::api::endpoints::hls_api::tests) async fn prepared_terminal_cutover_fixture(
 ) -> PreparedTerminalCutoverFixture {
     let temp_dir = tempfile::tempdir().expect("terminal cutover tempdir");
@@ -777,6 +784,13 @@ pub(in crate::api::endpoints::hls_api::tests) async fn prepared_terminal_cutover
         let response = get_response(Arc::clone(&app_state), &segment.uri, None).await;
         assert_eq!(response.status(), StatusCode::OK);
         assert!(!response_body(response).await.is_empty());
+    }
+    {
+        let mut leases = app_state.hls.proxy.access_leases().write().await;
+        let mut lease = leases.remove_access_lease(&lease_id).unwrap();
+        lease.playback_cursor.first_segment_started_at_ms =
+            lease.playback_cursor.first_segment_started_at_ms.map(|at| at - 10_000);
+        leases.prepare_access_lease(lease);
     }
     PreparedTerminalCutoverFixture {
         _temp_dir: temp_dir,
@@ -923,12 +937,10 @@ pub(in crate::api::endpoints::hls_api::tests) async fn commit_prepared_terminal_
 ) -> (u64, u64) {
     let cutover_now_ms = pressured_lease
         .playback_cursor
-        .first_segment_completed_at_ms
-        .expect("measured lease playback start")
-        // Enter the acquisition window while the live base and its key are still usable.
-        .saturating_add(
-            fixture.base_manifest.playlist_duration_ms.saturating_sub(fixture.base_manifest.target_duration_ms),
-        );
+        .first_segment_started_at_ms
+        .expect("actual transfer start")
+        .saturating_add(fixture.base_manifest.playlist_duration_ms)
+        .saturating_add(3_800);
 
     let first = commit_terminal_tail_if_lease_reserve_requires_cutover(
         &fixture.app_state.hls_ctx(),
@@ -1110,6 +1122,7 @@ pub(in crate::api::endpoints::hls_api::tests) fn test_beast_hls_proxy(
 }
 
 pub(in crate::api::endpoints::hls_api::tests) struct PublicationLateFixture {
+    pub(in crate::api::endpoints::hls_api::tests) _directory: tempfile::TempDir,
     pub(in crate::api::endpoints::hls_api::tests) origin: TestSegmentOrigin,
     pub(in crate::api::endpoints::hls_api::tests) origin_phase: Arc<AtomicUsize>,
     pub(in crate::api::endpoints::hls_api::tests) app_state: Arc<AppState>,
@@ -1142,6 +1155,15 @@ pub(in crate::api::endpoints::hls_api::tests) async fn publication_late_fixture(
         TestBinaryOriginResponse::new(StatusCode::OK, Arc::clone(&segment))
     }))
     .await;
+    publication_fixture_with_origin(HlsCacheConfigDto::default(), origin, origin_phase).await
+}
+
+pub(in crate::api::endpoints::hls_api::tests) async fn publication_fixture_with_origin(
+    mut config: HlsCacheConfigDto,
+    origin: TestSegmentOrigin,
+    origin_phase: Arc<AtomicUsize>,
+) -> PublicationLateFixture {
+    let directory = tempfile::tempdir().unwrap();
     let input = ConfigInput {
         id: 1,
         name: Arc::from("publication-late-request-input"),
@@ -1153,7 +1175,9 @@ pub(in crate::api::endpoints::hls_api::tests) async fn publication_late_fixture(
     };
     let mut target = test_m3u_hls_share_target();
     target.name = "default".to_string();
-    let app_state = test_app_state_with_inputs(vec![Arc::new(input.clone())]);
+    config.cache_path = Some(directory.path().to_string_lossy().into_owned());
+    let manager = Arc::new(HlsProxyManager::with_hls_cache_config(&HlsCacheConfig::from(&config)));
+    let app_state = test_app_state_with_hls_proxy_and_inputs(manager, vec![Arc::new(input.clone())]);
     enable_hls_cache(&app_state);
     enable_channel_unavailable_custom_response(&app_state);
     configure_default_test_server(&app_state);
@@ -1204,6 +1228,7 @@ pub(in crate::api::endpoints::hls_api::tests) async fn publication_late_fixture(
         .await
         .expect("shared publication-late session");
     PublicationLateFixture {
+        _directory: directory,
         origin,
         origin_phase,
         app_state,
@@ -1352,6 +1377,8 @@ pub(in crate::api::endpoints::hls_api::tests) fn regression_origin_refresh_reque
     access_lease_id: Option<HlsAccessLeaseId>,
 ) -> OriginRefreshRequest {
     OriginRefreshRequest {
+        work_owner: None,
+        attempt: None,
         app_config: Arc::clone(&app_state.app_config),
         session,
         origin_entry: LiveHlsOriginEntry::parse(manifest_url).expect("regression origin entry"),

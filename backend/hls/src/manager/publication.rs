@@ -18,8 +18,9 @@ use super::{
     HlsTerminalCommitWindow, HlsTerminalLeaseDecision, HlsTerminalMediaPreparationKey,
     HlsTerminalMediaPreparationState, HlsTerminalMediaRequirementOrigin, HlsTerminalPendingCoordinator,
     HlsTerminalTailPreparation, HlsTerminalTailPreparationInput, HlsTransitionMarginMs, ProxySessionId,
-    SegmentFetchPolicy, TransientManifestLeaseBinding, TransientResourceStore, HLS_STATE_CAS_LOCK_RETRIES,
+    TransientManifestLeaseBinding, TransientResourceStore, HLS_STATE_CAS_LOCK_RETRIES,
 };
+use crate::origin_telemetry::OriginTelemetryRecorder;
 use arc_swap::ArcSwap;
 use log::{debug, error, info};
 use std::{
@@ -121,20 +122,103 @@ fn hls_pending_manifest_follow_up_deadline(now_ms: u64, target_duration: Option<
 }
 
 impl HlsProxyManager {
+    /// A definitive admission failure is retained by this access lease. A fresh
+    /// master may open a successor attempt after capacity becomes available.
+    pub async fn fail_access_lease_start_admission(
+        &self,
+        ctx: &crate::HlsCtx,
+        session: &HlsSessionHandle,
+        lease_id: &HlsAccessLeaseId,
+        kind: crate::HlsBoundAccountAcquireErrorKind,
+        now_ms: u64,
+        expected_account: &crate::origin_account_runtime::HlsOriginAccountSnapshot,
+    ) {
+        let generation = {
+            let mut leases = self.access_leases.write().await;
+            let mut state = session.write().await;
+            let owns_binding = expected_account.matches_session_identity(&state);
+            let attempt = leases.manifest_attempt_context(
+                Some(lease_id),
+                crate::HlsManifestCommitRequirement::FreshCommitRequired {
+                    reason: crate::HlsFreshManifestRequiredReason::ColdStart,
+                },
+                owns_binding.then(|| state.origin_refresh.attempt.clone()).flatten(),
+                state.live_entry_revalidation_generation(),
+                now_ms,
+            );
+            attempt.record_provider_failure(kind);
+            attempt.finish(true);
+            if owns_binding && !state.origin_refresh.in_flight && state.activity.active_access_lease_count == 0 {
+                state.origin_refresh.attempt = Some(attempt);
+            }
+            owns_binding.then_some(state.activity.origin_work_generation)
+        };
+        if let Some(generation) = generation {
+            let ctx = ctx.clone();
+            let session = Arc::clone(session);
+            let expected = expected_account.clone();
+            // Once the failure is committed, cancelling its HTTP waiter cannot
+            // orphan the reservation cleanup.
+            let cleanup = tokio::spawn(async move {
+                crate::origin::finish_failed_hls_start_for_context(&ctx, &session, Some(generation), Some(&expected))
+                    .await;
+            });
+            let _ = cleanup.await;
+        }
+        let proxy_id = session.read().await.proxy_session_id.clone();
+        self.notify_session_evidence_changed(&proxy_id);
+    }
+
+    pub(crate) async fn prepare_manifest_attempt(
+        &self,
+        request: &crate::refresh::OriginRefreshRequest,
+    ) -> Option<Arc<crate::manifest_fetch::HlsManifestAttemptContext>> {
+        let access = self
+            .with_critical_handoff_state(&request.session, |leases, session| {
+                let attempt = leases.manifest_attempt_context(
+                    request.access_lease_id.as_ref(),
+                    request.manifest_commit_requirement,
+                    session.origin_refresh.attempt.clone(),
+                    session.live_entry_revalidation_generation(),
+                    request.now_ms,
+                );
+                if !session.origin_refresh.in_flight {
+                    session.origin_refresh.attempt = Some(Arc::clone(&attempt));
+                }
+                attempt
+            })
+            .await;
+        match access {
+            HlsCriticalHandoffStateAccess::Acquired(attempt) => Some(attempt),
+            HlsCriticalHandoffStateAccess::LockBusy => None,
+        }
+    }
+
     pub fn with_hls_cache_config(config: &HlsCacheConfig) -> Self {
         Self::with_hls_cache_config_and_secret(config, &[])
     }
 
     pub fn with_hls_cache_config_and_secret(config: &HlsCacheConfig, rewrite_secret: &[u8]) -> Self {
-        Self::with_hls_cache_config_and_secret_enabled(config, rewrite_secret, true)
+        Self::with_hls_cache_config_and_secret_enabled(
+            config,
+            rewrite_secret,
+            true,
+            shared::defaults::default_connect_timeout_secs(),
+            OriginTelemetryRecorder::disabled(),
+        )
     }
 
     pub(super) fn with_hls_cache_config_and_secret_enabled(
         config: &HlsCacheConfig,
         rewrite_secret: &[u8],
         enabled: bool,
+        connect_timeout_secs: u32,
+        origin_telemetry: OriginTelemetryRecorder,
     ) -> Self {
-        let segment_fetch_policy = SegmentFetchPolicy::from_config(config);
+        let mut runtime_config =
+            HlsProxyRuntimeConfig::from_config_with_enabled(config, rewrite_secret, enabled, connect_timeout_secs);
+        runtime_config.segment_fetch_policy.telemetry = origin_telemetry;
+        let segment_fetch_policy = runtime_config.segment_fetch_policy.clone();
         let global_fetch_semaphore = Arc::new(Semaphore::new(segment_fetch_policy.max_global_segment_fetches));
         let sessions = Arc::new(HlsSessionStore::new());
         let segment_cache = Arc::new(HlsSegmentCache::with_cache_path(PathBuf::from(&config.cache_path)));
@@ -146,7 +230,6 @@ impl HlsProxyManager {
         let lifecycle = Arc::new(HlsLifecycleManager::new());
         let account_overlap_cooldowns = Arc::new(RwLock::new(HashMap::new()));
         let gc_policy = GarbageCollectionPolicy::from_config(config);
-        let runtime_config = HlsProxyRuntimeConfig::from_config_with_enabled(config, rewrite_secret, enabled);
         let gc = Arc::new(HlsGarbageCollector::new_with_metrics(
             Arc::clone(&sessions),
             Arc::clone(&segment_cache),
@@ -196,6 +279,7 @@ impl HlsProxyManager {
             availability_reevaluations,
             terminal_commit_clock: Arc::new(HlsTerminalCommitClock::default()),
             startup_observability: Arc::new(HlsStartupObservability::default()),
+            private_cache_dir: None,
         };
         manager.install_worker_revision_recovery();
         manager
@@ -256,17 +340,15 @@ impl HlsProxyManager {
 
     pub fn map_worker_pool(&self) -> &Arc<HlsMapWorkerPool> { &self.map_worker_pool }
 
-    /// The clock every time-dependent HLS scheduler reads.
+    /// Shared-HLS request and scheduling clock.
     ///
     /// One clock, so a test that controls time controls all of it rather than
     /// some schedulers following the wall clock and others the test clock.
-    pub(crate) fn now_ms(&self) -> u64 { self.terminal_commit_clock.now_ms() }
+    pub fn now_ms(&self) -> u64 { self.terminal_commit_clock.now_ms() }
 
     /// Anchor the scheduling clock to tokio's, for `start_paused` tests.
-    #[cfg(test)]
-    pub(crate) fn follow_tokio_clock_for_test(&self, base_ms: u64) {
-        self.terminal_commit_clock.follow_tokio_clock(base_ms);
-    }
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn follow_tokio_clock_for_test(&self, base_ms: u64) { self.terminal_commit_clock.follow_tokio_clock(base_ms); }
 
     pub fn transient_resources(&self) -> &Arc<TransientResourceStore> { &self.transient_resources }
 
@@ -469,6 +551,10 @@ impl HlsProxyManager {
         self.access_leases.write().await.prepare_manifest_publication(lease_id, proxy_session_id, now_ms)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Keeps entry revalidation and all publication guards in the same transaction."
+    )]
     pub async fn commit_access_lease_manifest_publication_with_resources(
         &self,
         lease_id: &HlsAccessLeaseId,
@@ -487,6 +573,7 @@ impl HlsProxyManager {
                     snapshot,
                     published_transient_resource_ids,
                     now_ms,
+                    None,
                 )
                 .await;
         }
@@ -517,7 +604,21 @@ impl HlsProxyManager {
             } else {
                 published_transient_resource_ids
             };
-            return leases.commit_manifest_publication_with_resources(
+            let mut session_guard = match session.as_ref() {
+                Some(session) => Some(session.write().await),
+                None => None,
+            };
+            if session_guard.as_ref().is_some_and(|session| {
+                leases
+                    .response_snapshot(lease_id, proxy_session_id, now_ms)
+                    .is_none_or(|lease| !session.live_entry_snapshot_allowed_for_lease(&lease, Some(&snapshot)))
+            }) {
+                return HlsLeaseManifestPublicationOutcome::Rejected(
+                    HlsLeaseManifestPublicationRejectReason::ManifestGenerationUnavailable,
+                );
+            }
+            let published = snapshot.clone();
+            let outcome = leases.commit_manifest_publication_with_resources(
                 lease_id,
                 proxy_session_id,
                 expected,
@@ -525,6 +626,12 @@ impl HlsProxyManager {
                 published_transient_resource_ids,
                 now_ms,
             );
+            if outcome.is_committed() {
+                if let Some(session) = session_guard.as_mut() {
+                    session.record_live_window_publication(lease_id, lease_issued_at_ms, &published);
+                }
+            }
+            return outcome;
         };
         let Some(current_session) = self.sessions.hold_current_proxy_session(proxy_session_id).await else {
             return HlsLeaseManifestPublicationOutcome::Rejected(
@@ -536,6 +643,14 @@ impl HlsProxyManager {
         let session = Arc::clone(current_session.session());
         let mut leases = self.access_leases.write().await;
         let mut session = session.write().await;
+        if leases
+            .response_snapshot(lease_id, proxy_session_id, now_ms)
+            .is_none_or(|lease| !session.live_entry_snapshot_allowed_for_lease(&lease, Some(&snapshot)))
+        {
+            return HlsLeaseManifestPublicationOutcome::Rejected(
+                HlsLeaseManifestPublicationRejectReason::ManifestGenerationUnavailable,
+            );
+        }
         if session.proxy_session_id != *proxy_session_id || session.is_gc_marked_for_removal() {
             return HlsLeaseManifestPublicationOutcome::Rejected(
                 HlsLeaseManifestPublicationRejectReason::ManifestGenerationUnavailable,
@@ -631,7 +746,6 @@ impl HlsProxyManager {
                 cursor: &lease.playback_cursor,
                 ready_timeline: &ready_timeline,
                 now_ms,
-                playback_rate_guard_milli: super::super::HLS_PLAYBACK_RATE_GUARD_MILLI,
                 recovery_trigger_budget: HlsRecoveryTriggerBudgetMs::from_millis(0),
                 origin_path_degraded: true,
                 recovery_committed: false,
@@ -717,8 +831,20 @@ impl HlsProxyManager {
         now_ms: u64,
         timing: HlsAccessLeaseTiming,
     ) -> HlsAccessLeaseActivation {
-        let activation =
-            self.access_leases.write().await.activate_access_lease(lease_id, proxy_session_id, now_ms, timing);
+        let session = self.sessions.get_by_proxy_session_id(proxy_session_id).await;
+        let activation = {
+            let mut leases = self.access_leases.write().await;
+            if let Some(session) = session.as_ref() {
+                let session = session.read().await;
+                if leases.response_snapshot(lease_id, proxy_session_id, now_ms).is_some_and(|lease| {
+                    lease.playback_mode == crate::terminal_tail::HlsLeasePlaybackMode::Live
+                        && !session.live_entry_snapshot_allowed_for_lease(&lease, lease.last_manifest_snapshot.as_ref())
+                }) {
+                    return HlsAccessLeaseActivation::AvailabilityPending;
+                }
+            }
+            leases.activate_access_lease(lease_id, proxy_session_id, now_ms, timing)
+        };
         if let HlsAccessLeaseActivation::Activated { lease, previous_state } = &activation {
             if *previous_state == HlsAccessLeaseState::Pending {
                 self.segment_repair.ensure_access_lease_window(lease.lease_id.clone()).await;
@@ -895,7 +1021,6 @@ impl HlsProxyManager {
         let startup = (runtime.startup.mode != shared::model::HlsStartupMode::Conservative
             && origin_source.archive_reference.is_none())
         .then(|| super::super::HlsSessionStartup {
-            first_data_timeout_ms: runtime.segment_fetch_policy.origin_segment_timeout_ms,
             worker: Arc::downgrade(&self.segment_worker_pool),
             access_leases: Arc::clone(&self.access_leases),
             config: runtime.startup.clone(),

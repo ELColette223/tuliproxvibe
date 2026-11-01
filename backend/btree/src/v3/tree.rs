@@ -37,6 +37,7 @@ pub(crate) struct InternalSplit<'a, T> {
 #[cfg(test)]
 thread_local! {
     static INTERNAL_KEY_DECODE_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static VERIFY_FULL_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[derive(Clone, Debug)]
@@ -87,12 +88,17 @@ pub struct BPlusTreeQuery<K, V> {
 
 pub struct BPlusTreeDiskIterator<'a, K, V> {
     query: &'a mut BPlusTreeQuery<K, V>,
-    state: CursorState<K, V>,
+    state: CursorState<K, (K, V)>,
 }
 
 pub struct BPlusTreeDiskIteratorOwned<K, V> {
     query: BPlusTreeQuery<K, V>,
-    state: CursorState<K, V>,
+    state: CursorState<K, (K, V)>,
+}
+
+pub struct BPlusTreeKeyIterator<'a, K, V> {
+    query: &'a mut BPlusTreeQuery<K, V>,
+    state: CursorState<K, K>,
 }
 
 pub struct BPlusTreeRangeIterator<'a, K, V> {
@@ -121,6 +127,7 @@ mod query;
 mod serial_writer;
 mod transaction;
 mod update;
+mod verified_cache;
 mod verify;
 
 #[cfg(test)]
@@ -130,16 +137,20 @@ pub(crate) use self::mutation::{choose_internal_split, choose_leaf_split, used_l
 #[cfg(test)]
 use self::query::{internal_key_decode_count, reset_internal_key_decode_count};
 #[cfg(test)]
-pub(crate) use self::query::{read_leaf_value, validate_locator};
-#[cfg(test)]
 use self::transaction::page_byte_range;
+#[cfg(test)]
+pub(super) use self::verified_cache::{is_verified_with_cache, mark_verified_with_cache};
+pub(super) use self::{
+    bulk_store::publish_database_and_invalidate_sorted_index,
+    error::PublishDatabaseError,
+    verified_cache::{is_verified, mark_verified, VerifiedIdentity},
+};
 use self::{
     bulk_store::{
-        build_pages, internal_page, leaf_page, temporary_path, verify_internal_page, verify_leaf_page, PageSink,
-        StoredDatabase,
+        build_pages, internal_page, leaf_page, verify_internal_page, verify_leaf_page, PageSink, StoredDatabase,
     },
     error::{invalid_data, invalid_input},
-    iterators::{record_page_visit, CursorState},
+    iterators::{record_page_visit, ChainGuard, CursorState},
     mutation::{
         checked_page_usage, locate_transaction_leaf, minimum_tree_key, overflow_chain_pages, push_child_visits,
         stage_delete, stage_upsert, validate_leaf_backlink, validated_overflow_chain_pages,
@@ -149,8 +160,15 @@ use self::{
     update::ActiveBatch,
     verify::{validate_transaction_links, VerifyLeaf, VerifyValue, Visit},
 };
-pub(super) use self::{
-    bulk_store::{publish_database, publish_database_and_invalidate_sorted_index},
-    error::PublishDatabaseError,
+pub(crate) use self::{
+    bulk_store::{publish_database, temporary_path},
+    query::search_leaf,
+    verify::verify_full,
 };
-pub(crate) use self::{query::search_leaf, verify::verify_full};
+#[cfg(test)]
+pub(crate) use self::{
+    query::{read_leaf_value, validate_locator},
+    verify::{reset_verify_full_count, verify_full_count},
+};
+#[cfg(test)]
+pub(crate) use super::wal::leave_committed_test_wal;

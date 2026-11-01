@@ -28,9 +28,8 @@ use super::{
             HlsAcceptanceEpisodeTiming, HlsAcceptanceEpisodeTimingInput, HlsLeaseCutoverTiming,
             HlsObservedRecoveryLatency, HlsOperationTimeoutMs, HlsRecoveryEncryptionReadiness, HlsRecoveryEtaMs,
             HlsRecoveryMapWorkload, HlsRecoveryMediumReadiness, HlsRecoveryObjectReadiness, HlsRecoverySegmentWorkload,
-            HlsRecoveryTimingPolicy, HlsRecoveryWorkload, HlsRecoveryWorkloadEnvelope,
-            HlsTerminalCommitAcquisitionBudgetMs, HlsTerminalCommitWindow, HlsTerminalMediaPreparationState,
-            HlsTransitionMarginMs,
+            HlsRecoveryTimingPolicy, HlsRecoveryWorkload, HlsRecoveryWorkloadEnvelope, HlsTerminalCommitWindow,
+            HlsTerminalMediaPreparationState, HlsTransitionMarginMs,
         },
         runtime_custom_tail::HlsRuntimeCustomTailReason,
         session_store::HlsSessionIncarnation,
@@ -66,13 +65,16 @@ mod archive_master;
 mod critical_handoff;
 mod headers_redirects;
 mod origin_binding;
+mod origin_telemetry;
 mod ownership;
 mod reduced_retry;
+mod reservation_retry;
 mod retry_policy;
 mod short_manifest;
 mod startup_representation;
 mod support;
 mod switch_staging;
+mod target_duration;
 mod timing;
 mod transient;
 
@@ -109,6 +111,8 @@ async fn retryable_manifest_failure_keeps_optimistic_admission_degraded_until_me
     use std::sync::Arc;
     let session = test_session();
     let context = HlsOriginManifestFetchContext {
+        origin_account_snapshot: None,
+        attempt: None,
         app_config: test_app_config(),
         session: Arc::clone(&session),
         availability_runtime: None,
@@ -122,6 +126,7 @@ async fn retryable_manifest_failure_keeps_optimistic_admission_degraded_until_me
         retry_policy: RetryPolicy::default(),
         recovery_timing_policy: test_recovery_timing_policy(100),
         acceptance_timing_seed: None,
+        origin_telemetry: crate::origin_telemetry::OriginTelemetryRecorder::disabled(),
     };
     let manifest = fetched_manifest("#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:4,\n0.ts\n#EXTINF:4,\n1.ts\n#EXTINF:4,\n2.ts\n");
     let tuliprox_parser::hls::origin_manifest::OriginManifestParseOutcome::Normal(origin) =
@@ -149,7 +154,6 @@ async fn retryable_manifest_failure_keeps_optimistic_admission_degraded_until_me
         revisions[&0].revision().prefix_available.store(1, std::sync::atomic::Ordering::Release);
         session.startup = Some(crate::HlsSessionStartup {
             config: config.clone(),
-            first_data_timeout_ms: 10000,
             worker: std::sync::Weak::new(),
             access_leases: Arc::new(tokio::sync::RwLock::new(crate::HlsAccessLeaseStore::default())),
             revisions,

@@ -174,6 +174,16 @@ impl HlsProxyManager {
         }
     }
 
+    /// Runs the lazy cache usage scan ahead of the first request, so it is not charged to a segment fetch.
+    ///
+    /// A no-op while HLS is disabled and once the accounting of the current cache root is ready.
+    pub async fn prepare_cache_capacity_accounting(&self) -> io::Result<()> {
+        if !self.is_enabled() {
+            return Ok(());
+        }
+        self.segment_cache.prepare_capacity_accounting().await
+    }
+
     pub async fn run_garbage_collection_once(&self, now_ms: u64) -> io::Result<super::super::GarbageCollectionReport> {
         if !self.is_enabled() {
             return Ok(super::super::GarbageCollectionReport::default());
@@ -202,12 +212,13 @@ impl HlsProxyManager {
     pub async fn sync_session_access_lease_count_and_detach_if_needed(
         &self,
         active_users: &Arc<ActiveUserManager>,
-        _active_provider: &Arc<ActiveProviderManager>,
+        active_provider: &Arc<ActiveProviderManager>,
         session: &HlsSessionHandle,
         proxy_session_id: &ProxySessionId,
         now_ms: u64,
     ) {
         let snapshot = self.reconcile_session_access_lease_snapshot(session, proxy_session_id, now_ms).await;
+        self.sync_recovery_binding_protection(active_provider, session, now_ms).await;
         for release in &snapshot.idle_releases {
             active_users
                 .release_session_streams_and_counted_reservation(&release.username, &release.user_session_token)

@@ -6,10 +6,12 @@ use strum_macros::EnumIter;
 const DASHBOARD: &str = "dashboard";
 const STATS: &str = "stats";
 const STREAMS: &str = "streams";
+const LOGS: &str = "logs";
 const USERS: &str = "users";
 const PLANS: &str = "plans";
 const CONFIG: &str = "config";
 const PLAYLIST_UPDATE: &str = "playlist_update";
+const PLAYLIST_STATS: &str = "playlist_stats";
 const PLAYLIST_SETTINGS: &str = "playlist_settings";
 const PLAYLIST_EXPLORER: &str = "playlist_explorer";
 const PLAYLIST_EPG: &str = "playlist_epg";
@@ -26,12 +28,14 @@ pub enum ViewType {
     Dashboard,
     Stats,
     Streams,
+    Logs,
     StreamHistory,
     Users,
     Plans,
     Config,
     SourceEditor,
     PlaylistUpdate,
+    PlaylistStats,
     PlaylistSettings,
     PlaylistExplorer,
     PlaylistEpg,
@@ -48,12 +52,14 @@ impl ViewType {
             ViewType::Dashboard => DASHBOARD,
             ViewType::Stats => STATS,
             ViewType::Streams => STREAMS,
+            ViewType::Logs => LOGS,
             ViewType::StreamHistory => STREAM_HISTORY,
             ViewType::Users => USERS,
             ViewType::Plans => PLANS,
             ViewType::Config => CONFIG,
             ViewType::SourceEditor => SOURCE_EDITOR,
             ViewType::PlaylistUpdate => PLAYLIST_UPDATE,
+            ViewType::PlaylistStats => PLAYLIST_STATS,
             ViewType::PlaylistSettings => PLAYLIST_SETTINGS,
             ViewType::PlaylistExplorer => PLAYLIST_EXPLORER,
             ViewType::PlaylistEpg => PLAYLIST_EPG,
@@ -73,12 +79,14 @@ impl FromStr for ViewType {
             DASHBOARD => Ok(ViewType::Dashboard),
             STATS => Ok(ViewType::Stats),
             STREAMS => Ok(ViewType::Streams),
+            LOGS => Ok(ViewType::Logs),
             STREAM_HISTORY => Ok(ViewType::StreamHistory),
             USERS => Ok(ViewType::Users),
             PLANS => Ok(ViewType::Plans),
             CONFIG => Ok(ViewType::Config),
             SOURCE_EDITOR => Ok(ViewType::SourceEditor),
             PLAYLIST_UPDATE => Ok(ViewType::PlaylistUpdate),
+            PLAYLIST_STATS => Ok(ViewType::PlaylistStats),
             PLAYLIST_SETTINGS => Ok(ViewType::PlaylistSettings),
             PLAYLIST_EXPLORER => Ok(ViewType::PlaylistExplorer),
             PLAYLIST_EPG => Ok(ViewType::PlaylistEpg),
@@ -124,6 +132,18 @@ impl Serialize for ViewType {
 mod tests {
     use super::ViewType;
     use std::str::FromStr;
+
+    #[test]
+    fn logs_route_round_trips() {
+        assert_eq!(ViewType::Logs.as_str(), "logs");
+        assert_eq!(ViewType::from_str("logs").unwrap(), ViewType::Logs);
+    }
+
+    #[test]
+    fn playlist_stats_route_round_trips() {
+        assert_eq!(ViewType::PlaylistStats.as_str(), "playlist_stats");
+        assert_eq!(ViewType::from_str("playlist_stats").unwrap(), ViewType::PlaylistStats);
+    }
 
     #[test]
     fn standalone_downloads_route_is_removed() {

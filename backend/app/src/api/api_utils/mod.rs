@@ -175,10 +175,6 @@ pub struct ForceStreamRequestContext<'a> {
     pub(crate) content_representation: crate::api::model::ProviderContentRepresentationMode,
 }
 
-/// Upper bound a manifest refresh waits for its pinned account to free a slot. Parallel
-/// playbacks on one account free their slots within seconds; a 503 would stall the player.
-pub(crate) const HLS_MANIFEST_CAPACITY_WAIT: Duration = Duration::from_secs(5);
-
 /// Upper bound a media object (segment, init, key) waits. It stays well below a typical
 /// segment duration, so the player keeps buffer to retry after a 503.
 const HLS_MEDIA_CAPACITY_WAIT: Duration = Duration::from_secs(2);
@@ -216,6 +212,8 @@ where
 /// requests a provider or EPG entry can trigger through one resource link stays bounded.
 const RESOURCE_REDIRECT_LIMIT: u8 = 5;
 
+pub(crate) const RESOURCE_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// How the client-visible answer of a resource route is shaped.
 ///
 /// The variant mirrors the classification of the destination the route serves: a [`Public`] destination
@@ -245,6 +243,7 @@ mod media_server;
 mod metering;
 mod provider_acquire;
 mod provider_urls;
+mod resource_limiter;
 mod resources;
 mod response;
 mod serialization;
@@ -255,6 +254,8 @@ mod streaming;
 
 #[cfg(test)]
 use self::metering::resolve_stream_config_u64;
+#[cfg(test)]
+pub(crate) use self::provider_acquire::acquire_exact_provider_handle;
 #[cfg(test)]
 use self::provider_urls::find_input_account_by_signature;
 #[cfg(test)]
@@ -274,8 +275,8 @@ use self::{
         DetectedCatchupHlsResponseParams,
     },
     media_server::{
-        is_media_server_playback_url, is_media_server_stream_ref_url, media_server_image_error_status,
-        open_media_server_image_resource, open_media_server_stream_for_input,
+        is_media_server_input_stream_ref, is_media_server_playback_url, is_media_server_stream_ref_url,
+        media_server_image_error_status, open_media_server_image_resource, open_media_server_stream_for_input,
     },
     metering::{
         get_stream_config_u64, get_stream_throttle, is_stream_metrics_enabled, is_throttled_stream,
@@ -327,9 +328,7 @@ pub(crate) use self::{
     catchup::get_catchup_session_ttl_secs,
     local_files::local_stream_response,
     maintenance::{blocks_new_playback, is_running_playback, maintenance_rejection_response},
-    provider_acquire::{
-        acquire_exact_provider_handle, stream_response_with_provider_handle, stream_response_with_shared_key,
-    },
+    provider_acquire::{stream_response_with_provider_handle, stream_response_with_shared_key},
     provider_urls::select_provider_stream_url,
     resources::force_hls_resource_response,
     response::admission_failure_response,
@@ -344,4 +343,12 @@ pub(crate) use self::{
         get_hls_playback_ttl_secs, record_connect_failed_attempt, resolve_request_url_for_logging,
         resolve_stream_user_agent_index, should_allow_exhausted_shared_reconnect, stream_response,
     },
+};
+#[cfg(test)]
+use self::{
+    resource_limiter::{
+        acquire_resource_host_permit, get_resource_host_semaphore, RESOURCE_HOST_CONCURRENCY_LIMIT,
+        RESOURCE_HOST_MAP_PRUNE_THRESHOLD,
+    },
+    resources::fetch_resource_with_timeout,
 };

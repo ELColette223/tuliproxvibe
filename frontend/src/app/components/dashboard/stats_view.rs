@@ -1,7 +1,7 @@
 use super::stream_display::is_background_transfer_stream;
 use crate::{
     app::components::{
-        use_metrics_history, Card, CollapsePanel, LogConsole, MetricsHistory, PlaylistProgressStatusCard, Sparkline,
+        use_metrics_history, Card, CollapsePanel, MetricsHistory, PlaylistProgressStatusCard, Sparkline,
         SparklineFormat, SparklineSeries, StatusCard, StatusContext, StreamsView,
     },
     i18n::use_translation,
@@ -49,15 +49,6 @@ pub fn StatsView(props: &StatsViewProps) -> Html {
         users: Rc::from([SparklineSeries::new(MetricsHistory::as_vec(&history.users))]),
         connections: Rc::from([SparklineSeries::new(MetricsHistory::as_vec(&history.connections))]),
     });
-
-    // Collapsed by default so TRACE/DEBUG server config cannot open a live WS flood on Stats load.
-    let logs_expanded = use_state(|| false);
-    let on_logs_toggle = {
-        let logs_expanded = logs_expanded.clone();
-        Callback::from(move |expanded: bool| {
-            logs_expanded.set(expanded);
-        })
-    };
 
     let loading_label = translate.t("LABEL.LOADING");
     let (mem, cpu, net, disk, net_total) = status_ctx.system_info.as_ref().map_or_else(
@@ -151,15 +142,6 @@ pub fn StatsView(props: &StatsViewProps) -> Html {
                 <div class="tp__stats__body-group">
                     <Card><PlaylistProgressStatusCard /></Card>
                 </div>
-                <CollapsePanel expanded={*logs_expanded} on_state_change={on_logs_toggle.clone()} title_content={Some(html! {
-                    <div class="tp__stats__header">
-                     <h1>{ translate.t("LABEL.LOGS")}</h1>
-                    </div>
-                    })}>
-                    <div class="tp__stats__body">
-                        <LogConsole active={*logs_expanded} />
-                    </div>
-                </CollapsePanel>
             </div>
         </div>
         }
@@ -265,15 +247,6 @@ pub fn StatsView(props: &StatsViewProps) -> Html {
                 <div class="tp__stats__body-group">
                     <Card><PlaylistProgressStatusCard /></Card>
                 </div>
-                <CollapsePanel expanded={*logs_expanded} on_state_change={on_logs_toggle.clone()} title_content={Some(html! {
-                    <div class="tp__stats__header">
-                     <h1>{ translate.t("LABEL.LOGS")}</h1>
-                    </div>
-                    })}>
-                    <div class="tp__stats__body">
-                        <LogConsole active={*logs_expanded} />
-                    </div>
-                </CollapsePanel>
             </div>
           </div>
         }

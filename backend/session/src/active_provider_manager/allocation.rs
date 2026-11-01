@@ -315,7 +315,7 @@ impl ActiveProviderManager {
         Self::prune_expired_leases(&mut leases);
         let confirmed = leases
             .lease_of_owner(session_owner)
-            .is_some_and(|lease| lease.provider_name == *provider_name && lease.state.is_confirmed());
+            .is_some_and(|lease| lease.provider_name == *provider_name && lease.reserves_capacity());
         drop(leases);
         confirmed || self.has_active_owner_for_provider(provider_name, session_owner)
     }
@@ -327,9 +327,17 @@ impl ActiveProviderManager {
         else {
             return true;
         };
-        max_connections > 0
+        let blocked = max_connections > 0
             && idle_foreign_reservations > 0
-            && current_connections.saturating_add(idle_foreign_reservations) >= max_connections
+            && current_connections.saturating_add(idle_foreign_reservations) >= max_connections;
+        if blocked {
+            log::debug!(
+                "Provider admission rejected: reason=ReservedForOther conflict=provider-capacity account={} owner={} active_connections={current_connections} limit={max_connections} idle_foreign_reserved_slots={idle_foreign_reservations}",
+                sanitize_sensitive_info(provider_name.as_ref()),
+                sanitize_sensitive_info(session_owner.unwrap_or("<none>")),
+            );
+        }
+        blocked
     }
 
     pub(super) fn reserved_provider_names_for_other(
@@ -753,6 +761,29 @@ impl ActiveProviderManager {
             }
             PreemptionOutcome::Exhausted => None,
         }
+    }
+
+    /// Tries free capacity on one provider without grace or preemption, before a lineup fallback.
+    pub fn try_acquire_exact_connection_with_lease_for_session(
+        &self,
+        provider_name: &Arc<str>,
+        addr: &SocketAddr,
+        priority: i8,
+        kind: ConnectionKind,
+        lease: Option<PlaybackLeaseRef<'_>>,
+    ) -> Option<ProviderHandle> {
+        if self.is_shutting_down.load(Ordering::Acquire) {
+            return None;
+        }
+        let _transition = self.lock_capacity_transition();
+        if self.is_shutting_down.load(Ordering::Acquire) {
+            return None;
+        }
+        self.acquire_exact_connection_inner_no_preempt(
+            provider_name,
+            false,
+            &AcquireProviderParams { addr, priority, kind, lease },
+        )
     }
 
     /// Exact-provider acquisition with an explicit playback lease identity.

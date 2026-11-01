@@ -64,7 +64,7 @@ impl HlsCachedManifestOptions {
         self
     }
 
-    const fn requires_newer_manifest(self) -> bool {
+    pub const fn requires_newer_manifest(self) -> bool {
         self.newer_than_rendered_at_ms.is_some() || self.after_origin_manifest_commits.is_some()
     }
 }
@@ -163,6 +163,12 @@ pub async fn hls_manifest_commit_requirement(
     new_playback_entry: bool,
     now_ms: u64,
 ) -> HlsManifestCommitRequirement {
+    let session = session.read().await;
+    if new_playback_entry && session.live_entry_revalidation.required {
+        return HlsManifestCommitRequirement::FreshCommitRequired {
+            reason: HlsFreshManifestRequiredReason::OriginReserveExhausted,
+        };
+    }
     if handoff_previous_rendered_at_ms.is_some() {
         return HlsManifestCommitRequirement::FreshCommitRequired {
             reason: HlsFreshManifestRequiredReason::ProvisioningHandoff,
@@ -172,7 +178,6 @@ pub async fn hls_manifest_commit_requirement(
         return HlsManifestCommitRequirement::FreshCommitRequired { reason: HlsFreshManifestRequiredReason::ColdStart };
     }
 
-    let session = session.read().await;
     if let Some(reason) = session.fresh_manifest_commit_required {
         return HlsManifestCommitRequirement::FreshCommitRequired { reason };
     }
@@ -267,7 +272,15 @@ fn can_serve_committed_manifest(
     now_ms: u64,
 ) -> bool {
     match protection {
-        HlsAccountBindingProtection::HardActive { .. } | HlsAccountBindingProtection::SoftActive { .. } => true,
+        HlsAccountBindingProtection::HardActive { .. } | HlsAccountBindingProtection::SoftActive { .. } => {
+            let start_only =
+                session.origin_account_binding.as_ref().and_then(|binding| binding.startup_protection).is_some_and(
+                    |start| session.activity.last_authorized_media_at_ms.is_none_or(|at| at <= start.anchored_at_ms),
+                );
+            // Provider start protection does not establish playback or authorize
+            // an expired committed window while its replacement media is loading.
+            !start_only || committed_manifest_valid_at(candidate, now_ms)
+        }
         HlsAccountBindingProtection::NoMediaYet => {
             matches!(policy, HlsCachedManifestPolicy::AllowInitialNoMediaYet)
                 && committed_manifest_valid_at(candidate, now_ms)

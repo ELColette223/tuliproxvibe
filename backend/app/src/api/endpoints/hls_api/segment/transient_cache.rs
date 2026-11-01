@@ -23,7 +23,7 @@ use tuliprox_hls::api::{
     HlsOriginResourceFetchError, HlsResourceFetchAttempt, HlsSessionHandle, HlsTransientCacheCommitContext,
     HlsTransientDecodedOriginResponse, HlsTransientObjectFetchFailure, HlsTransientObjectFetchFinalizer,
     HlsTransientOriginCacheFetchRequest, HlsTransientOriginFetchRequest, HlsTransientOriginIoGuard, SegmentFetchPolicy,
-    TransientObjectFetchToken, TransientResourceFile, TransientResourceId, TransientResourceRef,
+    TransientObjectFetchToken, TransientResourceFile, TransientResourceId, TransientResourceKind, TransientResourceRef,
 };
 
 pub(in crate::api::endpoints::hls_api) struct HlsTransientEndpointOriginFetchRequest<'a> {
@@ -49,6 +49,14 @@ pub(in crate::api::endpoints::hls_api) async fn fetch_transient_origin_response_
     request: HlsTransientEndpointOriginFetchRequest<'_>,
 ) -> HlsTransientOriginFetchResult {
     let clients = HlsOriginResourceClients {
+        retry_work: tuliprox_hls::api::HlsOriginRetryWork::for_transient(
+            request.session,
+            &request.app_state.active_provider,
+            &request.policy,
+            request.resource.kind,
+        )
+        .await,
+        session: Some(request.session.clone()),
         client: request.app_state.http_clients.default.load().as_ref().clone(),
         no_redirect_client: request.app_state.http_clients.no_redirect.load().as_ref().clone(),
         use_manual_redirects: request.app_state.should_use_manual_redirects(),
@@ -116,7 +124,7 @@ pub(in crate::api::endpoints::hls_api) fn hls_transient_origin_prepare_closure(
     let fingerprint = fingerprint.clone();
     let headers = headers.clone();
     let runtime_prepare_error = Arc::clone(runtime_prepare_error);
-    move |_attempt| {
+    move |attempt| {
         let app_state = Arc::clone(&app_state);
         let session = Arc::clone(&session);
         let access_context = access_context.clone();
@@ -125,6 +133,7 @@ pub(in crate::api::endpoints::hls_api) fn hls_transient_origin_prepare_closure(
         let runtime_prepare_error = Arc::clone(&runtime_prepare_error);
         let snapshot = snapshot.clone();
         async move {
+            attempt.protect_origin_work(&app_state.active_provider, &session, snapshot.generation, false).await?;
             match prepare_hls_transient_origin_io_for_authorized_resource_work(
                 &app_state,
                 &session,
@@ -132,10 +141,16 @@ pub(in crate::api::endpoints::hls_api) fn hls_transient_origin_prepare_closure(
                 &fingerprint,
                 &headers,
                 current_time_millis(),
+                attempt.timeout.effective_ms,
             )
             .await
             {
                 Ok(guard) => {
+                    if guard.is_some() {
+                        attempt
+                            .protect_origin_work(&app_state.active_provider, &session, snapshot.generation, true)
+                            .await?;
+                    }
                     let session = session.read().await;
                     if session.activity.origin_work_generation != snapshot.generation
                         || !session.transient.origin_resource_is_fetchable(&snapshot.resource, current_time_millis())
@@ -182,6 +197,7 @@ pub(in crate::api::endpoints::hls_api) struct TransientObjectWaitContext<'a> {
     pub(in crate::api::endpoints::hls_api) resource_file: TransientResourceFile,
     pub(in crate::api::endpoints::hls_api) range_header: Option<HeaderValue>,
     pub(in crate::api::endpoints::hls_api) notifier: Arc<tokio::sync::Notify>,
+    pub(in crate::api::endpoints::hls_api) resource_kind: TransientResourceKind,
 }
 
 pub(in crate::api::endpoints::hls_api) struct TransientObjectCacheServeContext<'a> {
@@ -245,7 +261,12 @@ pub(in crate::api::endpoints::hls_api) async fn serve_transient_object_cache_res
 pub(in crate::api::endpoints::hls_api) async fn wait_for_transient_object_cache_fetch(
     context: TransientObjectWaitContext<'_>,
 ) -> axum::response::Response {
-    let wait_timeout = context.app_state.hls.proxy.segment_fetch_policy().origin_object_wait_timeout();
+    let wait_timeout = context
+        .app_state
+        .hls
+        .proxy
+        .segment_fetch_policy()
+        .transient_wait_timeout(context.resource_kind, context.session.read().await.target_duration);
     let safe_resource_id = safe_transient_resource_id(&context.resource_file.resource_id);
     debug!(
         "HLS transient object wait started: resource_id={} lease={} state=inflight",
@@ -315,6 +336,14 @@ pub(in crate::api::endpoints::hls_api) async fn fetch_and_cache_transient_origin
         HLS_TEMPORARY_RESOURCE_RETRY_AFTER_MS,
     );
     let clients = HlsOriginResourceClients {
+        retry_work: tuliprox_hls::api::HlsOriginRetryWork::for_transient(
+            context.session,
+            &context.app_state.active_provider,
+            &policy,
+            context.resource.kind,
+        )
+        .await,
+        session: Some(context.session.clone()),
         client: context.app_state.http_clients.default.load().as_ref().clone(),
         no_redirect_client: context.app_state.http_clients.no_redirect.load().as_ref().clone(),
         use_manual_redirects: context.app_state.should_use_manual_redirects(),

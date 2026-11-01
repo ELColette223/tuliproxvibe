@@ -43,8 +43,18 @@ where
         } else {
             HlsOriginByteRangeExpectation::FullObject
         },
+        media_duration_ms: None,
     };
     let clients = HlsOriginResourceClients {
+        retry_work: crate::HlsOriginRetryWork::for_resource(
+            &context.session,
+            context.origin_io.as_ref().map(|io| &io.ctx.active_provider),
+            policy,
+            resource_kind,
+            HlsResourceFetchSource::Normal,
+        )
+        .await,
+        session: Some(context.session.clone()),
         client: context.client.clone(),
         no_redirect_client: context.no_redirect_client.clone(),
         use_manual_redirects: context.use_manual_redirects,
@@ -54,6 +64,8 @@ where
         super::super::HlsLogIdentity::from_session(&session)
     };
     let cache = Arc::clone(&context.segment_cache);
+    // The first cache write scans the whole cache directory; do it before any per-attempt deadline starts.
+    cache.prepare_capacity_accounting().await.map_err(|error| HlsOriginResourceFetchError::cache_body(&error))?;
     run_hls_origin_resource_retry_loop_with_attempt_prepare(
         target,
         clients,

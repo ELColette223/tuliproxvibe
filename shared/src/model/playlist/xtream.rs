@@ -2,7 +2,8 @@ use super::{PlaylistEntry, PlaylistItemType, PlaylistItemTypeSet, XtreamCluster}
 use crate::{
     create_bitset,
     model::{
-        xtream_const, ClusterFlags, CommonPlaylistItem, StreamProperties, UUIDType, VirtualId, XtreamInfoDocument,
+        xtream_const, ClusterFlags, CommonPlaylistItem, SkipSeriesDetailsGuard, StreamProperties, UUIDType, VirtualId,
+        XtreamInfoDocument,
     },
     utils::{
         arc_str_option_serde, arc_str_serde, concat_path, generate_runtime_playlist_uuid, seal_web_ui_resource_url,
@@ -258,6 +259,13 @@ impl XtreamPlaylistItem {
         self.additional_properties.as_ref().is_some_and(super::super::stream_properties::StreamProperties::has_details)
     }
 
+    #[inline]
+    pub fn clear_series_details(&mut self) {
+        if let Some(props) = self.additional_properties.as_mut() {
+            props.clear_series_details();
+        }
+    }
+
     pub fn visit_resource_urls(&self, mut visit: impl FnMut(&str)) {
         let mut visit_persisted = |value: &str| {
             if let Some(url) = super::super::persisted_resource_url(value) {
@@ -325,6 +333,15 @@ impl XtreamPlaylistItem {
             std::borrow::Cow::Owned(value) => Arc::from(value),
         })
     }
+
+    /// Media-server items are identified by the stable id frozen at input time, not by a provider id.
+    /// Their URL may end in a numeric segment (Plex rating key, Emby item id) that parses as a provider
+    /// id, or in none (Jellyfin GUID) that leaves it `0`; the UUID must be the same either way, and
+    /// without the frozen id all items of the second kind would share one UUID and be removed as
+    /// duplicates of each other.
+    pub(crate) fn media_server_identity(&self) -> Option<&Arc<str>> {
+        (!self.input_stream_id.is_empty() && self.url.starts_with("media-server://")).then_some(&self.input_stream_id)
+    }
 }
 
 impl PlaylistEntry for XtreamPlaylistItem {
@@ -348,7 +365,15 @@ impl PlaylistEntry for XtreamPlaylistItem {
 
     #[inline]
     fn get_uuid(&self) -> UUIDType {
-        generate_runtime_playlist_uuid(&self.input_name, &self.provider_id.to_string(), self.item_type, &self.url)
+        match self.media_server_identity() {
+            Some(id) => generate_runtime_playlist_uuid(&self.input_name, id, self.item_type, &self.url),
+            None => generate_runtime_playlist_uuid(
+                &self.input_name,
+                &self.provider_id.to_string(),
+                self.item_type,
+                &self.url,
+            ),
+        }
     }
     #[inline]
     fn get_item_type(&self) -> PlaylistItemType { self.item_type }
@@ -386,4 +411,26 @@ impl PlaylistEntry for XtreamPlaylistItem {
 
 impl From<XtreamPlaylistItem> for CommonPlaylistItem {
     fn from(item: XtreamPlaylistItem) -> Self { item.to_common() }
+}
+
+/// Wrapper around `XtreamPlaylistItem` that enables the `skip_series_details`
+/// thread-local flag during deserialization, discarding season and episode details
+/// (which are not needed on the `get_series` list path).
+#[derive(Clone, Debug, Serialize)]
+#[serde(transparent)]
+pub struct SeriesListProjection(pub XtreamPlaylistItem);
+
+impl<'de> Deserialize<'de> for SeriesListProjection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let _guard = SkipSeriesDetailsGuard::enter();
+        XtreamPlaylistItem::deserialize(deserializer).map(Self)
+    }
+}
+
+impl From<SeriesListProjection> for XtreamPlaylistItem {
+    #[inline]
+    fn from(projection: SeriesListProjection) -> Self { projection.0 }
 }

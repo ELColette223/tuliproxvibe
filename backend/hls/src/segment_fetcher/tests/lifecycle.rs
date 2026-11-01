@@ -18,6 +18,105 @@ struct InvalidatingPrepare {
     handoff: bool,
 }
 
+#[tokio::test]
+async fn terminal_segment_commit_releases_its_reservation_but_preserves_protected_work() {
+    use crate::{
+        manifest_fetch::HlsManifestAttemptContext, origin::finish_failed_hls_start,
+        origin_attempt::tests::bound_origin_io, HlsManifestCommitRequirement, HlsOriginResourceFetchError,
+    };
+    use std::sync::{atomic::Ordering, Arc};
+    use tuliprox_core::model::PlaybackKind;
+    use tuliprox_session::{ConnectionKind, PlaybackLeaseRef};
+
+    #[derive(Clone, Copy, Debug)]
+    enum Protection {
+        None,
+        ActivePlayback,
+        OriginWork,
+        Successor,
+    }
+
+    for protection in [Protection::None, Protection::ActivePlayback, Protection::OriginWork, Protection::Successor] {
+        let server = spawn_segment_server(0).await;
+        let directory = tempfile::tempdir().unwrap();
+        let policy = SegmentFetchPolicy { permanent_failure_segment_threshold: 1, ..Default::default() };
+        let (worker, context, _) = fetch_context(&server, &directory, &policy).await;
+        let (mut io, _) = bound_origin_io(&context.session).await;
+        let binding = context.session.read().await.origin_account_binding.clone().unwrap();
+        let provider = io
+            .ctx
+            .active_provider
+            .acquire_exact_connection_with_lease_for_session(
+                &binding.account_name,
+                &io.client_addr,
+                false,
+                0,
+                ConnectionKind::Normal,
+                Some(PlaybackLeaseRef::new(&binding.session_owner, PlaybackKind::LiveHls)),
+            )
+            .unwrap();
+        let tag = io
+            .ctx
+            .active_provider
+            .reserve_hls_start(&binding.session_owner, &provider, Duration::from_secs(60))
+            .unwrap();
+        context.session.write().await.origin_account_binding.as_mut().unwrap().provider_binding_tag = Some(tag);
+        io.ctx.connection_manager.release_provider_handle(Some(provider));
+        assert_eq!(io.ctx.active_provider.get_provider_connections_count(), 0);
+        assert!(io.ctx.active_provider.should_reuse_playback_provider(&binding.session_owner, &binding.account_name));
+        let snapshot = worker.next_fetch_snapshot(&context, 10, &policy).await.unwrap();
+        io.prepared_account = Some(HlsOriginAccountSnapshot::from_session(&*context.session.read().await));
+        let attempt = Arc::new(HlsManifestAttemptContext::new(
+            HlsManifestCommitRequirement::CommittedManifestAllowed,
+            false,
+            None,
+        ));
+        let completion = {
+            let mut state = context.session.write().await;
+            state.origin_refresh.attempt = Some(Arc::clone(&attempt));
+            for (seq, entry) in &mut state.segments {
+                if *seq != snapshot.proxy_seq {
+                    entry.status = SegmentCacheStatus::FailedPermanent { failed_at_ms: 10, status: None };
+                }
+            }
+            worker.apply_segment_fetch_result(
+                &mut state,
+                &snapshot,
+                &policy,
+                Err(HlsOriginResourceFetchError::RetryableStatus(axum::http::StatusCode::SERVICE_UNAVAILABLE)),
+                20,
+            )
+        };
+        let generation = completion.recovery_generation.unwrap();
+        assert_eq!(generation, snapshot.origin_work_generation + 1, "the failure invalidates queued work");
+        finish_failed_hls_start(Some(&io), &context.session, Some(snapshot.origin_work_generation)).await;
+        assert!(!attempt.failed(), "the old fetch generation cannot finalize the current start");
+        {
+            let mut state = context.session.write().await;
+            match protection {
+                Protection::None => {}
+                Protection::ActivePlayback => state.activity.active_access_lease_count = 1,
+                Protection::OriginWork => {
+                    state.activity.active_origin_work_count.store(1, Ordering::Release);
+                }
+                Protection::Successor => state.invalidate_queued_origin_work(),
+            }
+        }
+        finish_failed_hls_start(Some(&io), &context.session, Some(generation)).await;
+        let released = matches!(protection, Protection::None);
+        assert_eq!(
+            context.session.read().await.origin_account_binding.as_ref().unwrap().is_detached(),
+            released,
+            "{protection:?}"
+        );
+        assert_eq!(
+            io.ctx.active_provider.should_reuse_playback_provider(&binding.session_owner, &binding.account_name),
+            !released,
+            "{protection:?}"
+        );
+    }
+}
+
 impl HlsOriginAccountRuntime for InvalidatingPrepare {
     fn prepare<'a>(
         &'a self,
@@ -229,7 +328,7 @@ async fn account_handoff_during_segment_prepare_blocks_old_origin_request() {
     let snapshot = worker.next_fetch_snapshot(&context, 10, &policy).await.expect("segment snapshot");
     let replacement_lease = Arc::new(HlsOriginAccountIoLease::active_for_test(&replacement, 1));
     let read_blocker = context.session.read().await;
-    let mut fetch = Box::pin(super::super::fetch_segment_with_retries_into_cache(&context, &snapshot, &policy));
+    let mut fetch = Box::pin(super::super::fetch_segment_with_retries_into_cache(&context, &snapshot, &policy, None));
     assert!(futures::poll!(fetch.as_mut()).is_pending());
     let mut handoff = Box::pin(context.session.write());
     assert!(futures::poll!(handoff.as_mut()).is_pending());
@@ -348,4 +447,58 @@ async fn demand_fetch_is_blocked_for_gc_marked_session() {
 
     assert_eq!(outcome, super::super::SegmentDemandFetchOutcome::NotFound);
     assert!(server.requests.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn encrypted_demand_wait_uses_manifest_key_budget_before_the_short_segment_budget() {
+    use std::sync::Arc;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        sync::Mutex,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let observed = requests.clone();
+    let task = tokio::spawn(async move {
+        for key in [true, false] {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                request.push(socket.read_u8().await.unwrap());
+            }
+            observed.lock().await.push(String::from_utf8(request).unwrap());
+            if key {
+                tokio::time::sleep(Duration::from_millis(2_400)).await;
+            }
+            let body: &[u8] = if key { b"0123456789abcdef" } else { b"encrypted-media" };
+            socket
+                .write_all(
+                    format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())
+                        .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(body).await.unwrap();
+        }
+    });
+    let server = super::TestSegmentServer { base_url: format!("http://{address}"), requests, task };
+    let temp = tempfile::tempdir().unwrap();
+    let policy = SegmentFetchPolicy {
+        timeouts: crate::HlsOriginTimeoutPolicy::fixed(100, 3_000),
+        retry_delays_ms: [0; 5],
+        retry_jitter_max_ms: 0,
+        max_prefetch_queue_depth: 0,
+        ..Default::default()
+    };
+    let (worker, context, segment) = encrypted_fetch_context(&server, &temp, &policy).await;
+    let result = worker.demand_fetch_and_wait(context.clone(), &segment, current_time_millis()).await;
+    assert_eq!(result, super::super::SegmentDemandFetchOutcome::Ready);
+    let requests = server.requests.lock().await;
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].starts_with("GET /key.key "));
+    assert!(requests[1].starts_with("GET /1.ts "));
+    assert_eq!(context.session.read().await.active_segment_fetches, 0);
+    assert!(!context.segment_cache.has_active_temp_files());
 }

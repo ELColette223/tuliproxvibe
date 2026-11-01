@@ -154,6 +154,18 @@ macro_rules! config_field_custom {
             </div>
         }
     };
+    ($label:expr, $value:expr, $hint:expr) => {
+        html! {
+            <div class="tp__form-field tp__form-field__text">
+                <$crate::app::components::FieldLabel
+                    label={$label.to_string()}
+                    field_id={$label.to_string()}
+                    hint_key={$hint}
+                />
+                <span class="tp__form-field__value">{$value}</span>
+            </div>
+        }
+    };
 }
 
 #[macro_export]
@@ -181,6 +193,18 @@ macro_rules! config_field_child {
                 <$crate::app::components::FieldLabel
                     label={$label.to_string()}
                     field_id={$field_id.to_string()}
+                />
+                { $body }
+            </div>
+        }
+    };
+    ($label:expr, $field_id:expr, $hint:expr, $body:block) => {
+        html! {
+            <div class="tp__form-field tp__form-field__text">
+                <$crate::app::components::FieldLabel
+                    label={$label.to_string()}
+                    field_id={$field_id.to_string()}
+                    hint_key={$hint}
                 />
                 { $body }
             </div>
@@ -624,6 +648,31 @@ macro_rules! edit_field_number_usize {
                              None => instance.dispatch($action(0)),
                         }
                     })}
+                />
+            </div>
+        }
+    }};
+}
+
+/// Like `edit_field_number_usize!`, but empty or non-numeric input is rolled back by the input
+/// instead of storing `0`.
+#[macro_export]
+macro_rules! edit_field_number_usize_strict {
+    ($instance:expr, $label:expr, $field:ident, $action:path) => {{
+        let instance = $instance.clone();
+        html! {
+            <div class="tp__form-field tp__form-field__number">
+                <$crate::app::components::number_input::NumberInput
+                    label={$label}
+                    name={stringify!($field)}
+                    field_id={Some($crate::app::components::dto_field_id(&instance.form, stringify!($field)))}
+                    u64_value={Some(instance.form.$field as u64)}
+                    max_u64={Some(usize::MAX as u64)}
+                    on_change_u64={Some(Callback::from(move |value: Option<u64>| {
+                        if let Some(val) = value.and_then(|value| usize::try_from(value).ok()) {
+                            instance.dispatch($action(val));
+                        }
+                    }))}
                 />
             </div>
         }

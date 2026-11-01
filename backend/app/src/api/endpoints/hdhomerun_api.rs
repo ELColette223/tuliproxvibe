@@ -3,7 +3,7 @@ use crate::{
         api_utils::{coalesce_byte_stream, internal_server_error, try_unwrap_body},
         model::{AppState, HdHomerunAppState},
     },
-    auth::{try_check_network_access_only, AuthBasic, Fingerprint},
+    auth::{AuthBasic, Fingerprint},
     model::{AppConfig, ConfigInputFlags, ConfigTarget, ProxyUserCredentials},
     processing::parser::xtream::get_xtream_url,
     repository::{
@@ -288,13 +288,7 @@ async fn lineup_status(
     let cfg = Arc::clone(&app_state.app_state.app_config);
     let network_access_denied =
         cfg.get_target_for_username(&app_state.device.t_username).is_none_or(|(credentials, _)| {
-            try_check_network_access_only(
-                &credentials,
-                &fingerprint,
-                &app_state.app_state.app_config,
-                &app_state.app_state.geoip,
-            )
-            .is_err()
+            app_state.app_state.try_check_network_access(&credentials, &fingerprint).is_err()
         });
     let current_state = app_state.hd_scan_state.load(std::sync::atomic::Ordering::Acquire);
     if network_access_denied || current_state < 0 {
@@ -328,24 +322,24 @@ async fn lineup_status(
                         0
                     }
                 } else if target.has_output(TargetType::Xtream) {
-                    let cred = Arc::clone(&credentials);
-                    let live = if cred.allows_cluster(XtreamCluster::Live) {
-                        match XtreamPlaylistIterator::new(XtreamCluster::Live, &cfg, &target, None, &cred).await {
-                            Ok(stream) => stream.filter_map(|entry| async move { entry.ok() }).count().await,
-                            Err(_) => 0,
+                    let mut count = 0;
+                    for cluster in [XtreamCluster::Live, XtreamCluster::Video] {
+                        if credentials.allows_cluster(cluster) {
+                            if let Ok(stream) = XtreamPlaylistIterator::new(
+                                cluster,
+                                &cfg,
+                                &app_state.app_state.playlists,
+                                &target,
+                                None,
+                                &credentials,
+                            )
+                            .await
+                            {
+                                count += stream.filter_map(|entry| async move { entry.ok() }).count().await;
+                            }
                         }
-                    } else {
-                        0
-                    };
-                    let vod = if cred.allows_cluster(XtreamCluster::Video) {
-                        match XtreamPlaylistIterator::new(XtreamCluster::Video, &cfg, &target, None, &cred).await {
-                            Ok(stream) => stream.filter_map(|entry| async move { entry.ok() }).count().await,
-                            Err(_) => 0,
-                        }
-                    } else {
-                        0
-                    };
-                    live + vod
+                    }
+                    count
                 } else {
                     0
                 }
@@ -380,13 +374,7 @@ async fn lineup_post(
 ) -> impl IntoResponse {
     let cfg = Arc::clone(&app_state.app_state.app_config);
     let allowed = cfg.get_target_for_username(&app_state.device.t_username).is_some_and(|(credentials, _)| {
-        try_check_network_access_only(
-            &credentials,
-            &fingerprint,
-            &app_state.app_state.app_config,
-            &app_state.app_state.geoip,
-        )
-        .is_ok()
+        app_state.app_state.try_check_network_access(&credentials, &fingerprint).is_ok()
     });
     if !allowed {
         return axum::http::StatusCode::FORBIDDEN.into_response();
@@ -428,12 +416,30 @@ async fn lineup(
         let (base_url_live, base_url_vod) = xtream_base_urls(credentials, target, server_info.get_base_url());
 
         let live_channels = if credentials.allows_cluster(XtreamCluster::Live) {
-            XtreamPlaylistIterator::new(XtreamCluster::Live, cfg, target, None, credentials).await.ok()
+            XtreamPlaylistIterator::new(
+                XtreamCluster::Live,
+                cfg,
+                &app_state.app_state.playlists,
+                target,
+                None,
+                credentials,
+            )
+            .await
+            .ok()
         } else {
             None
         };
         let vod_channels = if credentials.allows_cluster(XtreamCluster::Video) {
-            XtreamPlaylistIterator::new(XtreamCluster::Video, cfg, target, None, credentials).await.ok()
+            XtreamPlaylistIterator::new(
+                XtreamCluster::Video,
+                cfg,
+                &app_state.app_state.playlists,
+                target,
+                None,
+                credentials,
+            )
+            .await
+            .ok()
         } else {
             None
         };
@@ -491,7 +497,9 @@ fn authorize_device_user(
             return Err(Box::new(axum::http::StatusCode::UNAUTHORIZED.into_response()));
         }
     }
-    try_check_network_access_only(&credentials, fingerprint, cfg, &app_state.app_state.geoip)
+    app_state
+        .app_state
+        .try_check_network_access(&credentials, fingerprint)
         .map_err(|err| Box::new(err.into_player_response(cfg.get_auth_error_status())))?;
     Ok((credentials, target))
 }
@@ -793,7 +801,9 @@ async fn resolve_channel_stream_url(
                 if !credentials.allows_cluster(cluster) {
                     continue;
                 }
-                let Ok(channels) = XtreamPlaylistIterator::new(cluster, cfg, target, None, credentials).await else {
+                let Ok(channels) =
+                    XtreamPlaylistIterator::new(cluster, cfg, &app_state.playlists, target, None, credentials).await
+                else {
                     continue;
                 };
                 let Some((rank, item)) = find_channel(channels, query).await else { continue };

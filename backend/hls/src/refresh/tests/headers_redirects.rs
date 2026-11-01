@@ -46,6 +46,8 @@ async fn refresh_stores_headers_after_hls_origin_policy() {
     headers.insert(header::ACCEPT_LANGUAGE, HeaderValue::from_static("de"));
 
     let request = OriginRefreshRequest {
+        work_owner: None,
+        attempt: None,
         app_config: test_app_config(),
         session: Arc::clone(&session),
         origin_entry: entry.clone(),
@@ -217,6 +219,8 @@ async fn shared_initial_manifest_automatic_cross_origin_redirect_keeps_identity_
     headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer origin-secret"));
     headers.insert(header::COOKIE, HeaderValue::from_static("sid=origin-secret"));
     let context = HlsOriginManifestFetchContext {
+        origin_account_snapshot: None,
+        attempt: None,
         app_config: test_app_config(),
         session: test_session(),
         availability_runtime: None,
@@ -234,6 +238,7 @@ async fn shared_initial_manifest_automatic_cross_origin_redirect_keeps_identity_
         retry_policy: no_delay_policy(),
         recovery_timing_policy: test_recovery_timing_policy(2_000),
         acceptance_timing_seed: None,
+        origin_telemetry: crate::origin_telemetry::OriginTelemetryRecorder::disabled(),
     };
 
     let fetched = fetch_hls_origin_manifest_request(HlsOriginManifestFetchRequest::initial_global_policy(&context))
@@ -276,6 +281,8 @@ async fn shared_initial_manifest_budget_covers_status_decoder_redirect_and_succe
     let origin_entry =
         LiveHlsOriginEntry::parse(&format!("{}/live/user/pass/12345.m3u8", server.base_url)).expect("entry url");
     let context = HlsOriginManifestFetchContext {
+        origin_account_snapshot: None,
+        attempt: None,
         app_config: test_app_config(),
         session: test_session(),
         availability_runtime: None,
@@ -292,6 +299,7 @@ async fn shared_initial_manifest_budget_covers_status_decoder_redirect_and_succe
         retry_policy: no_delay_policy(),
         recovery_timing_policy: test_recovery_timing_policy(2_000),
         acceptance_timing_seed: None,
+        origin_telemetry: crate::origin_telemetry::OriginTelemetryRecorder::disabled(),
     };
 
     let fetched = fetch_hls_origin_manifest_request(HlsOriginManifestFetchRequest::initial_global_policy(&context))

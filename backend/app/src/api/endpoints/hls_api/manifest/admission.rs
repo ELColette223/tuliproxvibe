@@ -4,8 +4,7 @@ use super::{
     effective_hls_url_failover_provider_for_fetch_url, hls_access_lease_timing_for_session, hls_access_lease_ttl_ms,
     hls_availability_reevaluation_registration_failure_response, hls_cache_configured,
     hls_canonical_owner_registration, hls_canonical_owner_request_deadline_ms, hls_canonical_retry_after_response,
-    hls_canonical_status_response, hls_effective_origin_acquire_policy,
-    hls_origin_account_reservation_ttl_secs_for_session, hls_pending_bootstrap_window_ms,
+    hls_canonical_status_response, hls_effective_origin_acquire_policy, hls_pending_bootstrap_window_ms,
     hls_provider_connections_exhausted_manifest_resolution, hls_runtime_or_standalone_custom_tail_response,
     hls_unpublished_lease_channel_unavailable_response, join_hls_canonical_manifest_owner,
     latest_shared_hls_manifest_rendered_at_ms, mark_hls_authorized_manifest_access,
@@ -23,7 +22,6 @@ use axum::{
 use log::debug;
 use shared::utils::sanitize_sensitive_info;
 use std::{sync::Arc, time::Duration};
-use tuliprox_core::utils::current_time_millis;
 use tuliprox_hls::api::{
     build_proxy_session_id, hls_cached_manifest_options_for_requirement, hls_manifest_acceptance_directive_for_session,
     hls_manifest_commit_requirement, register_hls_availability_reevaluation, safe_hls_access_lease_id,
@@ -34,6 +32,7 @@ use tuliprox_hls::api::{
 };
 
 #[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_lines, reason = "Keep admission, final failure retention and its response in one lifecycle.")]
 pub(in crate::api::endpoints::hls_api) async fn prepare_hls_canonical_manifest_origin_runtime(
     app_state: &Arc<AppState>,
     session: &HlsSessionHandle,
@@ -46,6 +45,7 @@ pub(in crate::api::endpoints::hls_api) async fn prepare_hls_canonical_manifest_o
     server_path: Option<&str>,
     now_ms: u64,
 ) -> Result<PreparedHlsOriginRuntime, Box<axum::response::Response>> {
+    let expected_account = tuliprox_hls::api::HlsOriginAccountSnapshot::from_session(&*session.read().await);
     let mut allow_grace_hold = true;
     loop {
         let origin_policy = hls_effective_origin_acquire_policy(session).await;
@@ -103,7 +103,45 @@ pub(in crate::api::endpoints::hls_api) async fn prepare_hls_canonical_manifest_o
                     HlsProviderExhaustedResolution::RetryAcquire => {
                         allow_grace_hold = false;
                     }
-                    HlsProviderExhaustedResolution::Response(response) => return Err(Box::new(response)),
+                    HlsProviderExhaustedResolution::Provisioning(response) => return Err(Box::new(response)),
+                    HlsProviderExhaustedResolution::Exhausted(response) => {
+                        if matches!(access_lease_state, HlsAccessLeaseState::Pending | HlsAccessLeaseState::Idle)
+                            && session.read().await.origin_playback_kind()
+                                == tuliprox_core::model::PlaybackKind::LiveHls
+                            && app_state
+                                .hls
+                                .proxy
+                                .access_lease_response_snapshot(
+                                    access_lease_id,
+                                    path_proxy_session_id,
+                                    app_state.hls.proxy.now_ms(),
+                                )
+                                .await
+                                .is_some()
+                        {
+                            app_state
+                                .hls
+                                .proxy
+                                .fail_access_lease_start_admission(
+                                    &app_state.hls_ctx(),
+                                    session,
+                                    access_lease_id,
+                                    tuliprox_hls::api::HlsBoundAccountAcquireErrorKind::Exhausted,
+                                    now_ms,
+                                    &expected_account,
+                                )
+                                .await;
+                            return Err(Box::new(
+                                hls_unpublished_lease_channel_unavailable_response(
+                                    app_state,
+                                    path_proxy_session_id,
+                                    access_lease_id,
+                                )
+                                .await,
+                            ));
+                        }
+                        return Err(Box::new(response));
+                    }
                 }
             }
             Err(HlsOriginRuntimeAcquireError::Fatal(status)) => {
@@ -160,7 +198,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
     if &expected_proxy_session_id != path_proxy_session_id {
         return Some(StatusCode::NOT_FOUND.into_response());
     }
-    let now_ms = current_time_millis();
+    let now_ms = app_state.hls.proxy.now_ms();
     let rewrite_secret = app_state.get_encrypt_secret();
     let (session, session_outcome) = app_state
         .hls
@@ -172,6 +210,29 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
             now_ms,
         )
         .await;
+    if session.read().await.origin_playback_kind() == tuliprox_core::model::PlaybackKind::LiveHls {
+        touch_initial_manifest_access_lease_window(
+            app_state,
+            access_lease_id,
+            path_proxy_session_id,
+            access_lease_state,
+            hls_initial_manifest_decision_wait_timeout(app_state),
+            now_ms,
+        )
+        .await;
+    }
+    if matches!(access_lease_state, HlsAccessLeaseState::Pending | HlsAccessLeaseState::Idle)
+        && app_state
+            .hls
+            .proxy
+            .access_lease_response_snapshot(access_lease_id, path_proxy_session_id, now_ms)
+            .await
+            .is_some_and(|lease| lease.manifest_start_attempt.as_ref().is_some_and(|attempt| attempt.failed()))
+    {
+        return Some(
+            hls_unpublished_lease_channel_unavailable_response(app_state, path_proxy_session_id, access_lease_id).await,
+        );
+    }
     if access_lease_state == HlsAccessLeaseState::Activated {
         let timing = hls_access_lease_timing_for_session(app_state, &session).await;
         match app_state
@@ -267,7 +328,6 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
         safe_proxy_session_id(path_proxy_session_id),
         selected_account
     );
-    let reservation_ttl_secs = hls_origin_account_reservation_ttl_secs_for_session(&session).await;
     let previous_manifest_rendered_at_ms = latest_shared_hls_manifest_rendered_at_ms(&session).await;
     let entry_origin_manifest_commits = session.read().await.origin_manifest_commits();
     let handoff_previous_rendered_at_ms = maybe_mark_hls_provisioning_handoff_for_canonical_manifest(
@@ -283,7 +343,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
         &session,
         session_outcome,
         handoff_previous_rendered_at_ms,
-        access_lease_state == HlsAccessLeaseState::Pending,
+        matches!(access_lease_state, HlsAccessLeaseState::Pending | HlsAccessLeaseState::Idle),
         now_ms,
     )
     .await;
@@ -314,7 +374,15 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
         None => HlsRuntimeBandwidthLearningContext::Eligible(origin.input),
     };
 
-    let origin_policy = hls_effective_origin_acquire_policy(&session).await;
+    let (origin_policy, reservation_ttl_secs, playback_kind, account_runtime) = {
+        let session = session.read().await;
+        (
+            session.effective_origin_acquire_policy_or_default(),
+            session.account_overlap_timing().reservation_ttl_secs(),
+            session.origin_playback_kind(),
+            session.origin_account_runtime.clone(),
+        )
+    };
     let mut preacquired_provider_handle = prepared_origin.preacquired_origin_account_handle;
     let mut origin_io = HlsOriginIoContext {
         ctx: hls_ctx.clone(),
@@ -326,8 +394,8 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
         preacquired_provider_handle: None,
         started_generation: None,
         prepared_account: None,
-        playback_kind: session.read().await.origin_playback_kind(),
-        account_runtime: session.read().await.origin_account_runtime.clone(),
+        playback_kind,
+        account_runtime,
     };
     if availability_reevaluation_owner_key.is_none() {
         if let Some(provider_handle) = preacquired_provider_handle.take() {
@@ -369,7 +437,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
         let owner_wait_lease = app_state
             .hls
             .proxy
-            .access_lease_response_snapshot(access_lease_id, path_proxy_session_id, current_time_millis())
+            .access_lease_response_snapshot(access_lease_id, path_proxy_session_id, app_state.hls.proxy.now_ms())
             .await;
         let expected_lease_issued_at_ms = owner_wait_lease.as_ref().map(|lease| lease.issued_at_ms);
         let request_deadline_ms = owner_wait_lease
@@ -424,6 +492,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
             &session,
             path_proxy_session_id,
             access_lease_id,
+            access_lease_state,
             refresh_request,
             refresh_ordering,
         )
@@ -445,7 +514,12 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
         )
         .await
         {
-            clear_hls_provisioning_handoff_consumer(app_state, origin.input, context.virtual_id, current_time_millis());
+            clear_hls_provisioning_handoff_consumer(
+                app_state,
+                origin.input,
+                context.virtual_id,
+                app_state.hls.proxy.now_ms(),
+            );
             return Some(response);
         }
         return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
@@ -466,6 +540,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
                 &session,
                 path_proxy_session_id,
                 access_lease_id,
+                access_lease_state,
                 refresh_request,
                 refresh_ordering,
             )
@@ -496,6 +571,7 @@ pub(in crate::api::endpoints::hls_api) async fn try_hls_cache_canonical_manifest
                 &session,
                 path_proxy_session_id,
                 access_lease_id,
+                access_lease_state,
                 refresh_request,
                 refresh_ordering,
             )
@@ -594,6 +670,16 @@ pub(in crate::api::endpoints::hls_api) async fn touch_initial_manifest_access_le
     }
     let wait_timeout_ms = duration_to_millis_saturating(wait_timeout);
     let deadline_ms = now_ms.saturating_add(wait_timeout_ms.max(hls_pending_bootstrap_window_ms(app_state)));
+    let live = if let Some(session) = app_state.hls.proxy.sessions().get_by_proxy_session_id(proxy_session_id).await {
+        session.read().await.origin_playback_kind() == tuliprox_core::model::PlaybackKind::LiveHls
+    } else {
+        false
+    };
+    let pending_deadline = if live {
+        HlsAccessLeasePendingDeadline::Processing { deadline_ms }
+    } else {
+        HlsAccessLeasePendingDeadline::Bootstrap { deadline_ms }
+    };
     let touch = app_state
         .hls
         .proxy
@@ -602,7 +688,7 @@ pub(in crate::api::endpoints::hls_api) async fn touch_initial_manifest_access_le
             proxy_session_id,
             now_ms,
             None,
-            Some(HlsAccessLeasePendingDeadline::Bootstrap { deadline_ms }),
+            Some(pending_deadline),
             hls_access_lease_ttl_ms(app_state),
         )
         .await;
@@ -626,7 +712,7 @@ pub(in crate::api::endpoints::hls_api) async fn hls_initial_manifest_wait_timeou
 ) -> Duration {
     let session = session.read().await;
     if matches!(
-        session.account_binding_protection(current_time_millis()),
+        session.account_binding_protection(app_state.hls.proxy.now_ms()),
         HlsAccountBindingProtection::NoMediaYet | HlsAccountBindingProtection::Expired
     ) {
         hls_initial_manifest_decision_wait_timeout(app_state)

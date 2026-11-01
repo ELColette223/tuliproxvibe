@@ -44,6 +44,8 @@ pub use recovery::{
     RecoveryRepositoryState, RecoverySchema, RecoveryStoragePlacement, RecoveryVerificationReport,
 };
 // --- Sorted-index sidecar --------------------------------------------------
+/// Snapshot of a sorted-index sidecar that the database writer rewrites after its own commit.
+pub use sorted_index::v4::IndexSnapshot;
 /// Iterates a database in sorted-index order, falling back to the caller's own
 /// handling when the sidecar is unusable.
 pub use sorted_index::v4::OwnedIterator as SortedIndexIterator;
@@ -55,9 +57,9 @@ pub use v3::migration as typed_migration;
 // --- Staged publication ----------------------------------------------------
 pub use v3::{publish_staged_database, BPlusTreeStagingArtifacts};
 pub use v3::{
-    BPlusTree, BPlusTreeDiskIterator, BPlusTreeDiskIteratorOwned, BPlusTreeMetadata, BPlusTreeQuery,
-    BPlusTreeRangeIterator, BPlusTreeSerialWriter, BPlusTreeUpdate, FlushPolicy, RecoveryIdentity, MAGIC,
-    STORAGE_VERSION,
+    BPlusTree, BPlusTreeDiskIterator, BPlusTreeDiskIteratorOwned, BPlusTreeKeyIterator, BPlusTreeMetadata,
+    BPlusTreeQuery, BPlusTreeRangeIterator, BPlusTreeSerialWriter, BPlusTreeUpdate, FlushPolicy, RecoveryIdentity,
+    MAGIC, STORAGE_VERSION,
 };
 
 // --- Test support ----------------------------------------------------------

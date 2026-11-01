@@ -199,6 +199,18 @@ impl PlaylistSource {
         }
     }
 
+    pub fn get_cluster_count(&mut self, cluster: XtreamCluster) -> usize {
+        if self.skip_set.as_ref().is_some_and(|skip| skip.contains(&cluster)) {
+            return 0;
+        }
+        let skip_set: HashSet<XtreamCluster> = match cluster {
+            XtreamCluster::Live => [XtreamCluster::Video, XtreamCluster::Series].into_iter().collect(),
+            XtreamCluster::Video => [XtreamCluster::Live, XtreamCluster::Series].into_iter().collect(),
+            XtreamCluster::Series => [XtreamCluster::Live, XtreamCluster::Video].into_iter().collect(),
+        };
+        dispatch!(self.get_channel_count_excluding_clusters(&skip_set))
+    }
+
     pub fn get_group_count(&mut self) -> usize {
         if let Some(skip_set) = self.skip_set.as_ref() {
             return match &mut self.kind {
@@ -1475,44 +1487,12 @@ mod tests {
     use super::{
         MemoryPlaylistSource, PlaylistGroup, PlaylistItem, PlaylistSource, XtreamCluster, XtreamDiskPlaylistSource,
     };
-    use crate::BPlusTreeQuery;
-    use arc_swap::{ArcSwap, ArcSwapOption};
+    use crate::{test_config::app_config, BPlusTreeQuery};
     use shared::{
-        model::{ConfigPaths, PlaylistItemHeader, PlaylistItemType, XtreamPlaylistItem},
+        model::{PlaylistItemHeader, PlaylistItemType, XtreamPlaylistItem},
         utils::Internable,
     };
     use std::{collections::HashSet, path::PathBuf, sync::Arc};
-    use tuliprox_core::{
-        model::{AppConfig, Config, MediaToolCapabilities, SourcesConfig},
-        utils::FileLockManager,
-    };
-
-    fn test_app_config() -> Arc<AppConfig> {
-        Arc::new(AppConfig {
-            config: Arc::new(ArcSwap::from_pointee(Config::default())),
-            sources: Arc::new(ArcSwap::from_pointee(SourcesConfig::default())),
-            hdhomerun: Arc::new(ArcSwapOption::empty()),
-            api_proxy: Arc::new(ArcSwapOption::empty()),
-            file_locks: Arc::new(FileLockManager::default()),
-            paths: Arc::new(ArcSwap::from_pointee(ConfigPaths {
-                home_path: String::new(),
-                config_path: String::new(),
-                storage_path: String::new(),
-                config_file_path: String::new(),
-                sources_file_path: String::new(),
-                mapping_file_path: None,
-                mapping_files_used: None,
-                template_file_path: None,
-                template_files_used: None,
-                api_proxy_file_path: String::new(),
-                custom_stream_response_path: None,
-            })),
-            custom_stream_response: Arc::new(ArcSwapOption::empty()),
-            access_token_secret: [0u8; 32],
-            encrypt_secret: [0u8; 16],
-            media_tools: Arc::new(MediaToolCapabilities::new()),
-        })
-    }
 
     fn make_item(title: &str, group: &str, category_id: u32) -> PlaylistItem {
         PlaylistItem {
@@ -1608,7 +1588,7 @@ mod tests {
 
     #[tokio::test]
     async fn xtream_disk_clone_source_returns_error_when_query_clone_fails() {
-        let app_config = test_app_config();
+        let app_config = app_config();
         let storage_path = PathBuf::from("clone-error-fixture");
         let guard = Arc::new(app_config.file_locks.read_lock(&storage_path).await);
         let source = PlaylistSource::xtream_disk(XtreamDiskPlaylistSource {
@@ -1702,5 +1682,78 @@ mod tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].channels.len(), 1);
         assert_eq!(groups[0].xtream_cluster, XtreamCluster::Live);
+    }
+
+    #[tokio::test]
+    async fn cluster_count_identical_for_memory_and_disk_sources() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app_config = crate::test_config::app_config_in(temp.path());
+        let storage_path = temp.path().join("test_storage");
+        tokio::fs::create_dir_all(&storage_path).await.expect("create dir");
+
+        let live_path = crate::xtream_get_file_path(&storage_path, XtreamCluster::Live);
+        let mut live_tree = crate::BPlusTree::new();
+        for id in 1..=3u32 {
+            live_tree.insert(id, crate::test_config::xtream_playlist_item(id));
+        }
+        live_tree.store_with_index(&live_path, |pli| pli.source_ordinal).expect("store live tree");
+
+        let vod_path = crate::xtream_get_file_path(&storage_path, XtreamCluster::Video);
+        let mut vod_tree = crate::BPlusTree::new();
+        for id in 10..=11u32 {
+            let mut item = crate::test_config::xtream_playlist_item(id);
+            item.xtream_cluster = XtreamCluster::Video;
+            item.item_type = PlaylistItemType::Video;
+            vod_tree.insert(id, item);
+        }
+        vod_tree.store_with_index(&vod_path, |pli| pli.source_ordinal).expect("store vod tree");
+
+        let series_path = crate::xtream_get_file_path(&storage_path, XtreamCluster::Series);
+        let mut series_tree = crate::BPlusTree::new();
+        series_tree.insert(20u32, crate::test_config::xtream_series_item(20, None));
+        series_tree.store_with_index(&series_path, |pli| pli.source_ordinal).expect("store series tree");
+
+        let mut disk_source = PlaylistSource::xtream_disk(
+            XtreamDiskPlaylistSource::new(&app_config, &storage_path).await.expect("load xtream disk source"),
+        );
+
+        let mem_groups = vec![
+            make_cluster_group(
+                "Live",
+                XtreamCluster::Live,
+                vec![
+                    make_cluster_item("live-1", XtreamCluster::Live),
+                    make_cluster_item("live-2", XtreamCluster::Live),
+                    make_cluster_item("live-3", XtreamCluster::Live),
+                ],
+            ),
+            make_cluster_group(
+                "Video",
+                XtreamCluster::Video,
+                vec![
+                    make_cluster_item("vod-1", XtreamCluster::Video),
+                    make_cluster_item("vod-2", XtreamCluster::Video),
+                ],
+            ),
+            make_cluster_group(
+                "Series",
+                XtreamCluster::Series,
+                vec![make_cluster_item("series-1", XtreamCluster::Series)],
+            ),
+        ];
+        let mut mem_source = MemoryPlaylistSource::new(mem_groups).into_source();
+
+        for cluster in [XtreamCluster::Live, XtreamCluster::Video, XtreamCluster::Series] {
+            let mem_count = mem_source.get_cluster_count(cluster);
+            let disk_count = disk_source.get_cluster_count(cluster);
+            assert_eq!(mem_count, disk_count, "cluster count mismatch for {cluster:?}");
+        }
+
+        assert_eq!(mem_source.get_cluster_count(XtreamCluster::Live), 3);
+        assert_eq!(mem_source.get_cluster_count(XtreamCluster::Video), 2);
+        assert_eq!(mem_source.get_cluster_count(XtreamCluster::Series), 1);
+        assert_eq!(disk_source.get_cluster_count(XtreamCluster::Live), 3);
+        assert_eq!(disk_source.get_cluster_count(XtreamCluster::Video), 2);
+        assert_eq!(disk_source.get_cluster_count(XtreamCluster::Series), 1);
     }
 }

@@ -76,7 +76,8 @@ Use different upstream technologies without forcing every downstream player to u
 - **M3U/M3U8** — remote or local playlists with headers, credentials, EPG sources, and CSV batch inputs
 - **Stalker & Ministra** — full portal catalogs with MAC, credential or combined authentication, configurable MAG profiles,  
   `create_link` playback resolution, resumable refreshes, and per-alias configuration
-- **Plex, Emby & Jellyfin** — import selected movie and TV libraries and resolve protected playback and artwork through Tuliprox
+- **Plex, Emby & Jellyfin** — import selected movie and TV libraries, each as its own category, and resolve protected playback  
+  and artwork through Tuliprox
 - **Local Media Library** — scan movies and series from disk and enrich them with NFO or TMDB metadata
 - **Staged Sources** — overlay a prepared Live, VOD, or Series catalog while keeping the original provider responsible for  
   actual stream delivery
@@ -168,6 +169,7 @@ Upstream providers are not always reliable. Tuliprox is designed to preserve usa
 - Automatic provider URL failover on timeouts and server errors
 - Choose whether a provider resumes from the last working URL or restarts from the first URL on future requests
 - `provider://` references resolve to the currently active provider URL
+- `playback_provider` binds a provider profile to inputs with plain `http(s)://` playlist URLs, so mapped `provider://` playback URLs fail over too
 - Asynchronous DNS resolution and caching
 - Persisted resolved IPs without overwriting source configuration
 - HTTP, HTTPS, and SOCKS5 outbound proxy support for VPN gateways, corporate proxies, or Gluetun
@@ -231,6 +233,8 @@ Tuliprox can be configured and monitored directly from the browser.
 - **Update Details** explain where data came from, which quality guards were applied, processing order, target results,  
   and technical versus quality failures
 - Reload-safe update/cluster status so a browser refresh does not erase the operational picture
+- **Playlist Stats** with per-target content counts, input-to-output ratios, largest groups, catch-up channels,
+  EPG source health, and unmapped live channel CSV export
 - **Playlist Explorer** with tree/gallery views, EPG timeline, text/regex search, and field-scoped search
 - **Download & Recording Manager** with retries, queue controls, fairness, and RBAC-protected actions
 - **User Management** including plans, connection limits, priorities, category access, output clusters, and network policies
@@ -349,6 +353,8 @@ Optional stream telemetry can turn individual playback failures into longer-term
 - Track stable stream identity across runs
 - Track shared-stream participation
 - Aggregate rolling reliability snapshots in the background
+- Optionally measure Shared HLS origin transfer quality separately from availability, with sample coverage and
+  freshness, via `GET /api/v1/hls/origin-telemetry`
 - Maintain 24-hour, 7-day, and 30-day QoS windows
 - View QoS summaries/details in the Web UI or query them through the API
 - Compact QoS storage periodically to reclaim expired data
@@ -406,6 +412,9 @@ Tuliprox includes its own storage engine for playlist and runtime data.
 - Panel API integration for provider account provisioning/renewal workflows
 - Dependency-aware parallel input processing
 - Management REST API for configuration, processing, transfers, recordings, status, stream history, QoS, and system information
+- Optional MCP server (read-only by default) so AI assistants such as Claude Desktop or Cursor can inspect status,
+  streams, stream history, QoS, configuration, stored playlists (paged, filtered) and per-target EPG diagnostics under
+  the REST API's own authentication and permissions; configurable in the Web UI
 - JSON and CBOR responses on supported endpoints
 - CLI one-shot processing for scripts and CI/CD
 
@@ -455,6 +464,7 @@ or CLI when manual control is needed.
 - `${env:VAR}` interpolation throughout configuration
 - `.env` loading with host/container environment variables taking precedence
 - Optional startup runtime-configuration report in YAML or JSON with sensitive values redacted
+- External log shipping via UDP (syslog RFC 5424, RFC 3164, or NDJSON) with independent remote log level and non-blocking delivery
 - Configurable default outbound User-Agent
 - Dev Container/Codespaces environment with the Rust/WASM tooling needed for development
 
@@ -578,6 +588,7 @@ Main entry points:
   - [Mapping & Templates](docs/src/configuration/template.md)
 - [Examples & Recipes](docs/src/examples-recipes.md)
 - [Operations & Debugging](docs/src/operations-debugging.md)
+- [MCP Server](docs/src/operator/mcp.md)
 - [Troubleshooting & Resilience](docs/src/troubleshooting.md)
 
 ### Documentation Strategy

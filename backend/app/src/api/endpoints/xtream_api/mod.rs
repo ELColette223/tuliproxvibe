@@ -1,4 +1,3 @@
-use crate::auth::{check_network_access_only, check_permission_and_network_access_only};
 // https://github.com/tellytv/go.xtream-codes/blob/master/structs.go
 // Xtream api -> https://9tzx6f0ozj.apidog.io/
 use crate::{
@@ -224,7 +223,7 @@ pub(in crate::api) fn get_xtream_player_api_stream_url(
 
 async fn get_user_info(user: &ProxyUserCredentials, app_state: &AppState) -> Option<XtreamAuthorizationResponse> {
     let server_info = app_state.app_config.get_user_server_info(user)?;
-    let active_connections = app_state.get_active_connections_for_user(&user.username).await;
+    let active_connections = app_state.active_users.user_connections(&user.username).await;
 
     Some(XtreamAuthorizationResponse::new(
         &server_info,
@@ -270,7 +269,7 @@ async fn xtream_player_api_stream(
         Some((user, target)) => (user, target),
     };
     // Network access check only - permission check is done later with full stream info
-    if let Err(e) = check_network_access_only(&user, fingerprint, &app_state.app_config, &app_state.geoip) {
+    if let Err(e) = app_state.check_network_access(&user, fingerprint) {
         return e.into_player_response(auth_status);
     }
 
@@ -1119,9 +1118,7 @@ async fn xtream_player_api_resource(
     else {
         return auth_status.into_response();
     };
-    if let Err(e) =
-        check_permission_and_network_access_only(&user, fingerprint, &app_state.app_config, &app_state.geoip)
-    {
+    if let Err(e) = app_state.check_permission_and_network_access(&user, fingerprint) {
         return e.into_player_response(auth_status);
     }
     let target_name = &target.name;
@@ -1815,7 +1812,7 @@ async fn xtream_player_api(
     let Some((user, target)) = get_user_target(&api_req, app_state) else {
         return auth_status.into_response();
     };
-    if let Err(e) = check_network_access_only(&user, fingerprint, &app_state.app_config, &app_state.geoip) {
+    if let Err(e) = app_state.check_network_access(&user, fingerprint) {
         return e.into_player_response(auth_status);
     }
     if !target.has_output(TargetType::Xtream) {
@@ -1915,17 +1912,39 @@ async fn xtream_player_api(
     let result = match action {
         crate::model::XC_ACTION_GET_LIVE_STREAMS => skip_flag_optional!(
             skip_live,
-            xtream_load_rewrite_playlist(XtreamCluster::Live, &app_state.app_config, &target, category_id, &user).await
+            xtream_load_rewrite_playlist(
+                XtreamCluster::Live,
+                &app_state.app_config,
+                &app_state.playlists,
+                &target,
+                category_id,
+                &user
+            )
+            .await
         ),
         crate::model::XC_ACTION_GET_VOD_STREAMS => skip_flag_optional!(
             skip_vod,
-            xtream_load_rewrite_playlist(XtreamCluster::Video, &app_state.app_config, &target, category_id, &user)
-                .await
+            xtream_load_rewrite_playlist(
+                XtreamCluster::Video,
+                &app_state.app_config,
+                &app_state.playlists,
+                &target,
+                category_id,
+                &user
+            )
+            .await
         ),
         crate::model::XC_ACTION_GET_SERIES => skip_flag_optional!(
             skip_series,
-            xtream_load_rewrite_playlist(XtreamCluster::Series, &app_state.app_config, &target, category_id, &user)
-                .await
+            xtream_load_rewrite_playlist(
+                XtreamCluster::Series,
+                &app_state.app_config,
+                &app_state.playlists,
+                &target,
+                category_id,
+                &user
+            )
+            .await
         ),
         _ => Some(Err(TuliproxError::ApiXtream(format!("Unknown api call: {action} for target: {}", target.name)))),
     };

@@ -1,5 +1,9 @@
 use crate::{
-    api::{api_utils::json_or_bin_response, endpoints::extract_accept_header::ExtractAcceptHeader, model::AppState},
+    api::{
+        api_utils::json_or_bin_response,
+        endpoints::{extract_accept_header::ExtractAcceptHeader, extract_form_query::FormQuery},
+        model::AppState,
+    },
     model::StreamHistoryRecord,
     repository::{
         discover_files, resolve_time_range, CompiledFilter, QosSnapshotRecord, QosSnapshotRepository,
@@ -432,7 +436,7 @@ fn paginate_aggregated_records(
 #[allow(clippy::too_many_lines)]
 pub(crate) async fn stream_history_page_query(
     State(app_state): State<Arc<AppState>>,
-    Query(params): Query<StreamHistoryPageRequestDto>,
+    FormQuery(params): FormQuery<StreamHistoryPageRequestDto>,
 ) -> Response {
     let Some(history_dir) = get_history_directory(&app_state) else {
         return error_response(StatusCode::SERVICE_UNAVAILABLE, "Stream history is not enabled");
@@ -590,6 +594,17 @@ pub(crate) async fn qos_snapshot_query(
             error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read QoS snapshots: {err}"))
         }
         Err(err) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("QoS snapshot query task failed: {err}")),
+    }
+}
+
+/// Live origin transfer quality of the shared HLS fetches. Reads in-memory aggregates only; never contacts a provider.
+pub(crate) async fn hls_origin_telemetry_query(
+    ExtractAcceptHeader(accept): ExtractAcceptHeader,
+    State(app_state): State<Arc<AppState>>,
+) -> Response {
+    match app_state.hls.proxy.origin_telemetry().snapshot() {
+        Some(snapshot) => json_or_bin_response(accept.as_deref(), &snapshot).into_response(),
+        None => error_response(StatusCode::SERVICE_UNAVAILABLE, "HLS origin telemetry is not enabled"),
     }
 }
 
@@ -859,6 +874,44 @@ fn load_qos_snapshot(storage_dir: &str, stream_identity_key: &str) -> io::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn hls_origin_telemetry_route_reports_disabled_as_unavailable() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let app_state = crate::api::model::create_test_app_state(crate::model::Config::default());
+        let router = axum::Router::new()
+            .route("/hls/origin-telemetry", axum::routing::get(hls_origin_telemetry_query))
+            .with_state(app_state);
+        let response =
+            router.oneshot(Request::builder().uri("/hls/origin-telemetry").body(Body::empty()).unwrap()).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn page_route_accepts_the_search_field_query_the_web_ui_sends() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let app_state = crate::api::model::create_test_app_state(crate::model::Config::default());
+        let router = axum::Router::new()
+            .route("/stream-history", axum::routing::get(stream_history_page_query))
+            .with_state(app_state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/stream-history?search=abc&search_field=title&search_field=group")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Stream history is not configured here; the point is that the query is no longer rejected with 400.
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
     use crate::{
         model::{QosAggregationConfig, ResourceRetryConfig, ReverseProxyConfig},
         repository::{QosSnapshotDailyBucket, QosSnapshotRecord, QosSnapshotWindow},
@@ -1107,6 +1160,7 @@ mod tests {
                     compaction_interval_secs: 86_400,
                 }),
                 hls_cache: None,
+                hls_origin_telemetry: None,
             }),
             ..crate::model::Config::default()
         };

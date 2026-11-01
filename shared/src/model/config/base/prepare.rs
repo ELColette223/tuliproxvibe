@@ -62,6 +62,11 @@ impl ConfigDto {
         self.prepare_video_config()?;
         self.prepare_metadata_update_config()?;
 
+        if let Some(log) = &mut self.log {
+            log.clean();
+            log.validate()?;
+        }
+
         if let Some(reverse_proxy) = self.reverse_proxy.as_mut() {
             reverse_proxy.prepare(self.storage_dir.as_deref().unwrap_or_default())?;
         }
@@ -70,6 +75,10 @@ impl ConfigDto {
         }
         if let Some(ipcheck) = self.ipcheck.as_mut() {
             ipcheck.prepare()?;
+        }
+
+        if let Some(mcp) = self.mcp.as_mut() {
+            mcp.prepare()?;
         }
 
         if let Some(messaging) = &mut self.messaging {

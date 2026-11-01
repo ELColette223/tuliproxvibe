@@ -167,6 +167,7 @@ impl TVGuide {
         id_cache: &mut EpgIdCache,
         epg_source: &PersistedEpgSource,
         source_order: usize,
+        source_idx: usize,
         accumulator: &mut EpgMergeAccumulator,
     ) -> bool {
         let epg_attrib_id = EPG_ATTRIB_ID.intern();
@@ -223,6 +224,7 @@ impl TVGuide {
                                 accumulator.upsert_channel(
                                     epg_source.priority,
                                     source_order,
+                                    source_idx,
                                     epg_source.logo_override,
                                     EpgChannel {
                                         id: Arc::clone(&tag_epg_id),
@@ -272,8 +274,7 @@ where
     F: FnMut(XmlTag),
 {
     let binding = e.name();
-    let name_raw = String::from_utf8_lossy(binding.as_ref());
-    let name = name_raw.intern();
+    let name = binding.as_ref().intern();
     let tag_type = get_tag_type(&name);
     let attributes = collect_tag_attributes(e);
     let attribs = if attributes.is_empty() { None } else { Some(attributes) };
@@ -317,7 +318,8 @@ where
 
 fn handle_text_tag(stack: &mut [XmlTag], e: &BytesText) {
     if let Some(tag) = stack.last_mut() {
-        if let Ok(text) = e.decode() {
+        {
+            let text = e.xml10_content();
             let t = text.trim();
             if !t.is_empty() {
                 let t_fixed: Cow<str> = if t.ends_with('\\') {

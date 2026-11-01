@@ -1,5 +1,6 @@
 use crate::model::{
-    config::cache::CacheConfig, macros, GeoIpConfig, QosAggregationConfig, RateLimitConfig, StreamConfig,
+    config::cache::CacheConfig, macros, GeoIpConfig, HlsOriginTelemetryConfig, QosAggregationConfig, RateLimitConfig,
+    StreamConfig,
 };
 use regex::Regex;
 use shared::{
@@ -322,7 +323,8 @@ pub struct HlsCacheConfig {
     pub max_concurrent_segment_fetches_per_session: usize,
     pub max_concurrent_segment_fetches_global: usize,
     pub origin_manifest_timeout_ms: Millis,
-    pub origin_segment_timeout_ms: Millis,
+    pub min_origin_target_duration_secs: Secs,
+    pub origin_segment_timeout_ms: shared::model::HlsSegmentTimeout,
     pub initial_manifest_wait_timeout_secs: Secs,
     pub session_idle_timeout: Secs,
     pub manifest_recovery_burst: HlsManifestRecoveryBurstConfig,
@@ -354,6 +356,7 @@ impl From<&HlsCacheConfigDto> for HlsCacheConfig {
             max_concurrent_segment_fetches_per_session: dto.max_concurrent_segment_fetches_per_session,
             max_concurrent_segment_fetches_global: dto.max_concurrent_segment_fetches_global,
             origin_manifest_timeout_ms: dto.origin_manifest_timeout_ms,
+            min_origin_target_duration_secs: dto.min_origin_target_duration_secs,
             origin_segment_timeout_ms: dto.origin_segment_timeout_ms,
             initial_manifest_wait_timeout_secs: dto.initial_manifest_wait_timeout_secs,
             session_idle_timeout: dto.session_idle_timeout,
@@ -376,6 +379,7 @@ impl From<&HlsCacheConfig> for HlsCacheConfigDto {
             max_concurrent_segment_fetches_per_session: config.max_concurrent_segment_fetches_per_session,
             max_concurrent_segment_fetches_global: config.max_concurrent_segment_fetches_global,
             origin_manifest_timeout_ms: config.origin_manifest_timeout_ms,
+            min_origin_target_duration_secs: config.min_origin_target_duration_secs,
             origin_segment_timeout_ms: config.origin_segment_timeout_ms,
             initial_manifest_wait_timeout_secs: config.initial_manifest_wait_timeout_secs,
             session_idle_timeout: config.session_idle_timeout,
@@ -398,6 +402,7 @@ pub struct ReverseProxyConfig {
     pub stream_history: Option<crate::model::StreamHistoryConfig>,
     pub qos_aggregation: Option<QosAggregationConfig>,
     pub hls_cache: Option<HlsCacheConfig>,
+    pub hls_origin_telemetry: Option<HlsOriginTelemetryConfig>,
 }
 
 macros::from_impl!(ReverseProxyConfig);
@@ -421,6 +426,7 @@ impl From<&ReverseProxyConfigDto> for ReverseProxyConfig {
             stream_history: dto.stream_history.as_ref().map(Into::into),
             qos_aggregation: dto.qos_aggregation.as_ref().map(Into::into),
             hls_cache: dto.hls_cache.as_ref().map(Into::into),
+            hls_origin_telemetry: dto.hls_origin_telemetry.as_ref().map(Into::into),
         }
     }
 }
@@ -444,6 +450,7 @@ impl From<&ReverseProxyConfig> for ReverseProxyConfigDto {
             stream_history: instance.stream_history.as_ref().map(Into::into),
             qos_aggregation: instance.qos_aggregation.as_ref().map(Into::into),
             hls_cache: instance.hls_cache.as_ref().map(Into::into),
+            hls_origin_telemetry: instance.hls_origin_telemetry.as_ref().map(Into::into),
         }
     }
 }
@@ -459,12 +466,14 @@ mod tests {
     fn startup_config_preserves_mode_and_custom_budgets_across_dto_conversion() -> Result<(), Box<dyn std::error::Error>>
     {
         let mut dto: shared::model::HlsCacheConfigDto = serde_json::from_str(
-            r#"{"startup":{"mode":"progressive","max_progressive_segments":3,"max_progressive_bytes_per_segment":"8MB","max_progressive_bytes_total":"24MB","max_progressive_reader_lifetime_secs":40,"max_deferred_repairs":7}}"#,
+            r#"{"min_origin_target_duration_secs":6,"startup":{"mode":"progressive","max_progressive_segments":3,"max_progressive_bytes_per_segment":"8MB","max_progressive_bytes_total":"24MB","max_progressive_reader_lifetime_secs":40,"max_deferred_repairs":7}}"#,
         )?;
         dto.prepare()?;
         let domain = super::HlsCacheConfig::from(&dto);
         let restored = shared::model::HlsCacheConfigDto::from(&domain);
         assert_eq!(restored.startup, dto.startup);
+        assert_eq!(domain.min_origin_target_duration_secs, shared::model::Secs::new(6));
+        assert_eq!(restored.min_origin_target_duration_secs, shared::model::Secs::new(6));
         assert_eq!(domain.startup.max_progressive_segments, 3);
         assert_eq!(domain.startup.max_deferred_repairs, 7);
         Ok(())
@@ -550,7 +559,8 @@ mod tests {
                 max_concurrent_segment_fetches_per_session: 2,
                 max_concurrent_segment_fetches_global: 64,
                 origin_manifest_timeout_ms: Millis::new(3_000),
-                origin_segment_timeout_ms: Millis::new(10_000),
+                min_origin_target_duration_secs: shared::model::Secs::new(0),
+                origin_segment_timeout_ms: shared::model::HlsSegmentTimeout::Auto,
                 initial_manifest_wait_timeout_secs: Secs::new(90),
                 session_idle_timeout: Secs::new(300),
                 manifest_recovery_burst: HlsManifestRecoveryBurstConfig::default(),
