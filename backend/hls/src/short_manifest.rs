@@ -4,6 +4,41 @@ use crate::{
     manifest_acceptance::HlsManifestAcceptanceGeneration, manifest_origin_binding::HlsManifestOriginBinding,
     media_reserve::HlsManifestCommitIdentity, HlsSession,
 };
+use shared::model::Secs;
+
+pub(crate) fn log_short_window_warning(session: &HlsSession, segment_count: usize, context: &str) {
+    log::warn!(
+        "HLS short {context}: RFC 8216 section 6.2.2 recommends three target durations; host={} session={} proxy_session={} segments={segment_count} qualification={} burst={}",
+        session.origin_control.pinned_host.as_deref().map_or_else(|| "none".to_string(), crate::hls_origin_log_value),
+        crate::safe_session_key(&session.key),
+        crate::safe_proxy_session_id(&session.proxy_session_id),
+        session.origin_control.acceptance_generation.0,
+        session.origin_control.acceptance_episode.as_ref().map_or(0, |episode| episode.completed_burst_candidates)
+    );
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HlsTargetDurationQualificationResult {
+    SuitableOriginSelected,
+    NoSuitableOrigin,
+    NotApplicable,
+}
+
+/// A policy snapshot shared by every lease and reduced retry of one qualification.
+/// Configuration changes take effect only when the next qualification starts.
+#[derive(Clone, Debug)]
+pub(crate) struct HlsTargetDurationQualification {
+    pub(crate) basis: HlsOriginQualificationBasis,
+    pub(crate) minimum: Secs,
+    pub(crate) result: Option<HlsTargetDurationQualificationResult>,
+    pub(crate) warned: bool,
+}
+
+impl HlsTargetDurationQualification {
+    pub(crate) fn new(session: &HlsSession, minimum: Secs) -> Self {
+        Self { basis: HlsOriginQualificationBasis::capture(session), minimum, result: None, warned: false }
+    }
+}
 
 /// The validated origin foundation, deliberately independent of window movement and leases.
 #[derive(Clone, Debug, PartialEq, Eq)]

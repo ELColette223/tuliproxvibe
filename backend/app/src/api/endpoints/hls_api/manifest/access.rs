@@ -17,7 +17,6 @@ use axum::{
 };
 use shared::model::VirtualId;
 use std::sync::Arc;
-use tuliprox_core::utils::current_time_millis;
 use tuliprox_hls::api::{
     HlsAccessContext, HlsAccessLease, HlsAccessLeaseId, HlsLeasePlaybackMode, HlsOriginSource,
     HlsRuntimeCustomTailReason, HlsSessionHandle, HlsTerminalFailedClosedReason, ProxySessionId,
@@ -28,7 +27,11 @@ pub(in crate::api::endpoints::hls_api) async fn mark_successful_canonical_manife
     session: &HlsSessionHandle,
     now_ms: u64,
 ) {
-    mark_hls_authorized_media_access(app_state, session, now_ms).await;
+    if session.read().await.origin_playback_kind() == tuliprox_core::model::PlaybackKind::LiveHls {
+        mark_hls_authorized_manifest_access(app_state, session, now_ms).await;
+    } else {
+        mark_hls_authorized_media_access(app_state, session, now_ms).await;
+    }
 }
 
 pub(in crate::api::endpoints::hls_api) async fn mark_hls_authorized_manifest_access(
@@ -154,11 +157,11 @@ pub(in crate::api::endpoints::hls_api) async fn hls_manifest_preflight_refresh_o
     now_ms: u64,
 ) -> Result<HlsManifestRefreshOrdering, Box<axum::response::Response>> {
     match hls_manifest_terminal_preflight(session, lease, now_ms).await {
-        HlsManifestTerminalPreflight::ServeCommittedPlayback => {
-            Err(Box::new(hls_terminal_playback_response(lease, proxy_session_id, access_lease_id).unwrap_or_else(
-                || hls_terminal_failed_closed_response(HlsTerminalFailedClosedReason::RuntimeUnavailable),
-            )))
-        }
+        HlsManifestTerminalPreflight::ServeCommittedPlayback => Err(Box::new(
+            hls_terminal_playback_response(app_state, lease, proxy_session_id, access_lease_id).unwrap_or_else(|| {
+                hls_terminal_failed_closed_response(HlsTerminalFailedClosedReason::RuntimeUnavailable)
+            }),
+        )),
         HlsManifestTerminalPreflight::BootstrapPendingLease => Ok(HlsManifestRefreshOrdering::Background),
         HlsManifestTerminalPreflight::RefreshBeforeTerminalEvaluation => {
             Ok(HlsManifestRefreshOrdering::AwaitBeforeTerminalEvaluation)
@@ -187,7 +190,7 @@ pub(in crate::api::endpoints::hls_api) async fn hls_proxy_manifest(
 ) -> axum::response::Response {
     let proxy_session_id = ProxySessionId(params.proxy_session_id);
     let access_lease_id = HlsAccessLeaseId(params.hls_access_lease_id);
-    let now_ms = current_time_millis();
+    let now_ms = app_state.hls.proxy.now_ms();
     let access_lease_snapshot =
         app_state.hls.proxy.access_lease_response_snapshot(&access_lease_id, &proxy_session_id, now_ms).await;
     if let Some(lease) = access_lease_snapshot.as_ref() {
@@ -197,7 +200,7 @@ pub(in crate::api::endpoints::hls_api) async fn hls_proxy_manifest(
                 .is_some_and(HlsRuntimeCustomTailReason::permits_unpublished_lease_standalone_tail);
         if let (false, Some(response)) = (
             standalone_policy_response_required,
-            hls_terminal_playback_response(lease, &proxy_session_id, &access_lease_id),
+            hls_terminal_playback_response(&app_state, lease, &proxy_session_id, &access_lease_id),
         ) {
             return response;
         }

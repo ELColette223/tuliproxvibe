@@ -7,6 +7,7 @@ use super::{
     },
     model::{FetchedOriginManifest, HlsOriginManifestFetchContext, RetryPolicy, DEFAULT_HLS_TARGET_DURATION_SECS},
     selection_log::{log_manifest_initial_attempt, log_manifest_retry_scheduled, ManifestRetryLogKind},
+    telemetry::observe_manifest_attempt,
 };
 #[cfg(any(test, feature = "test-support"))]
 use super::{model::LiveHlsOriginEntry, selection_log::log_origin_refresh_retry_scheduled};
@@ -16,6 +17,7 @@ use crate::{
     observability::hls_origin_log_value, scrub_hls_origin_headers, MAX_MANUAL_REDIRECTS,
 };
 use axum::http::HeaderMap;
+use futures::FutureExt;
 use log::debug;
 #[cfg(any(test, feature = "test-support"))]
 use reqwest::Client;
@@ -65,18 +67,29 @@ impl<'a> HlsOriginManifestFetchRequest<'a> {
 pub async fn fetch_hls_origin_manifest_request(
     request: HlsOriginManifestFetchRequest<'_>,
 ) -> Result<FetchedOriginManifest, OriginManifestFetchError> {
-    match request.mode {
+    request.context.ensure_current_origin().await?;
+    if request.context.attempt.as_ref().is_some_and(|attempt| attempt.is_closed()) {
+        return Err(OriginManifestFetchError::RetryExhausted);
+    }
+    let result = match request.mode {
         HlsOriginManifestFetchMode::InitialGlobalPolicy => {
             fetch_hls_origin_manifest_initial_global_policy(request.context).await
         }
         HlsOriginManifestFetchMode::RecoveryDirectTarget { binding, reason, log_context } => {
-            let fetched =
-                fetch_hls_origin_manifest_recovery_direct_target(request.context, binding, reason, log_context).await?;
-            resolve_archive_master_manifest(request.context, fetched).await
+            match fetch_hls_origin_manifest_recovery_direct_target(request.context, binding, reason, log_context).await
+            {
+                Ok(fetched) => resolve_archive_master_manifest(request.context, fetched).await,
+                Err(error) => Err(error),
+            }
         }
+    };
+    match result {
+        Ok(fetched) => Ok(fetched),
+        Err(error) => Err(request.context.classify_current_error(error).await),
     }
 }
 
+#[allow(clippy::too_many_lines, reason = "One loop owns the shared attempt budget and its original failure.")]
 async fn fetch_hls_origin_manifest_initial_global_policy(
     context: &HlsOriginManifestFetchContext,
 ) -> Result<FetchedOriginManifest, OriginManifestFetchError> {
@@ -95,59 +108,73 @@ async fn fetch_hls_origin_manifest_initial_global_policy(
         context.origin_manifest_timeout_ms.max(1),
     ))
     .with_content_coding(OutboundContentCodingPolicy::Identity)
+    .with_proxy_authentication_failover(context.attempt.as_ref().is_none_or(|attempt| attempt.permits_407_retry()))
     .without_resource_retries();
     let attempts = context.retry_policy.attempt_count();
 
     // This HLS loop owns the logical manifest-attempt budget. Each iteration may traverse one bounded provider URL
     // failover cycle and redirect chain, but the generic resource-retry counter is not nested beneath it.
     for attempt_index in 0..attempts {
-        let response_result = if context.use_manual_redirects {
-            send_input_with_retry_and_provider_policy_with_manual_redirects_and_options_result(
-                &context.app_config,
-                &context.no_redirect_client,
-                &input_source,
-                Some(&context.headers),
-                context.origin_entry.url(),
-                MAX_MANUAL_REDIRECTS,
-                fetch_options,
-            )
-            .await
-        } else {
-            send_input_with_retry_and_provider_policy_with_options_result(
-                &context.app_config,
-                &context.client,
-                &input_source,
-                Some(&context.headers),
-                context.origin_entry.url(),
-                fetch_options,
-            )
-            .await
-        };
-        let fetch_result = match response_result {
-            Ok(response_result) => {
-                let provider_url_index = response_result.provider_url_index;
-                let resolved_request_url = resolved_hls_manifest_request_url_from_input(
+        context.ensure_current_origin().await?;
+        let shared_index = context.attempt.as_ref().map_or(attempt_index, |attempt| attempt.logical_attempts());
+        if context.attempt.as_ref().is_some_and(|attempt| !attempt.begin_logical_attempt()) {
+            return Err(OriginManifestFetchError::RetryExhausted);
+        }
+        let fetch_result = observe_manifest_attempt(context, shared_index, async {
+            let response_result = if context.use_manual_redirects {
+                send_input_with_retry_and_provider_policy_with_manual_redirects_and_options_result(
+                    &context.app_config,
+                    &context.no_redirect_client,
                     &input_source,
-                    provider_url_index,
+                    Some(&context.headers),
                     context.origin_entry.url(),
-                );
-                response_to_fetched_manifest(
-                    response_result.response,
-                    provider_url_index,
-                    resolved_request_url,
-                    context.origin_manifest_timeout_ms,
+                    MAX_MANUAL_REDIRECTS,
+                    fetch_options,
                 )
                 .await
+            } else {
+                send_input_with_retry_and_provider_policy_with_options_result(
+                    &context.app_config,
+                    &context.client,
+                    &input_source,
+                    Some(&context.headers),
+                    context.origin_entry.url(),
+                    fetch_options,
+                )
+                .await
+            };
+            match response_result {
+                Ok(response_result) => {
+                    let provider_url_index = response_result.provider_url_index;
+                    let resolved_request_url = resolved_hls_manifest_request_url_from_input(
+                        &input_source,
+                        provider_url_index,
+                        context.origin_entry.url(),
+                    );
+                    response_to_fetched_manifest(
+                        response_result.response,
+                        provider_url_index,
+                        resolved_request_url,
+                        context.origin_manifest_timeout_ms,
+                    )
+                    .await
+                }
+                Err(err) => Err(origin_manifest_fetch_error_from_io_error(&err)),
             }
-            Err(err) => Err(origin_manifest_fetch_error_from_io_error(&err)),
-        };
+        })
+        .await;
+        context.ensure_current_origin().await?;
         let fetch_result = match fetch_result {
             Ok(fetched) => resolve_archive_master_manifest(context, fetched).await,
             Err(err) => Err(err),
         };
+        let fetch_result = match fetch_result {
+            Ok(fetched) => Ok(fetched),
+            Err(error) => Err(context.classify_current_error(error).await),
+        };
         match fetch_result {
             Ok(fetched) => return Ok(fetched.with_attempts(attempt_index + 1)),
-            Err(err) if is_hls_retryable_initial_manifest_fetch_error(&err) && attempt_index + 1 < attempts => {
+            Err(err) if is_hls_retryable_initial_manifest_fetch_error(&err) && shared_index + 1 < attempts => {
                 record_retryable_manifest_attempt_failure(context, progress_generation, &err, current_time_millis())
                     .await;
                 let retry_after_ms = match &err {
@@ -158,11 +185,11 @@ async fn fetch_hls_origin_manifest_initial_global_policy(
                     _ => None,
                 };
                 let jitter_ms = if retry_after_ms.is_some() { 0 } else { context.retry_policy.sample_jitter_ms() };
-                let delay_ms = next_retry_delay_ms(&context.retry_policy, attempt_index, retry_after_ms, jitter_ms);
+                let delay_ms = next_retry_delay_ms(&context.retry_policy, shared_index, retry_after_ms, jitter_ms);
                 log_manifest_retry_scheduled(
                     context,
                     ManifestRetryLogKind::InitialFetch,
-                    attempt_index,
+                    shared_index,
                     attempts,
                     delay_ms,
                     None,
@@ -205,20 +232,24 @@ async fn resolve_archive_master_manifest(
         &master.provider_session_headers,
         &variant_url,
     );
-    let mut variant = timeout(
-        Duration::from_millis(context.origin_manifest_timeout_ms.max(1)),
-        fetch_origin_manifest_once(
-            &variant_url,
-            &headers,
-            &context.client,
-            &context.no_redirect_client,
-            context.use_manual_redirects,
-            master.provider_url_index,
-            context.origin_manifest_timeout_ms,
-        ),
+    let mut variant = observe_manifest_attempt(
+        context,
+        0,
+        timeout(
+            Duration::from_millis(context.origin_manifest_timeout_ms.max(1)),
+            fetch_origin_manifest_once(
+                &variant_url,
+                &headers,
+                &context.client,
+                &context.no_redirect_client,
+                context.use_manual_redirects,
+                master.provider_url_index,
+                context.origin_manifest_timeout_ms,
+            ),
+        )
+        .map(|result| result.unwrap_or_else(|_| Err(OriginManifestFetchError::Timeout))),
     )
-    .await
-    .map_err(|_| OriginManifestFetchError::Timeout)??;
+    .await?;
     if classify_hls_playlist(&variant.body) != HlsPlaylistKind::Media {
         return Err(OriginManifestFetchError::Request("archive master variant is not a media playlist".to_string()));
     }

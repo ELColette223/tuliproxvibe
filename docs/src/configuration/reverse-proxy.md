@@ -60,6 +60,7 @@ reverse_proxy:
 | `rewrite_secret` | String | `""` | A 32-character Hex string (16 bytes). Tuliprox encrypts/signs the original image URLs during the rewrite process. To prevent image URLs from becoming invalid after a server restart, you MUST enter a static secret here. |
 | `stream_history` | Block | `null` | Optional stream telemetry block that persists raw connect/disconnect/startup-failure events to daily history files. |
 | `qos_aggregation` | Block | `null` | Optional background worker that aggregates stream history into compact per-stream QoS snapshots. |
+| `hls_origin_telemetry` | Block | `null` | Optional measurement of Shared HLS origin transfer quality, exposed at `GET /api/v1/hls/origin-telemetry`. See [Shared HLS Origin Telemetry](../operator/hls-origin-telemetry.md). |
 
 **Internal destinations are never exposed through the resource route.** When resource rewriting is disabled, channel
 logos, Xtream covers and backdrops, and EPG image links are classified before they are written into player output.
@@ -290,6 +291,10 @@ For the configuration reference, see [Shared HLS Configuration](./shared-hls-con
 For the shared session, access lease, and transient delivery state machines, see
 [HLS Cache State Machines](./hls-cache-state-machine.md).
 
+When all origin segments fail during pending startup or idle re-entry, disabling custom responses makes the HLS
+fallback use the global `custom_stream_response_error_status` (default `502`). See
+[Shared HLS Configuration](./shared-hls-configuration.md#optional-startup-modes) for startup recovery behavior.
+
 The session and global byte limits cover committed objects, immutable revisions, and outstanding write reservations.
 Staging and postprocessing grow their budgets before writing additional bytes. Committing an object consumes its own
 reservation; capacity released by a completed or aborted write wakes deferred downloads. Both targeted reclamation
@@ -310,7 +315,8 @@ reverse_proxy:
     max_concurrent_segment_fetches_per_session: 2
     max_concurrent_segment_fetches_global: 64
     origin_manifest_timeout_ms: 3000
-    origin_segment_timeout_ms: 10000
+    min_origin_target_duration_secs: 0
+    origin_segment_timeout_ms: auto
     session_idle_timeout: 300
     segment_repair:
       max_level: "off"
@@ -344,8 +350,8 @@ windows, media readiness, lease validity, and resource retention rules still app
 | `max_segments_prefetch` | Int | `6` | Maximum session-local segment prefetch queue depth. |
 | `max_concurrent_segment_fetches_per_session` | Int | `2` | Maximum concurrent future segment fetches for one HLS session. |
 | `max_concurrent_segment_fetches_global` | Int | `64` | Maximum concurrent future segment fetches across all HLS sessions. |
-| `origin_manifest_timeout_ms` | Milliseconds | `3000` | Timeout for future Origin manifest fetches. |
-| `origin_segment_timeout_ms` | Milliseconds | `10000` | Timeout for future Origin segment fetches. |
+| `origin_manifest_timeout_ms` | Milliseconds | `3000` | Timeout for Origin manifest, Key and MAP fetches. |
+| `origin_segment_timeout_ms` | `auto` or positive milliseconds | `auto` | Segment/Part timeout per attempt; AUTO uses the full shared-session target duration, or 10000 ms if missing/zero. |
 | `initial_manifest_wait_timeout_secs` | Seconds | `90` | How long a client may wait for the initial manifest decision (session bootstrap window). Lower values fail unhealthy sessions faster; higher values tolerate slow providers. |
 | `session_idle_timeout` | Seconds | `300` | Idle timeout before a future HLS cache session may be collected. |
 | `segment_repair.max_level` | String | `off` | Maximum repair level allowed by the codec-aware MPEG-TS segment repair policy (`off`, `low`, `medium`, `high`). |
@@ -449,8 +455,13 @@ reverse_proxy:
 
 ## 5. Resource Retries (`resource_retry`)
 
-This block defines the retry behavior when Tuliprox proxies static resources (logos, EPG images).
-It ensures transient network issues or temporary provider timeouts don't result in broken images for your clients.
+This block defines the shared retry behavior for outbound requests that use the standard retry policy.
+It ensures transient network issues or temporary provider timeouts do not fail a request on the first error.
+
+Image proxy fetches (logos, covers, EPG icons on the Web UI and player resource routes) do not use these same-URL
+retries: they make one attempt per URL, fail after 15 seconds without a response, and run at most 6 concurrent
+upstream fetches per host. Provider URL failover still applies. A failing image server therefore cannot hold a
+client connection for minutes or receive a retry burst.
 
 ```yaml
 reverse_proxy:
@@ -644,8 +655,22 @@ If Tuliprox selected a different provider account for every segment, providers c
 hopping. Tuliprox therefore keeps a logical, confirmed slot lease for the playback:
 
 * `hls_session_ttl_secs: 15`: After Tuliprox has forwarded actual media bytes, a cleanly finished HLS request may keep
-  its provider account reserved for this playback for up to 15 seconds. A manifest-only or abandoned start does not
-  create a capacity reservation.
+  its provider account reserved for this playback for up to 15 seconds. Ordinary manifest-only or abandoned starts do
+  not create a capacity reservation.
+* Shared live HLS additionally reserves its existing slot at the first accepted origin media manifest, before releasing
+  the manifest allocation. Its fixed start protection is hard-active for `1T`, soft-active through `3T`, and reserves
+  provider capacity through `3T + 1s`, using that manifest's target duration `T`. Polling, retries, duration changes and
+  additional access leases do not extend this window. Normal authorized media activity renews protection. The local
+  entry master keeps the existing access-lease timeout and acquires no provider slot. A timely session request receives
+  the configured processing budget without inheriting the original entry deadline.
+* A definitive shared-start capacity failure wakes waiters and releases the matching binding immediately. It returns
+  the provider-exhausted custom video, the configured disabled-video status (default `502`), or `503` when an enabled
+  provider-exhausted asset is missing. The failed access lease retains that outcome; a new master may retry admission.
+* A shared live-HLS resource retry keeps its already admitted slot through preparation, transfers, backoff and required
+  processing using one fixed resource budget. This is a work right on the existing provider lease; it does not confirm
+  media or renew normal protection. Active I/O and any work rights still count one logical slot. EOF, terminal failure,
+  deadline and cancellation release only that operation's right, including direct transient response bodies. Polling and
+  configuration changes cannot renew an operation's deadline. New work after normal expiry requires fresh admission.
 * Archive/Catchup playback uses the same confirmed-lease principle with `catchup_session_ttl_secs: 45`.
 * Provider errors, preemption, kicks and timeouts release the lease immediately rather than keeping the reconnect window.
 * `provider_affinity_ttl_secs: 120`: When a player pauses its requests longer than the reconnect window (for example

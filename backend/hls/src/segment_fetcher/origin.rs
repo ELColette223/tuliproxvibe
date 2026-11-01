@@ -17,23 +17,58 @@ pub(super) async fn fetch_segment_into_cache(
     snapshot: &SegmentFetchSnapshot,
     policy: &SegmentFetchPolicy,
 ) -> Result<SegmentFetchCommit, SegmentFetchError> {
-    ensure_segment_key_dependency_ready(context, snapshot, policy).await?;
-    fetch_segment_with_retries_into_cache(context, snapshot, policy).await
+    // The first cache write scans the whole cache directory; do it before any per-attempt deadline starts.
+    context.segment_cache.prepare_capacity_accounting().await.map_err(|error| SegmentFetchError::cache_body(&error))?;
+    let target = context.session.read().await.target_duration;
+    let budget = policy.demand_wait_timeout_for_session(
+        if snapshot.key_dependency.is_some() {
+            super::HlsSegmentFetchWorkload::EncryptedWithKey
+        } else {
+            super::HlsSegmentFetchWorkload::Clear
+        },
+        target,
+    );
+    let now = tokio::time::Instant::now();
+    let work = crate::HlsOriginRetryWork::begin(
+        &context.session,
+        context.origin_io.as_ref().map(|io| &io.ctx.active_provider),
+        now.checked_add(budget).unwrap_or(now),
+    )
+    .await;
+    let run = async {
+        if let (Some(work), Some(io)) = (&work, &context.origin_io) {
+            work.protect(&io.ctx.active_provider, &context.session, snapshot.origin_work_generation, false).await?;
+        }
+        ensure_segment_key_dependency_ready(context, snapshot, policy, work.clone()).await?;
+        fetch_segment_with_retries_into_cache(context, snapshot, policy, work.clone()).await
+    };
+    if let Some(work) = &work {
+        tokio::time::timeout_at(work.deadline(), run).await.unwrap_or(Err(SegmentFetchError::Timeout))
+    } else {
+        run.await
+    }
 }
 
 pub(super) async fn prepare_segment_origin_attempt(
     context: SegmentFetchContext,
-    policy: SegmentFetchPolicy,
+    attempt: crate::HlsResourceFetchAttempt,
     expected_generation: u64,
 ) -> Result<SegmentOriginAttemptGuard, SegmentFetchError> {
-    prepare_media_origin_attempt(
+    if let Some(io) = &context.origin_io {
+        attempt.protect_origin_work(&io.ctx.active_provider, &context.session, expected_generation, false).await?;
+    }
+    let guard = prepare_media_origin_attempt(
         context.origin_io.as_ref(),
         &context.session,
         expected_generation,
-        hls_object_body_deadline(policy.origin_segment_timeout_ms),
+        hls_object_body_deadline(attempt.timeout.effective_ms),
     )
     .await
-    .map_err(SegmentFetchError::ProviderUnavailable)
+    .map_err(SegmentFetchError::ProviderUnavailable)?;
+    if let Some(io) = &context.origin_io {
+        attempt.protect_origin_work(&io.ctx.active_provider, &context.session, expected_generation, true).await?;
+    }
+    Ok(guard)
 }
 
 pub(super) async fn finish_segment_origin_attempt(
@@ -48,8 +83,15 @@ pub(super) async fn fetch_segment_with_retries_into_cache(
     context: &SegmentFetchContext,
     snapshot: &SegmentFetchSnapshot,
     policy: &SegmentFetchPolicy,
+    retry_work: Option<std::sync::Arc<crate::HlsOriginRetryWork>>,
 ) -> Result<SegmentFetchCommit, SegmentFetchError> {
-    let provider_headers = context.session.read().await.origin_provider_session_headers.clone();
+    let (provider_headers, media_duration_ms) = {
+        let session = context.session.read().await;
+        (
+            session.origin_provider_session_headers.clone(),
+            session.segments.get(&snapshot.proxy_seq).map(|entry| entry.duration_ms),
+        )
+    };
     let headers = build_segment_origin_headers(&context.headers, &provider_headers, snapshot.fetch_ref.byte_range)?;
     let target = HlsOriginResourceFetchTarget {
         kind: HlsResourceFetchKind::Segment,
@@ -62,8 +104,11 @@ pub(super) async fn fetch_segment_with_retries_into_cache(
         } else {
             HlsOriginByteRangeExpectation::FullObject
         },
+        media_duration_ms,
     };
     let clients = HlsOriginResourceClients {
+        retry_work,
+        session: Some(context.session.clone()),
         client: context.client.clone(),
         no_redirect_client: context.no_redirect_client.clone(),
         use_manual_redirects: context.use_manual_redirects,
@@ -75,7 +120,6 @@ pub(super) async fn fetch_segment_with_retries_into_cache(
     let expected_generation = snapshot.origin_work_generation;
     let context = context.clone();
     let snapshot = snapshot.clone();
-    let policy_for_prepare = policy.clone();
     let prepare_context = context.clone();
     let cleanup_context = context.clone();
     run_hls_origin_resource_retry_loop_with_attempt_prepare(
@@ -83,10 +127,9 @@ pub(super) async fn fetch_segment_with_retries_into_cache(
         clients,
         policy,
         &log_identity,
-        move |_attempt| {
+        move |attempt| {
             let context = prepare_context.clone();
-            let policy = policy_for_prepare.clone();
-            async move { prepare_segment_origin_attempt(context, policy, expected_generation).await }.boxed()
+            async move { prepare_segment_origin_attempt(context, attempt, expected_generation).await }.boxed()
         },
         move |guard| {
             let context = cleanup_context.clone();

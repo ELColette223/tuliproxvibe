@@ -68,6 +68,7 @@ mod origin;
 mod origin_account_runtime;
 mod origin_attempt;
 mod origin_progress;
+pub mod origin_telemetry;
 mod paths;
 mod post_refresh_availability;
 mod prefetch;
@@ -117,6 +118,12 @@ pub use self::terminal_tail::HlsTerminalTailGeneration;
 /// by the module that defines it, so a subsystem can be pruned or moved without
 /// reading the whole facade. Nothing is kept for a hypothetical future consumer.
 pub mod api {
+    #[cfg(any(test, feature = "test-support"))]
+    pub use super::media_reserve::{evaluate_lease_reserve, HlsLeaseReserveInput};
+    #[cfg(any(test, feature = "test-support"))]
+    pub use super::recovery_timing::HlsRecoveryTriggerBudgetMs;
+    #[cfg(any(test, feature = "test-support"))]
+    pub use super::timeline::HlsSegmentEncryption;
     pub use super::{
         availability::{
             commit_terminal_tail_if_lease_reserve_requires_cutover, hls_manifest_acceptance_directive_for_session,
@@ -137,7 +144,9 @@ pub mod api {
         lease::{
             new_hls_access_lease_id, HlsAccessLease, HlsAccessLeaseActivation, HlsAccessLeaseId,
             HlsAccessLeasePendingDeadline, HlsAccessLeaseState, HlsAccessLeaseTiming, HlsAccessLeaseTouch,
-            HlsFreshManifestRequiredReason, HlsLeaseStartupAdmissionState, HlsMediaLeaseIdentity, HlsPlaybackFamilyKey,
+            HlsFreshManifestRequiredReason, HlsLeaseManifestPublicationOutcome,
+            HlsLeaseManifestPublicationRejectReason, HlsLeaseStartupAdmissionState, HlsMediaLeaseIdentity,
+            HlsPlaybackFamilyKey,
         },
         lifecycle::{HlsLifecycleEvent, HlsLifecycleEventKey},
         live_window::{HlsLiveWindowPlan, HlsLiveWindowView},
@@ -169,12 +178,12 @@ pub mod api {
             HlsAccountBindingProtection, HlsAccountOverlapTiming, HlsBoundAccountAcquireErrorKind,
             HlsEffectiveOriginAcquirePolicy, HlsOriginAccountBinding, HlsOriginAccountBindingMode,
             HlsOriginAccountDetachedReason, HlsOriginAccountStatus, HlsOriginIoContext, HlsOriginSource,
-            HlsOriginSourceKind, HlsOriginWorkClass,
+            HlsOriginSourceKind, HlsOriginStartProtection, HlsOriginWorkClass,
         },
         origin_account_runtime::{
             HlsOriginAccountRuntime, HlsOriginAccountSnapshot, HlsOriginAccountWork, HlsPreparedOriginAccount,
         },
-        origin_progress::publication_late_after_ms,
+        origin_progress::{publication_late_after_ms, HlsOriginPathCondition},
         paths::{HlsMapFile, HlsSegmentFile, TransientResourceFile},
         playback::{
             validate_hls_access_lease, HlsAccessAdmissionMode, HlsAccessContext, HlsAccessLeaseValidationError,
@@ -185,9 +194,10 @@ pub mod api {
             cold_start_retry_after_seconds, maybe_trigger_origin_refresh_with_outcome, trigger_origin_refresh_sync,
             HlsManifestCommitRequirement, HlsOriginRefreshTriggerOutcome, HlsPostRefreshRuntime, OriginRefreshRequest,
         },
-        renderer::{HlsManifestRenderer, RenderedManifest},
+        renderer::{HlsManifestRenderer, RenderError, RenderedManifest},
         resource_fetch::{
-            retry_after_secs_from_ms, HlsOriginResourceClients, HlsOriginResourceFetchError, HlsResourceFetchAttempt,
+            retry_after_secs_from_ms, HlsOriginResourceClients, HlsOriginResourceFetchError, HlsOriginRetryWork,
+            HlsResourceFetchAttempt,
         },
         response::{
             finite_hls_immutable_media_response, finite_hls_media_head_response, finite_hls_media_response,
@@ -237,7 +247,7 @@ pub mod api {
 #[cfg(test)]
 pub(crate) use self::timeline::TimelineMapError;
 pub(crate) use self::{
-    availability::{hls_recovery_timing_policy, HlsManifestAcceptanceDirective, HLS_PLAYBACK_RATE_GUARD_MILLI},
+    availability::{hls_recovery_timing_policy, HlsManifestAcceptanceDirective},
     availability_reevaluation::HlsAvailabilityReevaluationRegistration,
     backpressure::{classify_hls_backpressure, HlsBackpressureState},
     cache::{
@@ -292,8 +302,8 @@ pub(crate) use self::{
         build_hls_origin_resource_headers, build_hls_origin_resource_headers_with_client_range,
         retry_after_secs_from_ms, run_hls_origin_resource_retry_loop_with_attempt_prepare,
         HlsOriginByteRangeExpectation, HlsOriginResourceBodyDeadline, HlsOriginResourceClients,
-        HlsOriginResourceFetchError, HlsOriginResourceFetchTarget, HlsResourceFetchAttempt, HlsResourceFetchKind,
-        HlsResourceFetchSource,
+        HlsOriginResourceFetchError, HlsOriginResourceFetchTarget, HlsOriginRetryWork, HlsOriginTimeoutConfig,
+        HlsOriginTimeoutPolicy, HlsResourceFetchAttempt, HlsResourceFetchKind, HlsResourceFetchSource,
     },
     segment_fetcher::{HlsSegmentWorkerPool, SegmentFetchContext, SegmentFetchPolicy},
     segment_repair::{
@@ -326,6 +336,7 @@ pub(crate) use self::{
 #[cfg(any(test, feature = "test-support"))]
 pub use self::{
     manifest_acceptance::{HlsManifestAcceptanceExhaustionReason, HlsManifestAcceptanceTrigger},
+    manifest_fetch::HlsManifestAttemptContext,
     master_playlist::HlsBandwidthPersistenceState,
     media_reserve::{
         HlsLeaseManifestSegment, HlsLeaseManifestSnapshot, HlsManifestCommitIdentity, HlsManifestDeliveryMode,

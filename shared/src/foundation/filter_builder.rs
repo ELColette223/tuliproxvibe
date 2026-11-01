@@ -1,6 +1,6 @@
 use crate::{
     error::TuliproxError,
-    foundation::{get_filter, BinaryOperator, Filter, StringOperator, UnaryOperator},
+    foundation::{get_filter, BinaryOperator, Filter, Leaf, Node, NodeId, StringOperator},
     model::{
         managed_filter_rule_template_name, FilterGroupOperator, FilterNode, FilterTypeValue, ItemField,
         ManagedFilterRule, PatternTemplate, PlaylistItemType, TemplateValue,
@@ -15,9 +15,13 @@ pub struct FilterBuilderError {
 }
 
 impl FilterBuilderError {
-    fn root(message: impl Into<String>) -> Self { Self { path: Vec::new(), message: message.into() } }
+    fn root(message: impl Into<String>) -> Self {
+        Self { path: Vec::new(), message: message.into() }
+    }
 
-    fn at(path: &[usize], message: impl Into<String>) -> Self { Self { path: path.to_vec(), message: message.into() } }
+    fn at(path: &[usize], message: impl Into<String>) -> Self {
+        Self { path: path.to_vec(), message: message.into() }
+    }
 }
 
 impl std::fmt::Display for FilterBuilderError {
@@ -195,9 +199,13 @@ pub fn compile_visual_rules_to_filter_dsl(
     // `!` starts a template placeholder (`!NAME!`) and is substituted textually
     // BEFORE the parser sees quoted strings, so any name containing `!` must be
     // matched with a regex that encodes it as `\x21` instead of a bare literal.
-    fn has_bang(value: &str) -> bool { value.contains('!') }
+    fn has_bang(value: &str) -> bool {
+        value.contains('!')
+    }
 
-    fn escape_dsl_string(value: &str) -> String { value.replace('"', "\\\"") }
+    fn escape_dsl_string(value: &str) -> String {
+        value.replace('"', "\\\"")
+    }
 
     fn regex_escape(value: &str) -> String {
         let mut out = String::with_capacity(value.len() + 8);
@@ -382,7 +390,9 @@ fn compile_node(
     }
 }
 
-fn escape_filter_string(value: &str) -> String { value.replace('"', "\\\"") }
+fn escape_filter_string(value: &str) -> String {
+    value.replace('"', "\\\"")
+}
 
 fn exact_managed_reference(expression: &str, rules: &[ManagedFilterRule]) -> Option<String> {
     rules.iter().find(|rule| expression == rule.placeholder()).map(|rule| rule.id.clone())
@@ -480,56 +490,68 @@ fn contains_template_placeholder(expression: &str) -> bool {
 }
 
 fn filter_to_node(filter: &Filter) -> FilterNode {
-    match filter {
-        Filter::Group(inner) => {
-            FilterNode::Group { operator: FilterGroupOperator::All, children: vec![filter_to_node(inner)] }
-        }
-        Filter::FieldComparison(field, regex) => FilterNode::Regex { field: *field, pattern: regex.restr.clone() },
-        Filter::TypeComparison(_, item_type) => FilterNode::Type {
-            value: match item_type {
-                PlaylistItemType::Live
-                | PlaylistItemType::LiveHls
-                | PlaylistItemType::LiveDash
-                | PlaylistItemType::LiveUnknown => FilterTypeValue::Live,
-                PlaylistItemType::Video | PlaylistItemType::LocalVideo | PlaylistItemType::Catchup => {
-                    FilterTypeValue::Movie
-                }
-                _ => FilterTypeValue::Series,
-            },
+    filter_node_to_draft(filter, filter.root())
+}
+
+fn filter_node_to_draft(filter: &Filter, id: NodeId) -> FilterNode {
+    match filter.node(id).expect("parsed filter node") {
+        Node::Group(inner) => FilterNode::Group {
+            operator: FilterGroupOperator::All,
+            children: vec![filter_node_to_draft(filter, *inner)],
         },
-        Filter::StringComparison(field, operator, value) => {
-            FilterNode::String { field: *field, operator: *operator, value: value.clone() }
-        }
-        Filter::PresenceComparison(field, operator) => FilterNode::Presence { field: *field, operator: *operator },
-        Filter::NumericComparison(field, operator, value) => {
-            FilterNode::Number { field: *field, operator: *operator, value: *value }
-        }
-        Filter::SetComparison(field, values) => FilterNode::Set { field: *field, values: values.clone() },
-        Filter::UnaryExpression(UnaryOperator::Not, inner) => FilterNode::Not { node: Box::new(filter_to_node(inner)) },
-        Filter::BinaryExpression(left, operator, right) => binary_to_group(left, *operator, right),
+        Node::Leaf(id) => match filter.leaf(*id).expect("parsed filter leaf") {
+            Leaf::FieldComparison(field, regex) => FilterNode::Regex { field: *field, pattern: regex.restr.clone() },
+            Leaf::TypeComparison(_, item_type) => FilterNode::Type {
+                value: match item_type {
+                    PlaylistItemType::Live
+                    | PlaylistItemType::LiveHls
+                    | PlaylistItemType::LiveDash
+                    | PlaylistItemType::LiveUnknown => FilterTypeValue::Live,
+                    PlaylistItemType::Video | PlaylistItemType::LocalVideo | PlaylistItemType::Catchup => {
+                        FilterTypeValue::Movie
+                    }
+                    _ => FilterTypeValue::Series,
+                },
+            },
+            Leaf::StringComparison(field, operator, value) => {
+                FilterNode::String { field: *field, operator: *operator, value: value.clone() }
+            }
+            Leaf::PresenceComparison(field, operator) => FilterNode::Presence { field: *field, operator: *operator },
+            Leaf::NumericComparison(field, operator, value) => {
+                FilterNode::Number { field: *field, operator: *operator, value: *value }
+            }
+            Leaf::SetComparison(field, values) => FilterNode::Set { field: *field, values: values.clone() },
+        },
+        Node::Not(inner) => FilterNode::Not { node: Box::new(filter_node_to_draft(filter, *inner)) },
+        Node::And(left, right) => binary_to_group(filter, *left, BinaryOperator::And, *right),
+        Node::Or(left, right) => binary_to_group(filter, *left, BinaryOperator::Or, *right),
     }
 }
 
-fn binary_to_group(left: &Filter, operator: BinaryOperator, right: &Filter) -> FilterNode {
+fn binary_to_group(filter: &Filter, left: NodeId, operator: BinaryOperator, right: NodeId) -> FilterNode {
     let group_operator = match operator {
         BinaryOperator::And => FilterGroupOperator::All,
         BinaryOperator::Or => FilterGroupOperator::Any,
     };
     let mut children = Vec::new();
-    append_binary_child(&mut children, left, operator);
-    append_binary_child(&mut children, right, operator);
+    append_binary_child(&mut children, filter, left, operator);
+    append_binary_child(&mut children, filter, right, operator);
     FilterNode::Group { operator: group_operator, children }
 }
 
-fn append_binary_child(children: &mut Vec<FilterNode>, filter: &Filter, parent_operator: BinaryOperator) {
-    if let Filter::BinaryExpression(left, operator, right) = filter {
-        if *operator == parent_operator {
-            append_binary_child(children, left, parent_operator);
-            append_binary_child(children, right, parent_operator);
-            return;
+fn append_binary_child(children: &mut Vec<FilterNode>, filter: &Filter, id: NodeId, parent_operator: BinaryOperator) {
+    let operands = match (filter.node(id), parent_operator) {
+        (Some(Node::And(left, right)), BinaryOperator::And) | (Some(Node::Or(left, right)), BinaryOperator::Or) => {
+            Some((*left, *right))
         }
+        _ => None,
+    };
+    if let Some((left, right)) = operands {
+        append_binary_child(children, filter, left, parent_operator);
+        append_binary_child(children, filter, right, parent_operator);
+    } else {
+        children.push(filter_node_to_draft(filter, id));
     }
-    children.push(filter_to_node(filter));
 }
 
 pub fn validate_filter_library(

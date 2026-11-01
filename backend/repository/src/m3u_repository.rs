@@ -15,10 +15,7 @@ use log::{error, warn};
 use shared::{
     concat_string,
     error::{str_to_io_error, string_to_io_error, TuliproxError},
-    model::{
-        LiveStreamProperties, M3uPlaylistItem, PlaylistGroup, PlaylistItem, PlaylistItemType, StreamProperties,
-        XtreamCluster,
-    },
+    model::{LiveStreamProperties, M3uPlaylistItem, PlaylistGroup, PlaylistItem, StreamProperties, XtreamCluster},
     utils::{m3u_flussonic_live_file_index_key, m3u_stream_url_identity, PROVIDER_SCHEME_PREFIX},
 };
 use std::{
@@ -277,9 +274,7 @@ pub async fn m3u_write_playlist(
     let m3u_playlist = new_playlist
         .iter()
         .flat_map(|pg| &pg.channels)
-        .filter(|&pli| {
-            !matches!(pli.header.item_type, PlaylistItemType::SeriesInfo | PlaylistItemType::LocalSeriesInfo)
-        })
+        .filter(|&pli| !pli.header.item_type.is_series_info())
         .map(M3uPlaylistItem::from)
         .collect::<Vec<M3uPlaylistItem>>();
 
@@ -599,48 +594,20 @@ pub async fn load_input_m3u_playlist(
 #[cfg(test)]
 mod tests {
     use super::{load_input_m3u_stream_url, persist_input_m3u_playlist, replace_m3u_url_line};
-    use crate::{get_input_m3u_playlist_file_path, get_input_storage_path, BPlusTreeQuery};
-    use arc_swap::{ArcSwap, ArcSwapOption};
+    use crate::{
+        get_input_m3u_playlist_file_path, get_input_storage_path,
+        test_config::{app_config, app_config_in},
+        BPlusTreeQuery,
+    };
     use shared::{
         model::{
-            ConfigPaths, LiveStreamProperties, PlaylistGroup, PlaylistItem, PlaylistItemHeader, PlaylistItemType,
+            LiveStreamProperties, PlaylistGroup, PlaylistItem, PlaylistItemHeader, PlaylistItemType,
             SeriesStreamDetailEpisodeProperties, SeriesStreamDetailProperties, SeriesStreamProperties,
             StreamProperties, XtreamCluster,
         },
         utils::Internable,
     };
     use std::sync::Arc;
-    use tuliprox_core::{
-        model::{AppConfig, Config, MediaToolCapabilities, SourcesConfig},
-        utils::FileLockManager,
-    };
-
-    fn test_app_config() -> Arc<AppConfig> {
-        Arc::new(AppConfig {
-            config: Arc::new(ArcSwap::from_pointee(Config::default())),
-            sources: Arc::new(ArcSwap::from_pointee(SourcesConfig::default())),
-            hdhomerun: Arc::new(ArcSwapOption::default()),
-            api_proxy: Arc::new(ArcSwapOption::default()),
-            file_locks: Arc::new(FileLockManager::default()),
-            paths: Arc::new(ArcSwap::from_pointee(ConfigPaths {
-                home_path: String::new(),
-                config_path: String::new(),
-                storage_path: String::new(),
-                config_file_path: String::new(),
-                sources_file_path: String::new(),
-                mapping_file_path: None,
-                mapping_files_used: None,
-                template_file_path: None,
-                template_files_used: None,
-                api_proxy_file_path: String::new(),
-                custom_stream_response_path: None,
-            })),
-            custom_stream_response: Arc::new(ArcSwapOption::default()),
-            access_token_secret: [0; 32],
-            encrypt_secret: [0; 16],
-            media_tools: Arc::new(MediaToolCapabilities::new()),
-        })
-    }
 
     fn live_playlist(properties: Option<LiveStreamProperties>) -> Vec<PlaylistGroup> {
         vec![PlaylistGroup {
@@ -688,7 +655,7 @@ mod tests {
     async fn persist_input_m3u_playlist_preserves_learned_live_metadata_across_full_rewrite() {
         let temp = tempfile::tempdir().expect("temp dir should be created");
         let path = temp.path().join("input.db");
-        let app_config = test_app_config();
+        let app_config = app_config();
         let learned = LiveStreamProperties {
             video: Some("learned-video".intern()),
             audio: Some("learned-audio".intern()),
@@ -725,9 +692,7 @@ mod tests {
     #[tokio::test]
     async fn persisted_stream_url_index_resolves_series_episode_alias_token() {
         let temp = tempfile::tempdir().expect("temp dir should be created");
-        let app_config = test_app_config();
-        let config = Config { storage_dir: temp.path().to_string_lossy().into_owned(), ..Config::default() };
-        app_config.config.store(Arc::new(config));
+        let app_config = app_config_in(temp.path());
 
         let alias_name = "backup-account".intern();
         let storage_path = get_input_storage_path(&alias_name, &app_config.config.load().storage_dir)
@@ -778,9 +743,7 @@ mod tests {
     #[tokio::test]
     async fn persisted_stream_url_index_resolves_account_specific_alias_token() {
         let temp = tempfile::tempdir().expect("temp dir should be created");
-        let app_config = test_app_config();
-        let config = Config { storage_dir: temp.path().to_string_lossy().into_owned(), ..Config::default() };
-        app_config.config.store(Arc::new(config));
+        let app_config = app_config_in(temp.path());
 
         let alias_name = "backup-account".intern();
         let storage_path = get_input_storage_path(&alias_name, &app_config.config.load().storage_dir)

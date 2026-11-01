@@ -61,6 +61,7 @@ const LABEL_EPG_SOURCES: &str = "LABEL.EPG_SOURCES";
 const LABEL_USERNAME: &str = "LABEL.USERNAME";
 const LABEL_PASSWORD: &str = "LABEL.PASSWORD";
 const LABEL_PERSIST: &str = "LABEL.PERSIST";
+const LABEL_PLAYBACK_PROVIDER: &str = "LABEL.PLAYBACK_PROVIDER";
 const LABEL_ENABLED: &str = "LABEL.ENABLED";
 const LABEL_DISABLED: &str = "LABEL.DISABLED";
 const LABEL_ACCOUNTS: &str = "LABEL.ACCOUNTS";
@@ -447,6 +448,7 @@ generate_form_reducer!(
         Password => password: Option<String>,
         Proxy => proxy: Option<ProxyConfigDto>,
         Persist => persist: Option<String>,
+        PlaybackProvider => playback_provider: Option<String>,
         Enabled => enabled: bool,
         Priority => priority: i16,
         MaxConnections => max_connections: u16,

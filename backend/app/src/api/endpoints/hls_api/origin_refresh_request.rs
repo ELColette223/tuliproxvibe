@@ -30,6 +30,8 @@ pub(super) async fn hls_origin_refresh_request(
     let client = app_state.http_clients.stream.load().as_ref().clone();
     let no_redirect_client = app_state.http_clients.stream_no_redirect.load().as_ref().clone();
     OriginRefreshRequest {
+        work_owner: None,
+        attempt: None,
         app_config: Arc::clone(&app_state.app_config),
         session: Arc::clone(session),
         origin_entry: prepared.entry,

@@ -171,12 +171,21 @@ stateDiagram-v2
 
 ## Origin account protection
 
-Origin account protection is derived from the most recent successful media response. Manifest-only activity is not enough
-to mark a session as media-active.
+Shared live HLS grants bounded protection at its first accepted origin media manifest, while the manifest allocation still
+holds provider capacity. This start anchor freezes its target duration: hard-active through `1T`, soft-active through `3T`,
+with provider TTL through `3T + 1s`. Subsequent authorized media activity renews protection. Manifest polling and additional
+leases neither renew the start nor mark media delivery; generic provider `Starting` leases remain non-reserving.
+
+An admitted resource operation additionally holds continuous origin work and a deadline-bound right on that same provider
+lease through preparation, retries, backoff and required processing. Its fixed budget can outlive normal protection;
+new independent work requires its own valid admission. Normal protection and parallel work rights still count one slot.
+Only the completing operation's right is removed on success, final error, deadline or cancellation. Direct transient bodies
+retain it through EOF, timeout or Drop. This does not change the normal protection states below.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NoMediaYet: No successful media response yet
+    [*] --> NoMediaYet: No start anchor or authorized media yet
+    NoMediaYet --> HardActive: First accepted origin media manifest fixes start anchor
     NoMediaYet --> HardActive: Segment, MAP, or /r response succeeds
     HardActive --> SoftActive: now > last_media + target_duration
     SoftActive --> Expired: soft overlap window elapsed
@@ -186,8 +195,8 @@ stateDiagram-v2
 
 | Protection state | Condition |
 | :--- | :--- |
-| `NoMediaYet` | No segment, MAP, or transient resource response has succeeded yet. |
-| `HardActive` | Current time is inside the hard-active window after the last authorized media access. |
+| `NoMediaYet` | Neither a start anchor nor authorized media activity exists. |
+| `HardActive` | Current time is inside the hard window after the fixed start or later authorized media access. |
 | `SoftActive` | Hard-active protection elapsed, but the soft overlap window has not elapsed. |
 | `Expired` | The soft overlap window elapsed. |
 
@@ -220,7 +229,7 @@ The manifest commit policy tracks multiple signals:
 | :--- | :--- | :--- |
 | `PublicationLate` | No publication progress has been observed for `1.5 * TARGETDURATION`. | Lateness evidence only. By itself it neither switches host nor closes admission nor cuts over a lease. |
 | `RecoveryRequired` | Degraded origin evidence and lease reserve/ETA show that recovery work must start. | Opens one generation-bound acceptance episode and temporarily closes new admission while existing leases use their remaining READY reserve. |
-| `Critical` | At least one live lease has reached its reserve/transition boundary without committed recovery. | Evaluates that lease's safe cross-host handoff or prepared terminal decision before its media exhaustion deadline. |
+| `Critical` | At least one live lease has reached its reserve/transition boundary without committed recovery. | Prepares that lease's safe cross-host handoff or terminal media. Availability CSV publication still requires known reserve exhaustion. |
 | `NoAdmission` | Operator shorthand for the closed startup-admission gate; it is not a separate stored origin enum. | New leases are not admitted from insufficient READY startup media. Existing leases are evaluated independently and are not terminalized as a group. |
 
 An acceptance episode owns an immutable candidate plan, timing budget, workload binding, generation, and deadline. The
@@ -250,7 +259,7 @@ A segment request validates the access lease and then looks up the segment objec
 | Known but not ready | Wait briefly or return `503` with `Retry-After`. |
 | Missing from session timeline | Return an unavailable/expired response depending on context. |
 | Retryable or hard origin failure | Update origin-path evidence and bounded retry state; keep serving lease-specific READY reserve when safe. |
-| Lease reserve reaches the transition boundary | Commit a generation-bound prepared terminal decision only after the complete acceptance budget can no longer recover before the safe deadline. |
+| Lease reserve reaches the transition boundary | Prepare and re-evaluate early; publish availability CSV only at known reserve exhaustion while the origin is still degraded. |
 
 For a warm canonical manifest request, terminal `channel_unavailable` is not a redirect. The same manifest URL returns an
 immutable HTTP `200` media playlist containing a safe live suffix, a discontinuity, finite lease/generation-bound
@@ -304,12 +313,12 @@ the old location.
 | Target duration fallback | 15 seconds | Used before an origin target duration is known. |
 | Publication lateness | `1.5 * target_duration` | Observation signal only; never a cutover or terminal deadline. |
 | Recovery trigger | Lease READY reserve minus full acceptance ETA and transition margin | Starts recovery while the configured burst can still complete. |
-| Terminal cutover | Lease-specific safe splice deadline | Bounds a live-tail splice; a late finite Custom Response uses a separate bounded commit budget. |
+| Terminal cutover | Known lease media exhaustion | Starts one bounded terminal CAS/retry budget; the last committed live segment remains before CSV. |
 | HLS cache GC interval | 30 seconds | Periodic cleanup cadence for cache objects and stale runtime state. |
 | Temporary file retention | 30 seconds | Retention window for temporary HLS cache files. |
 | Failed segment retention | 10 seconds | Short retention for failed segment state. |
-| Origin manifest timeout | `hls_cache.origin_manifest_timeout_ms` | Upstream manifest fetch timeout. Default: 3000 ms. |
-| Origin segment timeout | `hls_cache.origin_segment_timeout_ms` | Upstream segment fetch timeout. Default: 10000 ms. |
+| Origin manifest timeout | `hls_cache.origin_manifest_timeout_ms` | Upstream manifest, Key and MAP fetch timeout. Default: 3000 ms. |
+| Origin segment timeout | `hls_cache.origin_segment_timeout_ms` | Per-attempt Segment/Part timeout. Default AUTO: full shared-session target duration, fallback 10000 ms if missing/zero. |
 
 ## Implementation map
 

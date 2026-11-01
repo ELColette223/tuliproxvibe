@@ -347,7 +347,7 @@ async fn recording_reload_for(app_state: &Arc<AppState>, incoming: &ConfigDto) -
         &incoming_recording.directory,
         &app_state.app_config.paths.load().home_path,
     );
-    let existing = app_state.recordings.committed_snapshot().await.1.len();
+    let existing = app_state.recording.queue.committed_snapshot().await.1.len();
     recording_reload_outcome(current_recording, &incoming_recording, existing)
 }
 
@@ -408,6 +408,22 @@ async fn save_config_main(
         if let Some(err) = intern_save_config_main(&file_path, &backup_dir, &cfg).await {
             return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, axum::Json(json!({"error": err.to_string()})))
                 .into_response();
+        }
+        if let Some(hls) = cfg.reverse_proxy.as_ref().and_then(|proxy| proxy.hls_cache.as_ref()) {
+            let minimum = hls.min_origin_target_duration_secs;
+            // Apply these validated preferences even when general hot reload is disabled.
+            let segment_timeout = hls.origin_segment_timeout_ms;
+            let manifest_timeout = hls.origin_manifest_timeout_ms;
+            app_state.app_config.config.rcu(|current| {
+                let mut next = current.as_ref().clone();
+                if let Some(hls) = next.reverse_proxy.as_mut().and_then(|proxy| proxy.hls_cache.as_mut()) {
+                    hls.min_origin_target_duration_secs = minimum;
+                    hls.origin_segment_timeout_ms = segment_timeout;
+                    hls.origin_manifest_timeout_ms = manifest_timeout;
+                }
+                Arc::new(next)
+            });
+            app_state.hls.proxy.update_origin_preferences(minimum, segment_timeout, manifest_timeout.get());
         }
         let updated_revision = match read_file_revision(&file_path).await {
             Ok(revision) => revision,
@@ -602,9 +618,18 @@ async fn save_config_sources(
     response_with_revision_header(StatusCode::OK.into_response(), HEADER_CONFIG_SOURCES_REVISION, &updated_revision)
 }
 
-async fn get_config_api_proxy_config_public(
-    axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
-) -> impl IntoResponse + Send {
+/// Reads `api-proxy.yml` for a config response.
+///
+/// `permissions: None` means the caller is unauthenticated because the Web UI has no
+/// auth configured; there is no identity to filter for, so the document is returned in
+/// full. This matches `get_config_common` for `config.yml`, which already ships the very
+/// same servers and users to the same caller. Filtering with an empty permission set
+/// would strip every server and user and leave the Web UI with a config it cannot save
+/// back.
+async fn get_config_api_proxy_config_common(
+    app_state: &Arc<AppState>,
+    permissions: Option<PermissionSet>,
+) -> axum::response::Response {
     let paths = app_state.app_config.paths.load();
     let api_proxy_file_path = paths.api_proxy_file_path.clone();
     let revision = match read_file_revision(&api_proxy_file_path).await {
@@ -620,18 +645,27 @@ async fn get_config_api_proxy_config_public(
         app_state.app_config.api_proxy.load().as_ref().and_then(|config| config.templates.as_deref()),
     ) {
         Ok(Some(mut api_proxy_dto)) => {
-            filter_api_proxy_by_permissions(&mut api_proxy_dto, PermissionSet::new());
+            if let Some(permissions) = permissions {
+                filter_api_proxy_by_permissions(&mut api_proxy_dto, permissions);
+            }
             let response = axum::response::Json(api_proxy_dto).into_response();
-            return response_with_revision_header(response, HEADER_CONFIG_API_PROXY_REVISION, &revision);
+            response_with_revision_header(response, HEADER_CONFIG_API_PROXY_REVISION, &revision)
         }
         Ok(None) => {
             error!("Failed to read api proxy config");
+            internal_server_error!()
         }
         Err(err) => {
             error!("Failed to read api proxy config: {err}");
+            internal_server_error!()
         }
     }
-    internal_server_error!()
+}
+
+async fn get_config_api_proxy_config_public(
+    axum::extract::State(app_state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse + Send {
+    get_config_api_proxy_config_common(&app_state, None).await
 }
 
 async fn save_config_api_proxy_config(
@@ -673,6 +707,7 @@ async fn save_config_api_proxy_config(
         use_user_db: req_api_proxy.use_user_db,
         server: req_api_proxy.server.iter().map(Into::into).collect(),
         auth_error_status: req_api_proxy.auth_error_status,
+        credential_generation: req_api_proxy.credential_generation.clone(),
         ..base
     };
 
@@ -802,34 +837,7 @@ async fn get_config_api_proxy_config(
         return axum::http::StatusCode::FORBIDDEN.into_response();
     }
 
-    let paths = app_state.app_config.paths.load();
-    let api_proxy_file_path = paths.api_proxy_file_path.clone();
-    let revision = match read_file_revision(&api_proxy_file_path).await {
-        Ok(revision) => revision,
-        Err(err) => {
-            error!("Failed to read revision for api-proxy.yml '{api_proxy_file_path}': {err}");
-            return internal_server_error!();
-        }
-    };
-    match read_api_proxy_file_with_templates(
-        api_proxy_file_path.as_str(),
-        true,
-        app_state.app_config.api_proxy.load().as_ref().and_then(|config| config.templates.as_deref()),
-    ) {
-        Ok(Some(mut api_proxy_dto)) => {
-            filter_api_proxy_by_permissions(&mut api_proxy_dto, permissions);
-            let response = axum::response::Json(api_proxy_dto).into_response();
-            response_with_revision_header(response, HEADER_CONFIG_API_PROXY_REVISION, &revision)
-        }
-        Ok(None) => {
-            error!("Failed to read api proxy config");
-            internal_server_error!()
-        }
-        Err(err) => {
-            error!("Failed to read api proxy config: {err}");
-            internal_server_error!()
-        }
-    }
+    get_config_api_proxy_config_common(&app_state, Some(permissions)).await
 }
 
 async fn config_batch_content(
@@ -1164,6 +1172,174 @@ mod tests {
     };
     use std::sync::Arc;
 
+    #[tokio::test]
+    async fn origin_target_duration_config_saves_reloads_and_rejects_invalid_values() {
+        use axum::{
+            body::{to_bytes, Body},
+            http::Request,
+        };
+        use shared::model::{HlsCacheConfigDto, ReverseProxyConfigDto, Secs};
+        use tower::ServiceExt;
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("config.yml");
+        let hls_cache = HlsCacheConfigDto {
+            cache_path: Some(temp.path().join("hls-cache").to_string_lossy().into_owned()),
+            ..HlsCacheConfigDto::default()
+        };
+        let config = crate::model::Config {
+            backup_dir: Some(temp.path().join("backup").to_string_lossy().into_owned()),
+            reverse_proxy: Some(crate::model::ReverseProxyConfig::from(&ReverseProxyConfigDto {
+                hls_cache: Some(hls_cache.clone()),
+                rewrite_secret: "00112233445566778899aabbccddeeff".to_string(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let app = crate::api::model::create_test_app_state(config);
+        let mut paths = app.app_config.paths.load_full().as_ref().clone();
+        paths.home_path = temp.path().to_string_lossy().into_owned();
+        paths.config_path.clone_from(&paths.home_path);
+        paths.storage_path.clone_from(&paths.home_path);
+        paths.config_file_path = file.to_string_lossy().into_owned();
+        app.app_config.paths.store(Arc::new(paths));
+        let mut dto = ConfigDto::default();
+        dto.api.host = "127.0.0.1".to_string();
+        dto.api.port = 18941;
+        dto.storage_dir = Some(temp.path().to_string_lossy().into_owned());
+        dto.backup_dir = Some(temp.path().join("backup").to_string_lossy().into_owned());
+        dto.reverse_proxy = Some(ReverseProxyConfigDto {
+            hls_cache: Some(hls_cache),
+            rewrite_secret: "00112233445566778899aabbccddeeff".to_string(),
+            ..Default::default()
+        });
+        tokio::fs::write(&file, serde_saphyr::to_string(&dto).unwrap()).await.unwrap();
+        assert_eq!(app.hls.proxy.min_origin_target_duration_secs(), Secs::new(0));
+        let router = axum::Router::new()
+            .route("/config/main", axum::routing::post(super::save_config_main))
+            .with_state(Arc::clone(&app));
+        for value in [6, 0, -1] {
+            let revision = super::read_file_revision(file.to_str().unwrap()).await.unwrap();
+            let before = tokio::fs::read(&file).await.unwrap();
+            let mut body = serde_json::to_value(&dto).unwrap();
+            body["reverse_proxy"]["hls_cache"]["min_origin_target_duration_secs"] = serde_json::json!(value);
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/config/main")
+                        .header("content-type", "application/json")
+                        .header(HEADER_IF_MATCH, revision)
+                        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            if value >= 0 {
+                let expected = Secs::new(u64::try_from(value).unwrap());
+                assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&bytes));
+                let stored: ConfigDto =
+                    serde_saphyr::from_str(&tokio::fs::read_to_string(&file).await.unwrap()).unwrap();
+                assert_eq!(stored.reverse_proxy.unwrap().hls_cache.unwrap().min_origin_target_duration_secs, expected);
+                assert_eq!(
+                    app.hls.proxy.min_origin_target_duration_secs(),
+                    expected,
+                    "save applies preference without restart or general hot reload"
+                );
+                assert_eq!(
+                    app.app_config
+                        .config
+                        .load()
+                        .reverse_proxy
+                        .as_ref()
+                        .unwrap()
+                        .hls_cache
+                        .as_ref()
+                        .unwrap()
+                        .min_origin_target_duration_secs,
+                    expected
+                );
+                super::ConfigFile::Config.reload(&file, &app).await.unwrap();
+                assert_eq!(app.hls.proxy.min_origin_target_duration_secs(), expected);
+            } else {
+                assert!(status.is_client_error(), "{status}");
+                assert!(String::from_utf8_lossy(&bytes).contains("min_origin_target_duration_secs"));
+                assert_eq!(tokio::fs::read(&file).await.unwrap(), before);
+                assert_eq!(app.hls.proxy.min_origin_target_duration_secs(), Secs::new(0));
+            }
+        }
+        assert_origin_timeout_config_contract(&app, &file, &dto, &router).await;
+    }
+
+    async fn assert_origin_timeout_config_contract(
+        app: &Arc<crate::api::model::AppState>,
+        file: &std::path::Path,
+        dto: &ConfigDto,
+        router: &axum::Router,
+    ) {
+        use axum::{
+            body::{to_bytes, Body},
+            http::Request,
+        };
+        use tower::ServiceExt;
+        let existing_worker_policy = app.hls.proxy.segment_worker_pool().policy();
+        let frozen = existing_worker_policy.segment_timeout_ms(Some(2));
+        for value in [
+            serde_json::json!(2700),
+            serde_json::json!("AUTO"),
+            serde_json::json!("auto"),
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::Value::Null,
+            serde_json::json!("unknown"),
+        ] {
+            let revision = super::read_file_revision(file.to_str().unwrap()).await.unwrap();
+            let before = tokio::fs::read(&file).await.unwrap();
+            let before_runtime = existing_worker_policy.timeouts.config();
+            let mut body = serde_json::to_value(dto).unwrap();
+            body["reverse_proxy"]["hls_cache"]["origin_segment_timeout_ms"] = value.clone();
+            body["reverse_proxy"]["hls_cache"]["origin_manifest_timeout_ms"] = serde_json::json!(8000);
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/config/main")
+                        .header("content-type", "application/json")
+                        .header(HEADER_IF_MATCH, revision)
+                        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            if value == serde_json::json!(2700)
+                || value == serde_json::json!("AUTO")
+                || value == serde_json::json!("auto")
+            {
+                assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&bytes));
+                let expected = if value.is_number() { 2700 } else { 12000 };
+                assert_eq!(existing_worker_policy.segment_timeout_ms(Some(12)), expected);
+                assert_eq!(existing_worker_policy.manifest_timeout_ms(), 8000);
+                let stored: ConfigDto =
+                    serde_saphyr::from_str(&tokio::fs::read_to_string(&file).await.unwrap()).unwrap();
+                let saved = stored.reverse_proxy.unwrap().hls_cache.unwrap();
+                assert_eq!(saved.origin_segment_timeout_ms, existing_worker_policy.timeouts.config().segment);
+                assert_eq!(saved.origin_manifest_timeout_ms.get(), 8000);
+            } else {
+                assert!(status.is_client_error(), "{status}");
+                assert!(String::from_utf8_lossy(&bytes).contains("origin_segment_timeout_ms"));
+                assert_eq!(tokio::fs::read(&file).await.unwrap(), before);
+                assert_eq!(existing_worker_policy.timeouts.config(), before_runtime);
+            }
+        }
+        assert_eq!(frozen, 2000);
+    }
+
     #[test]
     fn require_matching_revision_rejects_missing_if_match_header() {
         let headers = HeaderMap::new();
@@ -1194,6 +1370,7 @@ mod tests {
             user: vec![TargetUserDto { target: String::from("target-a"), credentials: vec![] }],
             use_user_db: true,
             auth_error_status: 401,
+            credential_generation: shared::model::CredentialGenerationDto::default(),
         }
     }
 
@@ -1554,5 +1731,47 @@ mod tests {
         let saved: SourcesConfigDto =
             serde_saphyr::from_str(&tokio::fs::read_to_string(&sources_file).await.unwrap()).unwrap();
         assert_eq!(saved.sources[0].targets[0].curation.as_ref(), Some(&curation));
+    }
+
+    #[tokio::test]
+    async fn public_api_proxy_config_keeps_servers_and_users_for_the_web_ui() {
+        use axum::{
+            body::{to_bytes, Body},
+            http::Request,
+        };
+        use tempfile::TempDir;
+        use tower::ServiceExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let api_proxy_file = temp_dir.path().join("api-proxy.yml");
+        let stored = ApiProxyConfigDto {
+            server: vec![ApiProxyServerInfoDto {
+                name: "default".to_string(),
+                protocol: "http".to_string(),
+                host: "localhost".to_string(),
+                ..ApiProxyServerInfoDto::default()
+            }],
+            user: vec![TargetUserDto { target: "target-a".to_string(), credentials: vec![] }],
+            ..ApiProxyConfigDto::default()
+        };
+        tokio::fs::write(&api_proxy_file, serde_saphyr::to_string(&stored).unwrap()).await.unwrap();
+
+        let app_state = crate::api::model::create_test_app_state(crate::model::Config::default());
+        let mut paths = app_state.app_config.paths.load_full().as_ref().clone();
+        paths.home_path = temp_dir.path().to_string_lossy().to_string();
+        paths.api_proxy_file_path = api_proxy_file.to_string_lossy().to_string();
+        app_state.app_config.paths.store(Arc::new(paths));
+
+        // Auth is disabled, so the Web UI router serves `/config/apiproxy` from the public handler.
+        let router = super::v1_api_config_register(axum::routing::Router::new()).with_state(Arc::clone(&app_state));
+        let response =
+            router.oneshot(Request::builder().uri("/config/apiproxy").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let returned: ApiProxyConfigDto = serde_json::from_slice(&body).unwrap();
+        assert_eq!(returned.server.len(), 1);
+        assert_eq!(returned.server[0].name, "default");
+        assert_eq!(returned.user.len(), 1);
     }
 }

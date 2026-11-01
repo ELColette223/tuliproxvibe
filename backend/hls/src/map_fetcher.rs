@@ -78,6 +78,8 @@ pub struct HlsMapWorkerPool {
 }
 
 impl HlsMapWorkerPool {
+    pub fn policy(&self) -> SegmentFetchPolicy { self.runtime.load().policy.clone() }
+
     pub fn new(policy: SegmentFetchPolicy) -> Self {
         let global_semaphore = Arc::new(Semaphore::new(policy.max_global_segment_fetches));
         Self::with_global_semaphore(policy, global_semaphore)
@@ -211,6 +213,10 @@ impl HlsMapWorkerPool {
         Some(MapFetchSnapshot { proxy_map_id, proxy_map_id_log, cache_key, fetch_ref, origin_work_generation })
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the map result, start completion and its notifications in one lifecycle."
+    )]
     async fn fetch_one_map(
         self: Arc<Self>,
         context: MapFetchContext,
@@ -230,6 +236,9 @@ impl HlsMapWorkerPool {
                     entry.cache_key == snapshot.cache_key && matches!(entry.status, MapCacheStatus::Fetching { .. })
                 });
             if generation_valid && result.is_err() {
+                if let Err(error) = &result {
+                    session.record_start_provider_failure(error);
+                }
                 session.origin_control.path_condition =
                     super::origin_progress::HlsOriginPathCondition::SegmentReadinessFailure;
             }
@@ -286,6 +295,14 @@ impl HlsMapWorkerPool {
             }
             (generation_valid, generation_valid.then(|| session.proxy_session_id.clone()))
         };
+        if generation_valid {
+            super::origin::finish_failed_hls_start(
+                context.origin_io.as_ref(),
+                &context.session,
+                Some(snapshot.origin_work_generation),
+            )
+            .await;
+        }
         if fetch_succeeded && !generation_valid {
             if let Err(err) = context.segment_cache.delete(&snapshot.cache_key).await {
                 debug!("HLS stale map cache cleanup failed: resource=map/{} error={err}", snapshot.proxy_map_id_log);
@@ -296,6 +313,12 @@ impl HlsMapWorkerPool {
             }) {
                 entry.status = MapCacheStatus::Discovered;
             }
+        }
+        if let Some(io) = context.origin_io.as_ref() {
+            io.ctx
+                .hls_proxy
+                .sync_recovery_binding_protection(&io.ctx.active_provider, &context.session, finished_at_ms)
+                .await;
         }
         if let (Some(coordinator), Some(proxy_session_id)) =
             (self.availability_reevaluations.as_ref(), evidence_changed_for.as_ref())
@@ -326,22 +349,31 @@ async fn fetch_map_into_cache(
     snapshot: &MapFetchSnapshot,
     policy: &SegmentFetchPolicy,
 ) -> Result<MapFetchCommit, MapFetchError> {
+    // The first cache write scans the whole cache directory; do it before any per-attempt deadline starts.
+    context.segment_cache.prepare_capacity_accounting().await.map_err(|error| MapFetchError::cache_body(&error))?;
     fetch_map_with_retries_into_cache(context, snapshot, policy).await
 }
 
 async fn prepare_map_origin_attempt(
     context: MapFetchContext,
-    policy: SegmentFetchPolicy,
+    attempt: crate::HlsResourceFetchAttempt,
     expected_generation: u64,
 ) -> Result<MapOriginAttemptGuard, MapFetchError> {
-    prepare_media_origin_attempt(
+    if let Some(io) = &context.origin_io {
+        attempt.protect_origin_work(&io.ctx.active_provider, &context.session, expected_generation, false).await?;
+    }
+    let guard = prepare_media_origin_attempt(
         context.origin_io.as_ref(),
         &context.session,
         expected_generation,
-        hls_object_body_deadline(policy.origin_segment_timeout_ms),
+        hls_object_body_deadline(attempt.timeout.effective_ms),
     )
     .await
-    .map_err(MapFetchError::ProviderUnavailable)
+    .map_err(MapFetchError::ProviderUnavailable)?;
+    if let Some(io) = &context.origin_io {
+        attempt.protect_origin_work(&io.ctx.active_provider, &context.session, expected_generation, true).await?;
+    }
+    Ok(guard)
 }
 
 async fn finish_map_origin_attempt(context: MapFetchContext, guard: MapOriginAttemptGuard) -> MapOriginWorkFinish {
@@ -367,8 +399,18 @@ async fn fetch_map_with_retries_into_cache(
         } else {
             HlsOriginByteRangeExpectation::FullObject
         },
+        media_duration_ms: None,
     };
     let clients = HlsOriginResourceClients {
+        retry_work: crate::HlsOriginRetryWork::for_resource(
+            &context.session,
+            context.origin_io.as_ref().map(|io| &io.ctx.active_provider),
+            policy,
+            HlsResourceFetchKind::Map,
+            HlsResourceFetchSource::Normal,
+        )
+        .await,
+        session: Some(context.session.clone()),
         client: context.client.clone(),
         no_redirect_client: context.no_redirect_client.clone(),
         use_manual_redirects: context.use_manual_redirects,
@@ -380,7 +422,6 @@ async fn fetch_map_with_retries_into_cache(
     let expected_generation = snapshot.origin_work_generation;
     let context = context.clone();
     let snapshot = snapshot.clone();
-    let policy_for_prepare = policy.clone();
     let prepare_context = context.clone();
     let cleanup_context = context.clone();
     run_hls_origin_resource_retry_loop_with_attempt_prepare(
@@ -388,10 +429,9 @@ async fn fetch_map_with_retries_into_cache(
         clients,
         policy,
         &log_identity,
-        move |_attempt| {
+        move |attempt| {
             let context = prepare_context.clone();
-            let policy = policy_for_prepare.clone();
-            async move { prepare_map_origin_attempt(context, policy, expected_generation).await }.boxed()
+            async move { prepare_map_origin_attempt(context, attempt, expected_generation).await }.boxed()
         },
         move |guard| {
             let context = cleanup_context.clone();
@@ -624,7 +664,7 @@ mod tests {
         let cache = Arc::new(HlsSegmentCache::with_cache_path(temp_dir.path().to_path_buf()));
         let worker = Arc::new(HlsMapWorkerPool::new(SegmentFetchPolicy {
             retry_jitter_max_ms: 0,
-            origin_segment_timeout_ms: 1_000,
+            timeouts: crate::HlsOriginTimeoutPolicy::fixed(1_000, 1_000),
             ..SegmentFetchPolicy::default()
         }));
         let proxy_session_id = session.read().await.proxy_session_id.clone();
@@ -887,7 +927,7 @@ mod tests {
         let cache = Arc::new(HlsSegmentCache::with_cache_path(temp_dir.path().to_path_buf()));
         let worker = Arc::new(HlsMapWorkerPool::new(SegmentFetchPolicy {
             retry_jitter_max_ms: 0,
-            origin_segment_timeout_ms: 1_000,
+            timeouts: crate::HlsOriginTimeoutPolicy::fixed(1_000, 1_000),
             ..SegmentFetchPolicy::default()
         }));
         let proxy_session_id = session.read().await.proxy_session_id.clone();
