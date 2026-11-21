@@ -220,3 +220,64 @@ fn prepare_target_playlist_for_persistence_preserves_stream_ids_when_enabled() {
         "Without preserve_stream_ids, legacy behavior increments virtual_id when upstream provider changes!"
     );
 }
+
+#[test]
+fn preserve_stream_ids_does_not_reconcile_different_series_with_same_provider_id() {
+    let dir = tempdir().expect("tempdir");
+    let mut mapping = TargetIdMapping::new(&dir.path().join("series_ids.db"), false).expect("mapping");
+    let target = ConfigTarget::from(&ConfigTargetDto {
+        name: "stable-series".to_string(),
+        options: Some(ConfigTargetOptions { preserve_stream_ids: true, ..Default::default() }),
+        output: vec![TargetOutputDto::Xtream(XtreamTargetOutputDto::default())],
+        ..ConfigTargetDto::default()
+    });
+    let make_series = |input_name: &str, name: &str| {
+        let mut header = PlaylistItemHeader {
+            id: "298".intern(), name: name.intern(), group: "Series".intern(),
+            input_name: input_name.intern(), item_type: PlaylistItemType::SeriesInfo,
+            xtream_cluster: XtreamCluster::Series, ..Default::default()
+        };
+        header.gen_uuid(); PlaylistItem { header }
+    };
+    let mut playlist = vec![PlaylistGroup {
+        id: 1, title: "Series".intern(),
+        channels: vec![make_series("provider-a", "Dragon Ball"), make_series("provider-b", "Other Series")],
+        xtream_cluster: XtreamCluster::Series,
+    }];
+    prepare_target_playlist_for_persistence(&mut playlist, &target, &mut mapping);
+    assert_ne!(playlist[0].channels[0].header.virtual_id, playlist[0].channels[1].header.virtual_id);
+}
+
+#[test]
+fn preserve_stream_ids_keeps_distinct_episodes_with_same_title() {
+    let dir = tempdir().expect("tempdir");
+    let mut mapping = TargetIdMapping::new(&dir.path().join("episode_ids.db"), false).expect("mapping");
+    let target = ConfigTarget::from(&ConfigTargetDto {
+        name: "stable-series".to_string(),
+        options: Some(ConfigTargetOptions { preserve_stream_ids: true, ..Default::default() }),
+        output: vec![TargetOutputDto::Xtream(XtreamTargetOutputDto::default())], ..ConfigTargetDto::default()
+    });
+    let make_episode = |id: &str, season: u32, episode: u32| PlaylistItem {
+        header: PlaylistItemHeader {
+            id: id.intern(), name: "Dragon Ball".intern(), title: "Episode 1".intern(),
+            group: "Anime".intern(), parent_code: "source-series-uuid".intern(),
+            item_type: PlaylistItemType::Series, xtream_cluster: XtreamCluster::Series,
+            additional_properties: Some(StreamProperties::Episode(Box::new(shared::model::EpisodeStreamProperties {
+                episode_id: id.parse().unwrap(), season, episode, added: None, release_date: None,
+                series_release_date: None, plot: None, tmdb: None, movie_image: "".intern(),
+                container_extension: "mp4".intern(), video: None, audio: None,
+            }))), ..Default::default()
+        },
+    };
+    let mut playlist = vec![PlaylistGroup { id: 1, title: "Anime".intern(),
+        channels: vec![make_episode("1001", 1, 1), make_episode("2001", 2, 1)], xtream_cluster: XtreamCluster::Series }];
+    prepare_target_playlist_for_persistence(&mut playlist, &target, &mut mapping);
+    let first = playlist[0].channels[0].header.virtual_id;
+    let second = playlist[0].channels[1].header.virtual_id;
+    assert_ne!(first, second);
+    let mut next = vec![PlaylistGroup { id: 1, title: "Anime".intern(),
+        channels: vec![make_episode("3001", 1, 1), make_episode("4001", 2, 1)], xtream_cluster: XtreamCluster::Series }];
+    prepare_target_playlist_for_persistence(&mut next, &target, &mut mapping);
+    assert_eq!(next[0].channels[0].header.virtual_id, first);
+    assert_eq!(next[0].channels[1].header.virtual_id, second);
+}

@@ -65,15 +65,32 @@ pub(super) fn prepare_target_playlist_for_persistence(
             }
 
             let item_type = header.item_type;
+            let source_uuid = header.get_uuid().to_owned();
             if preserve_stream_ids {
-                // Identity-derived ids survive upstream provider id changes, so a client's
-                // saved channel keeps resolving after a source update.
-                header.uuid = shared::utils::generate_stable_channel_uuid(
-                    &target.name,
-                    &header.group,
-                    &header.get_name(),
-                    item_type,
-                );
+                // Episode titles repeat across seasons (and may change independently of the
+                // episode). Include the series name and season/episode coordinates in the
+                // stable identity; otherwise different episodes overwrite the same virtual ID.
+                // Without episode coordinates, retain the source UUID rather than coalescing
+                // every episode with the same title into one stream.
+                if item_type == PlaylistItemType::Series {
+                    if let Some(StreamProperties::Episode(episode)) = header.additional_properties.as_ref() {
+                        header.uuid = shared::utils::generate_stable_channel_uuid(
+                            &target.name,
+                            &header.group,
+                            &format!("{}\0{}\0{}", header.name, episode.season, episode.episode),
+                            item_type,
+                        );
+                    }
+                } else {
+                    // Identity-derived ids survive upstream provider id changes, so a client's
+                    // saved channel keeps resolving after a source update.
+                    header.uuid = shared::utils::generate_stable_channel_uuid(
+                        &target.name,
+                        &header.group,
+                        &header.get_name(),
+                        item_type,
+                    );
+                }
                 let parent_virtual_id = if item_type.is_series() {
                     target_id_mapping.get_parent_virtual_id_by_uuid(&header.uuid).unwrap_or_default()
                 } else {
@@ -84,6 +101,7 @@ pub(super) fn prepare_target_playlist_for_persistence(
                     provider_id,
                     item_type,
                     parent_virtual_id,
+                    &source_uuid,
                 );
             } else {
                 let uuid = header.get_uuid();

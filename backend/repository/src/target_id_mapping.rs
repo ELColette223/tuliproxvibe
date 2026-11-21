@@ -196,14 +196,16 @@ impl TargetIdMapping {
     }
 
     /// Retrieves or allocates a virtual ID with reconciliation support.
-    /// When switching to stable UUIDs, this reconciles legacy records matching `provider_id`
-    /// to seamlessly adopt the new stable UUID without changing the allocated `virtual_id`.
+    /// When switching to stable UUIDs, this reconciles a record only when its exact
+    /// previous source UUID matches, preserving its virtual ID without adopting an
+    /// unrelated item from another provider that happens to reuse the same ID.
     pub fn get_and_update_virtual_id_with_reconciliation(
         &mut self,
         uuid: &UUIDType,
         provider_id: u32,
         item_type: PlaylistItemType,
         parent_virtual_id: VirtualId,
+        source_uuid: &UUIDType,
     ) -> VirtualId {
         // 1. Direct lookup by stable UUID
         if let Some(virtual_id) = self.mem_by_uuid.get(uuid).copied() {
@@ -225,18 +227,14 @@ impl TargetIdMapping {
             return virtual_id;
         }
 
-        // 2. Migration reconciliation: check if an existing record has this provider_id (legacy uuid migration)
-        if provider_id > 0 {
-            let candidate = self
-                .mem_by_virtual_id
-                .values()
-                .find(|record| record.provider_id == provider_id && record.item_type == item_type)
-                .map(|record| (record.virtual_id, record.uuid));
-
-            if let Some((virtual_id, old_uuid)) = candidate {
-                // Re-bind to the new stable uuid
-                self.mem_by_uuid.remove(&old_uuid);
-                self.pending_uuid_upserts.remove(&old_uuid);
+        // 2. Migrate only the exact source identity. Provider IDs are scoped to an
+        // input and may collide across inputs (or across separate catalog entries).
+        if let Some(virtual_id) = self.mem_by_uuid.get(source_uuid).copied() {
+            if self.mem_by_virtual_id.get(&virtual_id).is_some_and(|record| {
+                record.uuid == *source_uuid && record.provider_id == provider_id && record.item_type == item_type
+            }) {
+                self.mem_by_uuid.remove(source_uuid);
+                self.pending_uuid_upserts.remove(source_uuid);
 
                 let new_record = VirtualIdRecord::new(provider_id, virtual_id, item_type, parent_virtual_id, *uuid);
                 self.pending_virtual_id_upserts.insert(virtual_id, new_record.clone());
@@ -446,6 +444,7 @@ mod tests {
                 38839,
                 PlaylistItemType::Live,
                 VirtualId::default(),
+                &stable_uuid_globo,
             );
             assert_eq!(vid, VirtualId::new(1));
             mapping.persist().map_err(|err| TuliproxError::Config(err.to_string()))?;
@@ -460,6 +459,7 @@ mod tests {
                 50123,
                 PlaylistItemType::Live,
                 VirtualId::default(),
+                &stable_uuid_globo,
             );
             assert_eq!(
                 vid_after_update,
@@ -504,6 +504,7 @@ mod tests {
                 20000,
                 PlaylistItemType::Live,
                 VirtualId::default(),
+                &legacy_uuid_record,
             );
             assert_eq!(
                 vid_reconciled,
